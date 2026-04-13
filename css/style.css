@@ -46,8 +46,6 @@
 
 /* =============================================
    RESET E BASE
-   Neutraliza comportamentos padrão dos navegadores
-   que variam entre Chrome, Safari, Firefox
 ============================================= */
 * {
   margin: 0;
@@ -56,16 +54,9 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/*
-  "box-sizing: border-box" é uma das configurações mais importantes do CSS moderno.
-  Por padrão, se você define width: 100px e adiciona padding: 10px,
-  o elemento fica com 120px. Com border-box, ele permanece 100px.
-  Muito mais intuitivo para trabalhar.
-*/
-
 html, body {
   height: 100%;
-  overflow: hidden; /* Impede scroll na página — cada tela gerencia seu próprio scroll */
+  overflow: hidden;
 }
 
 body {
@@ -76,38 +67,61 @@ body {
   line-height: 1.5;
 }
 
-/*
-  A família de fontes acima usa a fonte nativa de cada sistema:
-  -apple-system = San Francisco no iPhone/Mac
-  BlinkMacSystemFont = Chrome no Mac
-  Segoe UI = Windows
-  Resultado: sempre parece um app nativo, sem carregar fontes externas
-*/
-
 
 /* =============================================
    SISTEMA DE TELAS
-   O mecanismo que mostra/esconde cada tela
 ============================================= */
 .screen {
-  display: none; /* Todas as telas ficam escondidas por padrão */
+  display: none;
   flex-direction: column;
-  height: 100vh; /* Ocupa exatamente a altura da tela do celular */
-  overflow-y: auto; /* Permite scroll dentro da tela se o conteúdo for grande */
+  height: 100vh;
+  overflow-y: auto;
   padding: var(--space-md);
-  padding-bottom: 80px; /* Espaço extra no final para o último botão não ficar colado */
+  padding-bottom: 80px;
+
+  /* CORREÇÃO: a transição de cor precisa estar na própria .screen
+     para que a mudança de background-color seja animada */
+  transition: background-color 0.5s ease;
 }
 
 .screen.active {
-  display: flex; /* Só a tela com classe "active" aparece */
+  display: flex;
 }
 
-/*
-  "vh" = viewport height = altura da tela visível
-  100vh = 100% da altura da tela
-  Isso garante que cada tela ocupe exatamente o celular inteiro,
-  sem mais nem menos
-*/
+
+/* =============================================
+   TELA COMPLETA — feedback visual de conclusão
+   A classe 'complete' é adicionada pelo JavaScript
+   quando total >= nucleoidsPerGel
+============================================= */
+#screen-counter.complete {
+  /* Verde escuro — visível no escuro sem ofuscar */
+  background-color: #0a2116;
+}
+
+#screen-counter.complete .comet-class-card {
+  /* Cards ficam levemente opacos para indicar que não há mais ação */
+  opacity: 0.6;
+  border-color: var(--color-success);
+}
+
+#screen-counter.complete .btn-count {
+  background-color: var(--color-success);
+}
+
+/* Botão "Finish Slide" pulsa continuamente quando completo */
+#screen-counter.complete #btn-finish-gel {
+  background-color: var(--color-success);
+  animation: pulse-complete 1.2s ease-in-out infinite;
+}
+
+/* Animação de pulso específica para o estado completo
+   Diferente do pulso rápido de feedback de clique */
+@keyframes pulse-complete {
+  0%   { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.5); }
+  70%  { box-shadow: 0 0 0 12px rgba(63, 185, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+}
 
 
 /* =============================================
@@ -166,7 +180,7 @@ body {
   margin-bottom: var(--space-lg);
   padding-bottom: var(--space-md);
   border-bottom: 1px solid var(--color-bg-card);
-  position: sticky; /* Fica fixo no topo enquanto o usuário scrolla */
+  position: sticky;
   top: 0;
   background-color: var(--color-bg-primary);
   z-index: 10;
@@ -175,6 +189,16 @@ body {
   padding-left: var(--space-md);
   padding-right: var(--space-md);
   padding-top: var(--space-md);
+
+  /* CORREÇÃO: o cabeçalho precisa herdar a transição
+     para não "piscar" quando a tela muda de cor */
+  transition: background-color 0.5s ease;
+}
+
+/* Quando a tela está completa, o cabeçalho também muda de cor
+   para manter a coerência visual */
+#screen-counter.complete .screen-header {
+  background-color: #0a2116;
 }
 
 .screen-header h2 {
@@ -217,12 +241,11 @@ body {
   padding: var(--space-sm) var(--space-md);
   width: 100%;
   transition: border-color 0.2s;
-  /* "transition" cria animação suave quando a borda muda de cor */
 }
 
 .form-group input:focus,
 .form-group select:focus {
-  outline: none; /* Remove o contorno padrão do navegador */
+  outline: none;
   border-color: var(--color-accent);
 }
 
@@ -272,8 +295,7 @@ body {
   width: 0%;
   background-color: var(--color-accent);
   border-radius: 3px;
-  transition: width 0.3s ease;
-  /* A transição aqui cria o efeito de barra preenchendo suavemente */
+  transition: width 0.3s ease, background-color 0.3s ease;
 }
 
 /* Grid das classes de cometa */
@@ -284,13 +306,6 @@ body {
   margin-bottom: var(--space-md);
 }
 
-/*
-  "grid-template-columns: repeat(3, 1fr)" cria 3 colunas iguais.
-  "1fr" = 1 fração do espaço disponível.
-  As classes 0, 1, 2 ficam na primeira linha.
-  As classes 3 e 4 ficam na segunda, centralizadas automaticamente.
-*/
-
 .comet-class-card {
   background-color: var(--color-bg-card);
   border: 2px solid transparent;
@@ -300,13 +315,12 @@ body {
   flex-direction: column;
   align-items: center;
   gap: var(--space-xs);
-  transition: border-color 0.15s, transform 0.1s;
+  transition: border-color 0.15s, transform 0.1s, opacity 0.4s;
   cursor: pointer;
 }
 
 .comet-class-card:active {
   transform: scale(0.96);
-  /* Efeito de "pressionar" quando o usuário toca no card */
   border-color: var(--color-accent);
 }
 
@@ -344,7 +358,7 @@ body {
   width: 100%;
   padding: var(--space-xs) 0;
   cursor: pointer;
-  transition: background-color 0.15s;
+  transition: background-color 0.3s ease;
 }
 
 .btn-count:active {
@@ -356,7 +370,7 @@ body {
    TELA 4: RESUMO
 ============================================= */
 #summary-table-container {
-  overflow-x: auto; /* Scroll horizontal se a tabela for larga */
+  overflow-x: auto;
   margin-bottom: var(--space-lg);
 }
 
@@ -416,8 +430,8 @@ body {
   padding: var(--space-md) var(--space-lg);
   width: 100%;
   cursor: pointer;
-  transition: background-color 0.2s, transform 0.1s;
-  min-height: 52px; /* Altura mínima para toque confortável no celular */
+  transition: background-color 0.3s ease, transform 0.1s;
+  min-height: 52px;
 }
 
 .btn-primary:active {
@@ -463,11 +477,8 @@ body {
 /* =============================================
    UTILITÁRIOS
 ============================================= */
-
-/* Classe para adicionar espaçamento entre botões */
 .mt-md { margin-top: var(--space-md); }
 
-/* Texto de aviso */
 .warning-text {
   color: var(--color-warning);
   font-size: var(--font-size-sm);
@@ -475,7 +486,7 @@ body {
   padding: var(--space-sm);
 }
 
-/* Animação de pulso — usaremos no contador quando atingir 100 nucleoides */
+/* Pulso de feedback rápido — clique nos cards */
 @keyframes pulse {
   0%   { box-shadow: 0 0 0 0 rgba(74, 158, 255, 0.4); }
   70%  { box-shadow: 0 0 0 10px rgba(74, 158, 255, 0); }
@@ -485,6 +496,7 @@ body {
 .pulse {
   animation: pulse 0.6s ease-out;
 }
+
 
 /* =============================================
    SELETOR DE IDIOMA
@@ -528,7 +540,6 @@ body {
   opacity: 1;
 }
 
-/* Hover para desktop */
 #btn-lang-en:hover {
   border-color: #4a9eff;
   opacity: 0.8;

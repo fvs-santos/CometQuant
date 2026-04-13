@@ -7,26 +7,13 @@
 // PARTE 1 — INICIALIZAÇÃO
 // =============================================
 
-// "document.addEventListener('DOMContentLoaded', ...)" é o equivalente
-// ao bloco "if __name__ == '__main__'" do Python.
-// Garante que todo o HTML foi carregado antes de o JavaScript executar.
-
 document.addEventListener('DOMContentLoaded', () => {
 
-  // Aplica o idioma salvo (ou inglês por padrão)
   applyLanguage()
   updateLanguageButtons()
-
-  // Inicializa os eventos de navegação
   initNavigation()
-
-  // Inicializa os eventos do formulário
   initSetup()
-
-  // Inicializa o contador
   initCounter()
-
-  // Inicializa o resumo
   initSummary()
 
   console.log('CometQuant Lab initialized')
@@ -37,41 +24,25 @@ document.addEventListener('DOMContentLoaded', () => {
 // PARTE 2 — NAVEGAÇÃO ENTRE TELAS
 // =============================================
 
-// Essa função é o mecanismo central de navegação.
-// Recebe o ID da tela destino e faz a troca.
-//
-// Em Python, seria algo como:
-// def show_screen(screen_id):
-//     for screen in all_screens:
-//         screen.visible = False
-//     target_screen.visible = True
-
 function showScreen(screenId) {
-  // Esconde todas as telas removendo a classe 'active'
   document.querySelectorAll('.screen').forEach(screen => {
     screen.classList.remove('active')
   })
 
-  // Mostra apenas a tela solicitada adicionando 'active'
   const target = document.getElementById(screenId)
   if (target) {
     target.classList.add('active')
-    // Rola para o topo da tela — importante após navegação
     target.scrollTop = 0
   }
 }
 
 
-// Atualiza o visual dos botões de idioma
-// para destacar qual está ativo
 function updateLanguageButtons() {
   document.getElementById('btn-lang-en').classList.toggle('active', currentLanguage === 'en')
   document.getElementById('btn-lang-pt').classList.toggle('active', currentLanguage === 'pt')
 }
 
 
-// Sobrescreve a função setLanguage do i18n.js
-// para também atualizar os botões visuais
 const _setLanguage = setLanguage
 window.setLanguage = function(lang) {
   _setLanguage(lang)
@@ -79,43 +50,38 @@ window.setLanguage = function(lang) {
 }
 
 
-// Conecta todos os botões de navegação
 function initNavigation() {
 
-  // Tela Início → Configuração
   document.getElementById('btn-new-experiment')
     .addEventListener('click', () => {
       resetSetupForm()
       showScreen('screen-setup')
     })
 
-  // Tela Início → Retomar experimento
   document.getElementById('btn-resume-experiment')
     .addEventListener('click', () => {
-      handleResumeExperiment()
+      document.getElementById('input-load-files').click()
     })
 
-  // Voltar: Configuração → Início
   document.getElementById('btn-back-setup')
     .addEventListener('click', () => showScreen('screen-home'))
 
-  // Voltar: Contador → Configuração
   document.getElementById('btn-back-counter')
     .addEventListener('click', () => {
-      if (confirm(t('alert.backWarning') || 'Return to setup? Current slide data will be lost.')) {
+      const msg = currentLanguage === 'pt'
+        ? 'Voltar para configuração? Os dados da lâmina atual serão perdidos.'
+        : 'Return to setup? Current slide data will be lost.'
+      if (confirm(msg)) {
         showScreen('screen-setup')
       }
     })
 
-  // Voltar: Resumo → Início
   document.getElementById('btn-back-summary')
     .addEventListener('click', () => showScreen('screen-home'))
 
-  // Voltar: Análise → Resumo
   document.getElementById('btn-back-analysis')
     .addEventListener('click', () => showScreen('screen-summary'))
 
-  // Resumo → Análise
   document.getElementById('btn-go-to-analysis')
     .addEventListener('click', () => showScreen('screen-analysis'))
 }
@@ -125,39 +91,26 @@ function initNavigation() {
 // PARTE 3 — CONFIGURAÇÃO DO EXPERIMENTO
 // =============================================
 
-// Objeto global que representa o experimento em andamento
-// É o "estado" do app — equivalente às variáveis globais
-// do seu app.py, mas organizado num único objeto
 let currentExperiment = null
-
-// Índice do tratamento sendo contado no momento
 let currentTreatmentIndex = 0
-
-// Índice da lâmina atual dentro do tratamento
 let currentGelIndex = 0
 
 
 function initSetup() {
-
-  // Quando o usuário digita o número de concentrações,
-  // gera dinamicamente os campos de input
   document.getElementById('input-conditions')
     .addEventListener('input', generateConcentrationInputs)
 
-  // Botão Iniciar Contagem
   document.getElementById('btn-start-counting')
     .addEventListener('click', handleStartCounting)
 }
 
 
-// Gera os campos de concentração dinamicamente
-// Equivalente ao loop "for i in range(conditions)" do seu app.py
 function generateConcentrationInputs() {
   const container = document.getElementById('concentrations-container')
   const n = parseInt(document.getElementById('input-conditions').value) || 0
   const unit = document.getElementById('input-conc-unit').value
 
-  container.innerHTML = '' // Limpa campos anteriores
+  container.innerHTML = ''
 
   for (let i = 0; i < n; i++) {
     const label = `${t('setup.concentration')} ${i + 1}${unit ? ' (' + unit + ')' : ''}`
@@ -176,10 +129,8 @@ function generateConcentrationInputs() {
 }
 
 
-// Valida e processa o formulário ao clicar em "Start Counting"
 function handleStartCounting() {
 
-  // Lê os valores do formulário
   const researcher = document.getElementById('input-researcher').value.trim()
   const agent      = document.getElementById('input-agent').value.trim()
   const cells      = document.getElementById('input-cells').value.trim()
@@ -190,7 +141,6 @@ function handleStartCounting() {
   const conditions = parseInt(document.getElementById('input-conditions').value)
   const concUnit   = document.getElementById('input-conc-unit').value
 
-  // Validações — equivalente à função validate_info() do seu app.py
   if (!negControl && !posControl && !solControl) {
     alert(t('alert.needControl'))
     return
@@ -206,8 +156,6 @@ function handleStartCounting() {
     return
   }
 
-  // Monta a lista de tratamentos
-  // Controles primeiro, depois as concentrações — igual ao seu app.py
   const treatments = []
 
   if (posControl) treatments.push(posControl)
@@ -219,10 +167,8 @@ function handleStartCounting() {
     treatments.push(`${val} ${concUnit}`)
   }
 
-  // Monta o objeto do experimento
-  // Essa é a estrutura de dados que definimos antes de começar
   currentExperiment = {
-    id: `exp_${Date.now()}`,  // timestamp como ID único
+    id: `exp_${Date.now()}`,
     researcher,
     agent,
     cells,
@@ -235,23 +181,20 @@ function handleStartCounting() {
     replicates: [
       {
         replicateNumber: 1,
-        date: new Date().toISOString().split('T')[0], // formato YYYY-MM-DD
+        date: new Date().toISOString().split('T')[0],
         gels: []
       }
     ]
   }
 
-  // Salva imediatamente no localStorage
   saveExperiment()
 
-  // Reseta os contadores e inicia com o primeiro tratamento
   currentTreatmentIndex = 0
   currentGelIndex = 0
   startCounting()
 }
 
 
-// Limpa o formulário para um novo experimento
 function resetSetupForm() {
   document.getElementById('input-researcher').value = ''
   document.getElementById('input-agent').value = ''
@@ -270,19 +213,12 @@ function resetSetupForm() {
 // PARTE 4 — CONTADOR
 // =============================================
 
-// Histórico de cliques para a função "desfazer"
-// Funciona como uma pilha (stack) — último a entrar, primeiro a sair
 let clickHistory = []
-
-// Contadores atuais da lâmina em andamento
 let currentCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 }
 
 
 function initCounter() {
 
-  // Conecta os 5 botões de classe
-  // "querySelectorAll" retorna todos os elementos com aquela classe
-  // equivalente a um loop sobre uma lista em Python
   document.querySelectorAll('.comet-class-card').forEach(card => {
     card.addEventListener('click', () => {
       const cometClass = parseInt(card.getAttribute('data-class'))
@@ -290,11 +226,9 @@ function initCounter() {
     })
   })
 
-  // Botão desfazer
   document.getElementById('btn-undo')
     .addEventListener('click', undoLastCount)
 
-  // Botão finalizar lâmina
   document.getElementById('btn-finish-gel')
     .addEventListener('click', handleFinishGel)
 }
@@ -302,55 +236,49 @@ function initCounter() {
 
 // Inicia a contagem para o tratamento/lâmina atual
 function startCounting() {
-  // Reseta os contadores visuais e o histórico
   currentCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 }
   clickHistory = []
 
-  // Atualiza a interface
+  // CORREÇÃO: remove o estado 'complete' garantindo tela limpa para nova lâmina
+  // Usamos setTimeout para garantir que a remoção ocorre APÓS showScreen()
+  // que pode reativar a tela e reprocessar estilos
+  setTimeout(() => {
+    const screen = document.getElementById('screen-counter')
+    screen.classList.remove('complete')
+  }, 0)
+
   updateCounterDisplay()
   showScreen('screen-counter')
 }
 
 
-// Registra um clique em uma classe de cometa
 function registerCount(cometClass) {
   const nucleoids = currentExperiment.nucleoidsPerGel
   const total = getTotalCount()
 
-  // Não permite ultrapassar o total de nucleoides
   if (total >= nucleoids) {
-    // Pulsa o card para indicar que está completo
     const card = document.getElementById(`card-class-${cometClass}`)
     card.classList.add('pulse')
     setTimeout(() => card.classList.remove('pulse'), 600)
     return
   }
 
-  // Incrementa o contador da classe
   currentCounts[cometClass]++
-
-  // Registra no histórico para permitir desfazer
   clickHistory.push(cometClass)
 
-  // Atualiza a interface
   updateCounterDisplay()
 
-  // Feedback visual no card clicado
   const card = document.getElementById(`card-class-${cometClass}`)
   card.classList.add('pulse')
   setTimeout(() => card.classList.remove('pulse'), 300)
 }
 
 
-// Desfaz o último clique registrado
 function undoLastCount() {
   if (clickHistory.length === 0) return
 
-  // Remove o último item do histórico
-  // "pop()" existe tanto em Python quanto em JavaScript
   const lastClass = clickHistory.pop()
 
-  // Decrementa o contador correspondente
   if (currentCounts[lastClass] > 0) {
     currentCounts[lastClass]--
   }
@@ -359,12 +287,8 @@ function undoLastCount() {
 }
 
 
-// Retorna a soma total de nucleoides contados
 function getTotalCount() {
   return Object.values(currentCounts).reduce((sum, val) => sum + val, 0)
-
-  // "reduce" aqui faz o mesmo que sum() em Python:
-  // soma todos os valores do objeto currentCounts
 }
 
 
@@ -375,44 +299,42 @@ function updateCounterDisplay() {
   const total = getTotalCount()
   const gelNumber = currentGelIndex + 1
 
-  // Atualiza o nome do tratamento no cabeçalho
   document.getElementById('counter-treatment-name').textContent = treatment
 
-  // Atualiza o label da lâmina
   const gelLabel = currentLanguage === 'pt'
     ? `Lâmina ${gelNumber}`
     : `Slide ${gelNumber}`
   document.getElementById('counter-gel-label').textContent = gelLabel
 
-  // Atualiza o progresso numérico
   document.getElementById('counter-progress').textContent =
     `${total} / ${nucleoids} ${t('counter.nucleoids')}`
 
-  // Atualiza a barra de progresso
   const percent = (total / nucleoids) * 100
   document.getElementById('progress-bar').style.width = `${percent}%`
 
-  // Atualiza cada contador individual
   for (let i = 0; i <= 4; i++) {
     document.getElementById(`count-${i}`).textContent = currentCounts[i]
   }
 
-  // Muda a cor da barra quando completo
   const bar = document.getElementById('progress-bar')
+  const screen = document.getElementById('screen-counter')
+
+  // CORREÇÃO: aplica/remove a classe 'complete' na tela inteira
+  // A classe 'complete' no CSS muda o fundo para verde escuro
   if (total >= nucleoids) {
     bar.style.backgroundColor = 'var(--color-success)'
+    screen.classList.add('complete')
   } else {
     bar.style.backgroundColor = 'var(--color-accent)'
+    screen.classList.remove('complete')
   }
 }
 
 
-// Processa o clique em "Finalizar Lâmina"
 function handleFinishGel() {
   const nucleoids = currentExperiment.nucleoidsPerGel
   const total = getTotalCount()
 
-  // Avisa se a contagem está incompleta, mas permite finalizar
   if (total < nucleoids) {
     const msg = currentLanguage === 'pt'
       ? `Apenas ${total} de ${nucleoids} nucleoides contados. Deseja finalizar mesmo assim?`
@@ -420,7 +342,6 @@ function handleFinishGel() {
     if (!confirm(msg)) return
   }
 
-  // Monta o objeto da lâmina finalizada
   const gelData = {
     treatment: currentExperiment.treatments[currentTreatmentIndex],
     gelNumber: currentGelIndex + 1,
@@ -432,31 +353,21 @@ function handleFinishGel() {
     total: total
   }
 
-  // Adiciona aos dados da repetição atual (sempre a última)
   const lastReplicate = currentExperiment.replicates[currentExperiment.replicates.length - 1]
   lastReplicate.gels.push(gelData)
 
-  // Salva automaticamente após cada lâmina
   saveExperiment()
-
-  // Decide o que fazer a seguir
   moveToNextGelOrTreatment()
 }
 
 
-// Avança para a próxima lâmina ou próximo tratamento
 function moveToNextGelOrTreatment() {
-
-  // Por ora: cada tratamento tem 1 lâmina por repetição
-  // (poderemos configurar múltiplas lâminas por tratamento depois)
   currentTreatmentIndex++
 
   if (currentTreatmentIndex < currentExperiment.treatments.length) {
-    // Ainda há tratamentos — continua contando
     currentGelIndex = 0
     startCounting()
   } else {
-    // Todos os tratamentos desta repetição foram contados
     showSummary()
   }
 }
@@ -469,47 +380,23 @@ function moveToNextGelOrTreatment() {
 const STORAGE_KEY = 'cometquant-experiments'
 
 
-// Salva o experimento atual no localStorage
 function saveExperiment() {
-  // Recupera a lista de todos os experimentos salvos
   let experiments = getAllExperiments()
-
-  // Verifica se esse experimento já existe (pelo ID)
   const index = experiments.findIndex(e => e.id === currentExperiment.id)
 
   if (index >= 0) {
-    // Atualiza o experimento existente
     experiments[index] = currentExperiment
   } else {
-    // Adiciona como novo
     experiments.push(currentExperiment)
   }
 
-  // Salva de volta no localStorage
   localStorage.setItem(STORAGE_KEY, JSON.stringify(experiments))
 }
 
 
-// Retorna todos os experimentos salvos
 function getAllExperiments() {
   const data = localStorage.getItem(STORAGE_KEY)
   return data ? JSON.parse(data) : []
-}
-
-
-// Lida com o botão "Retomar Experimento"
-function handleResumeExperiment() {
-  const experiments = getAllExperiments()
-
-  if (experiments.length === 0) {
-    alert(t('alert.noExperiments'))
-    return
-  }
-
-  // Por ora: retoma o experimento mais recente automaticamente
-  // Numa próxima versão: mostrar lista para o usuário escolher
-  currentExperiment = experiments[experiments.length - 1]
-  showSummary()
 }
 
 
@@ -523,17 +410,256 @@ function initSummary() {
 
   document.getElementById('btn-add-replicate')
     .addEventListener('click', handleAddReplicate)
+
+  // Conecta o botão de retomar ao input de arquivo oculto
+  document.getElementById('btn-resume-experiment')
+    .addEventListener('click', () => {
+      document.getElementById('input-load-files').click()
+    })
+
+  // Quando o usuário seleciona os arquivos
+  document.getElementById('input-load-files')
+    .addEventListener('change', handleLoadFiles)
 }
 
 
-// Exibe a tela de resumo com a tabela de dados
+// Lida com o carregamento de um ou mais arquivos .json
+function handleLoadFiles(event) {
+  const files = Array.from(event.target.files)
+
+  if (files.length === 0) return
+
+  // Lê todos os arquivos selecionados em paralelo
+  // Promise.all espera todos terminarem antes de continuar
+  // Equivalente em Python seria: asyncio.gather(*tasks)
+  const readers = files.map(file => readJsonFile(file))
+
+  Promise.all(readers)
+    .then(experiments => {
+      if (files.length === 1) {
+        // Um único arquivo — carrega direto
+        currentExperiment = experiments[0]
+        saveExperiment()
+        showSummary()
+
+      } else {
+        // Múltiplos arquivos — tenta consolidar
+        const consolidated = consolidateExperiments(experiments)
+        if (consolidated) {
+          currentExperiment = consolidated
+          saveExperiment()
+          showSummary()
+        }
+      }
+    })
+    .catch(() => alert(t('alert.importError')))
+
+  // Limpa o input para permitir selecionar os mesmos arquivos novamente
+  event.target.value = ''
+}
+
+
+// Lê um arquivo .json e retorna uma Promise com o objeto parseado
+// Promise é o mecanismo JavaScript para operações assíncronas
+// Equivalente em Python: seria uma coroutine com async/await
+function readJsonFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result)
+        // Valida que é um arquivo CometQuant legítimo
+        if (!data.id || !data.treatments || !data.replicates) {
+          reject(new Error('Invalid file'))
+          return
+        }
+        resolve(data)
+      } catch {
+        reject(new Error('Parse error'))
+      }
+    }
+
+    reader.onerror = () => reject(new Error('Read error'))
+    reader.readAsText(file)
+  })
+}
+
+
+// Consolida múltiplos arquivos de repetições do mesmo experimento
+function consolidateExperiments(experiments) {
+
+  // Verifica se todos os arquivos são do mesmo experimento
+  // Compara agente e tipo celular — os identificadores mais confiáveis
+  const reference = experiments[0]
+
+  for (let i = 1; i < experiments.length; i++) {
+    if (
+      experiments[i].agent !== reference.agent ||
+      experiments[i].cells !== reference.cells
+    ) {
+      alert(t('alert.invalidAgent'))
+      return null
+    }
+  }
+
+  // Coleta todas as repetições de todos os arquivos
+  // "flat()" achata um array de arrays em um único array
+  // Equivalente em Python: [rep for exp in experiments for rep in exp.replicates]
+  const allReplicates = experiments.flatMap(exp => exp.replicates)
+
+  // Remove repetições duplicadas mantendo a mais recente
+  // Um Map garante chaves únicas — se o número de repetição
+  // aparecer duas vezes, a segunda sobrescreve a primeira
+  const replicateMap = new Map()
+
+  allReplicates.forEach(rep => {
+    const existing = replicateMap.get(rep.replicateNumber)
+    if (!existing || rep.date > existing.date) {
+      replicateMap.set(rep.replicateNumber, rep)
+    }
+  })
+
+  // Verifica se havia duplicatas para avisar o usuário
+  if (replicateMap.size < allReplicates.length) {
+    alert(t('alert.duplicateRep'))
+  }
+
+  // Monta o experimento consolidado baseado no arquivo mais recente
+  // e substitui as repetições pela versão consolidada e ordenada
+  const consolidated = {
+    ...reference,  // copia todos os campos do arquivo de referência
+    id: `exp_${Date.now()}`,  // novo ID para o consolidado
+    replicates: Array.from(replicateMap.values())
+      .sort((a, b) => a.replicateNumber - b.replicateNumber)
+  }
+
+  return consolidated
+}
+
+
+// Mantém a função antiga como fallback para localStorage
+// (usada internamente quando há dados locais)
+function handleResumeExperiment() {
+  document.getElementById('input-load-files').click()
+}
+
+
+// Lida com o carregamento de um ou mais arquivos .json
+function handleLoadFiles(event) {
+  const files = Array.from(event.target.files)
+
+  if (files.length === 0) return
+
+  // Lê todos os arquivos em paralelo usando Promise.all
+  // Equivalente Python: asyncio.gather(*[read(f) for f in files])
+  const readers = files.map(file => readJsonFile(file))
+
+  Promise.all(readers)
+    .then(experiments => {
+      if (files.length === 1) {
+        // Um único arquivo — carrega direto
+        currentExperiment = experiments[0]
+        saveExperiment()
+        showSummary()
+
+      } else {
+        // Múltiplos arquivos — tenta consolidar repetições
+        const consolidated = consolidateExperiments(experiments)
+        if (consolidated) {
+          currentExperiment = consolidated
+          saveExperiment()
+          showSummary()
+        }
+      }
+    })
+    .catch(() => alert(t('alert.importError')))
+
+  // Limpa o input para permitir selecionar os mesmos arquivos de novo
+  event.target.value = ''
+}
+
+
+// Lê um arquivo .json e retorna uma Promise com o objeto parseado
+// FileReader é assíncrono — por isso precisamos da Promise
+function readJsonFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result)
+        // Valida estrutura mínima de um arquivo CometQuant
+        if (!data.id || !data.treatments || !data.replicates) {
+          reject(new Error('Invalid CometQuant file'))
+          return
+        }
+        resolve(data)
+      } catch {
+        reject(new Error('JSON parse error'))
+      }
+    }
+
+    reader.onerror = () => reject(new Error('File read error'))
+    reader.readAsText(file)
+  })
+}
+
+
+// Consolida múltiplos arquivos de repetições do mesmo experimento
+function consolidateExperiments(experiments) {
+
+  // Verifica se todos os arquivos são do mesmo experimento
+  const reference = experiments[0]
+
+  for (let i = 1; i < experiments.length; i++) {
+    if (
+      experiments[i].agent !== reference.agent ||
+      experiments[i].cells !== reference.cells
+    ) {
+      alert(t('alert.invalidAgent'))
+      return null
+    }
+  }
+
+  // Coleta todas as repetições de todos os arquivos
+  // flatMap = map + flat: equivalente a [rep for exp in experiments for rep in exp.replicates]
+  const allReplicates = experiments.flatMap(exp => exp.replicates)
+
+  // Usa Map para deduplicar por número de repetição
+  // Se o mesmo número aparecer duas vezes, mantém o mais recente (maior data)
+  const replicateMap = new Map()
+
+  allReplicates.forEach(rep => {
+    const existing = replicateMap.get(rep.replicateNumber)
+    if (!existing || rep.date > existing.date) {
+      replicateMap.set(rep.replicateNumber, rep)
+    }
+  })
+
+  if (replicateMap.size < allReplicates.length) {
+    alert(t('alert.duplicateRep'))
+  }
+
+  // Spread operator (...reference) copia todos os campos do objeto de referência
+  // Equivalente Python: {**reference, 'id': novo_id, 'replicates': lista}
+  const consolidated = {
+    ...reference,
+    id: `exp_${Date.now()}`,
+    replicates: Array.from(replicateMap.values())
+      .sort((a, b) => a.replicateNumber - b.replicateNumber)
+  }
+
+  return consolidated
+}
+
+
 function showSummary() {
   renderSummaryTable()
   showScreen('screen-summary')
 }
 
 
-// Monta a tabela de resumo dinamicamente
 function renderSummaryTable() {
   const container = document.getElementById('summary-table-container')
 
@@ -544,7 +670,6 @@ function renderSummaryTable() {
 
   let html = ''
 
-  // Uma tabela por repetição
   currentExperiment.replicates.forEach(replicate => {
     html += `
       <h3 style="margin: 16px 0 8px; color: var(--color-accent)">
@@ -593,12 +718,11 @@ function renderSummaryTable() {
 
 
 // Calcula o Score Visual de uma lâmina
-// Fórmula idêntica ao seu app.py:
-// score = ((0*c0 + 0.25*c1 + 0.5*c2 + 0.75*c3 + 1*c4) / total) * 100
+// Fórmula: score = (0*c0 + 0.25*c1 + 0.5*c2 + 0.75*c3 + 1*c4) / nucleoidsPerGel * 100
 function calculateScore(gel) {
   if (!gel.total || gel.total === 0) return 0
   return (
-    (0 * gel.class0 +
+    (0    * gel.class0 +
      0.25 * gel.class1 +
      0.5  * gel.class2 +
      0.75 * gel.class3 +
@@ -608,14 +732,10 @@ function calculateScore(gel) {
 }
 
 
-// Exporta o experimento atual como arquivo .json
 function exportExperiment() {
   if (!currentExperiment) return
 
-  // Converte o objeto para texto JSON formatado
   const json = JSON.stringify(currentExperiment, null, 2)
-
-  // Cria um "arquivo virtual" no navegador e simula o download
   const blob = new Blob([json], { type: 'application/json' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
@@ -626,12 +746,10 @@ function exportExperiment() {
   a.download = `CometQuant_${currentExperiment.agent}_${currentExperiment.cells}_Rep${repNumber}_${today}.json`
   a.click()
 
-  // Libera a memória do arquivo virtual
   URL.revokeObjectURL(url)
 }
 
 
-// Adiciona uma nova repetição ao experimento atual
 function handleAddReplicate() {
   if (!currentExperiment) return
 
@@ -643,7 +761,6 @@ function handleAddReplicate() {
     gels: []
   })
 
-  // Reseta os índices e volta para a contagem
   currentTreatmentIndex = 0
   currentGelIndex = 0
   startCounting()

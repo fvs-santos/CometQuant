@@ -81,7 +81,12 @@ const translations = {
     'alert.gelComplete': 'Lâmina completa! Verifique os dados e finalize.',
     'alert.noExperiments': 'Nenhum experimento salvo encontrado.',
     'alert.importSuccess': 'Experimento importado com sucesso!',
-    'alert.importError': 'Arquivo inválido. Verifique o arquivo .json.'
+    'alert.importError': 'Arquivo inválido. Verifique o arquivo .json.',
+    'alert.invalidAgent': 'Os arquivos selecionados são de experimentos diferentes (agente ou célula diferente). Selecione apenas arquivos do mesmo experimento.',
+    'alert.duplicateRep': 'Atenção: repetição duplicada detectada. Apenas a versão mais recente foi mantida.',
+    'resume.consolidated': 'Experimento consolidado',
+    'resume.replicates': 'repetições carregadas',
+    'resume.selectFiles': 'Selecione um ou mais arquivos .json do CometQuant',
   },
 
   'en': {
@@ -158,7 +163,12 @@ const translations = {
     'alert.gelComplete': 'Slide complete! Review the data and finish.',
     'alert.noExperiments': 'No saved experiments found.',
     'alert.importSuccess': 'Experiment imported successfully!',
-    'alert.importError': 'Invalid file. Please check the .json file.'
+    'alert.importError': 'Invalid file. Please check the .json file.',
+    'alert.invalidAgent': 'Selected files belong to different experiments (different agent or cell type). Please select files from the same experiment only.',
+    'alert.duplicateRep': 'Warning: duplicate replicate detected. Only the most recent version was kept.',
+    'resume.consolidated': 'Consolidated experiment',
+    'resume.replicates': 'replicates loaded',
+    'resume.selectFiles': 'Select one or more CometQuant .json files',
   }
 }
 
