@@ -549,3 +549,117 @@ body {
   border-color: #3fb950;
   opacity: 0.8;
 }
+
+/* =============================================
+   TELA 5: ANÁLISE ESTATÍSTICA
+============================================= */
+
+/* Status do Pyodide */
+.pyodide-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl) var(--space-md);
+  text-align: center;
+  flex: 1;
+}
+
+.pyodide-status-icon {
+  font-size: 2.5rem;
+}
+
+.pyodide-progress-bar-container {
+  width: 100%;
+  max-width: 280px;
+  height: 6px;
+  background-color: var(--color-bg-card);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pyodide-progress-bar {
+  height: 100%;
+  width: 0%;
+  background-color: var(--color-accent);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* Estado: pronto */
+.pyodide-status.ready .pyodide-status-icon::after {
+  content: '✓';
+}
+
+/* Seções de resultado */
+.result-section {
+  margin-bottom: var(--space-xl);
+}
+
+.result-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-accent);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-bg-card);
+}
+
+.result-caption {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+/* Tabelas de resultado — reutiliza o padrão do resumo */
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-sm);
+  overflow-x: auto;
+  display: block;
+}
+
+.result-table th {
+  background-color: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  padding: var(--space-sm);
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.result-table td {
+  padding: var(--space-sm);
+  text-align: center;
+  border-bottom: 1px solid var(--color-bg-card);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* Destaque para p-valor significativo */
+.td-significant {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.td-not-significant {
+  color: var(--color-text-secondary);
+}
+
+/* Gráficos gerados pelo matplotlib */
+.chart-img {
+  width: 100%;
+  height: auto;
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--space-md);
+}
+
+.chart-caption {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin-bottom: var(--space-lg);
+}

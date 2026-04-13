@@ -11,6 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="CometQuant">
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
   <link rel="stylesheet" href="./css/style.css">
   <title>CometQuant Lab</title>
 </head>
@@ -290,27 +291,95 @@
   </div>
 
 
-  <!-- ============================================
-    TELA 5: ANÁLISE
-  ============================================ -->
-  <div id="screen-analysis" class="screen">
+<!-- ============================================
+  TELA 5: ANÁLISE ESTATÍSTICA
+============================================ -->
+<div id="screen-analysis" class="screen">
 
-    <div class="screen-header">
-      <button class="btn-back" id="btn-back-analysis"
-              data-i18n="btn.back">← Back</button>
-      <h2 data-i18n="analysis.title">Statistical Analysis</h2>
+  <div class="screen-header">
+    <button class="btn-back" id="btn-back-analysis"
+            data-i18n="btn.back">← Back</button>
+    <h2 data-i18n="analysis.title">Statistical Analysis</h2>
+  </div>
+
+  <!-- Status do carregamento do Pyodide -->
+  <div id="pyodide-status" class="pyodide-status">
+    <div class="pyodide-status-icon" id="pyodide-icon">⏳</div>
+    <p id="pyodide-message" data-i18n="analysis.loading">
+      Loading Python environment...
+    </p>
+    <div class="pyodide-progress-bar-container" id="pyodide-progress-container">
+      <div class="pyodide-progress-bar" id="pyodide-progress"></div>
+    </div>
+  </div>
+
+  <!-- Resultados — preenchidos dinamicamente -->
+  <div id="analysis-results" style="display:none">
+
+    <div class="result-section" id="section-scores">
+      <h3 class="result-title" data-i18n="analysis.scoresTitle">
+        Visual Scores
+      </h3>
+      <div id="scores-table"></div>
     </div>
 
-    <div id="analysis-status">
-      <p data-i18n="analysis.loading">Loading Python environment...</p>
+    <div class="result-section" id="section-shapiro">
+      <h3 class="result-title" data-i18n="analysis.shapiroTitle">
+        Shapiro-Wilk Normality Test
+      </h3>
+      <div id="shapiro-table"></div>
     </div>
 
-    <div id="analysis-results"></div>
+    <div class="result-section" id="section-anova">
+      <h3 class="result-title" data-i18n="analysis.anovaTitle">
+        One-Way ANOVA
+      </h3>
+      <div id="anova-table"></div>
+    </div>
 
-    <button class="btn-primary" id="btn-run-analysis"
-            data-i18n="analysis.run">Run Analysis</button>
+    <div class="result-section" id="section-tukey">
+      <h3 class="result-title" data-i18n="analysis.tukeyTitle">
+        Tukey Post-hoc Test
+      </h3>
+      <p class="result-caption" data-i18n="analysis.tukeyCaption">
+        Performed only if ANOVA p-value &lt; 0.05
+      </p>
+      <div id="tukey-table"></div>
+    </div>
+
+    <div class="result-section" id="section-regression">
+      <h3 class="result-title" data-i18n="analysis.regressionTitle">
+        Linear Regression &amp; Pearson Correlation
+      </h3>
+      <div id="regression-table"></div>
+    </div>
+
+    <div class="result-section" id="section-charts">
+      <h3 class="result-title" data-i18n="analysis.chartsTitle">
+        Charts
+      </h3>
+      <div id="charts-container"></div>
+    </div>
+
+    <!-- Botões de exportação -->
+    <div class="summary-buttons" style="margin-top: 24px">
+      <button class="btn-secondary" id="btn-export-report"
+              data-i18n="analysis.exportReport">
+        Export Report (.html)
+      </button>
+      <button class="btn-secondary" id="btn-export-csv"
+              data-i18n="analysis.exportCsv">
+        Export Data (.csv)
+      </button>
+      <button class="btn-primary" id="btn-export-zip"
+              data-i18n="analysis.exportZip">
+        Download All (.zip)
+      </button>
+    </div>
 
   </div>
+
+</div>
 
 
   <!-- ============================================
@@ -326,6 +395,7 @@
   </script>
 
   <script src="./js/i18n.js"></script>
+  <script src="./js/analysis.js"></script>
   <script src="./js/app.js"></script>
 
 </body>
