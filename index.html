@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CometQuant">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./css/style.css">
+  <title>CometQuant Lab</title>
+</head>
+
+<body>
+
+  <!-- ============================================
+    TELA 1: INÍCIO
+  ============================================ -->
+  <div id="screen-home" class="screen active">
+
+    <div class="app-header">
+      <h1 class="app-title" data-i18n="app.title">CometQuant Lab</h1>
+      <p class="app-subtitle" data-i18n="app.subtitle">Comet Assay Visual Score</p>
+    </div>
+
+    <div class="language-selector">
+      <button class="btn-lang" id="btn-lang-en" onclick="setLanguage('en')">
+        🇺🇸 EN
+      </button>
+      <button class="btn-lang" id="btn-lang-pt" onclick="setLanguage('pt')">
+        🇧🇷 PT
+      </button>
+    </div>
+
+    <div class="home-buttons">
+      <button class="btn-primary" id="btn-new-experiment"
+              data-i18n="home.newExperiment">
+        New Experiment
+      </button>
+      <button class="btn-secondary" id="btn-resume-experiment"
+              data-i18n="home.resumeExperiment">
+        Resume Experiment
+      </button>
+    </div>
+
+    <div class="app-version">
+      <p data-i18n="app.version">CometQuant Lab v1.0</p>
+      <p data-i18n="app.credits">Developed for mutagenesis research</p>
+    </div>
+
+  </div>
+
+
+  <!-- ============================================
+    TELA 2: CONFIGURAÇÃO
+  ============================================ -->
+  <div id="screen-setup" class="screen">
+
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-setup"
+              data-i18n="btn.back">← Back</button>
+      <h2 data-i18n="setup.title">New Experiment</h2>
+    </div>
+
+    <div class="form-container">
+
+      <div class="form-group">
+        <label for="input-researcher"
+               data-i18n="setup.researcher">Researcher</label>
+        <input type="text" id="input-researcher"
+               data-i18n-placeholder="setup.researcher.placeholder">
+      </div>
+
+      <div class="form-group">
+        <label for="input-agent"
+               data-i18n="setup.agent">Test Agent</label>
+        <input type="text" id="input-agent"
+               data-i18n-placeholder="setup.agent.placeholder">
+      </div>
+
+      <div class="form-group">
+        <label for="input-cells"
+               data-i18n="setup.cells">Cell Type</label>
+        <input type="text" id="input-cells"
+               data-i18n-placeholder="setup.cells.placeholder">
+      </div>
+
+      <div class="form-group">
+        <label for="input-neg-control"
+               data-i18n="setup.negControl">Negative Control</label>
+        <input type="text" id="input-neg-control"
+               data-i18n-placeholder="setup.negControl.placeholder">
+      </div>
+
+      <div class="form-group">
+        <label for="input-pos-control"
+               data-i18n="setup.posControl">Positive Control</label>
+        <input type="text" id="input-pos-control"
+               data-i18n-placeholder="setup.posControl.placeholder">
+      </div>
+
+      <div class="form-group">
+        <label for="input-sol-control"
+               data-i18n="setup.solControl">Solvent Control</label>
+        <input type="text" id="input-sol-control"
+               data-i18n-placeholder="setup.solControl.placeholder">
+      </div>
+
+      <div class="form-group">
+        <label for="input-nucleoids"
+               data-i18n="setup.nucleoids">Nucleoids/Slide</label>
+        <input type="number" id="input-nucleoids"
+               data-i18n-placeholder="setup.nucleoids.placeholder"
+               min="1">
+      </div>
+
+      <div class="form-group">
+        <label for="input-conditions"
+               data-i18n="setup.conditions">No. of Concentrations</label>
+        <input type="number" id="input-conditions"
+               data-i18n-placeholder="setup.conditions.placeholder"
+               min="1">
+      </div>
+
+      <div class="form-group">
+        <label for="input-conc-unit"
+               data-i18n="setup.concUnit">Concentration Unit</label>
+        <select id="input-conc-unit">
+          <option value="" disabled selected
+                  data-i18n="setup.concUnit.placeholder">Select...</option>
+          <option value="M">M</option>
+          <option value="mM">mM</option>
+          <option value="µM">µM</option>
+          <option value="nM">nM</option>
+          <option value="g/mL">g/mL</option>
+          <option value="mg/mL">mg/mL</option>
+          <option value="µg/mL">µg/mL</option>
+          <option value="ng/mL">ng/mL</option>
+        </select>
+      </div>
+
+      <div id="concentrations-container"></div>
+
+      <button class="btn-primary" id="btn-start-counting"
+              data-i18n="setup.startCounting">
+        Start Counting
+      </button>
+
+    </div>
+
+  </div>
+
+
+  <!-- ============================================
+    TELA 3: CONTADOR
+  ============================================ -->
+  <div id="screen-counter" class="screen">
+
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-counter"
+              data-i18n="btn.back">← Back</button>
+      <h2 id="counter-treatment-name">Treatment</h2>
+    </div>
+
+    <div class="counter-info">
+      <span id="counter-gel-label">Slide 1</span>
+      <span id="counter-progress">0 / 100 <span data-i18n="counter.nucleoids">nucleoids</span></span>
+    </div>
+
+    <div class="progress-bar-container">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+
+    <div class="comet-classes-grid">
+
+      <div class="comet-class-card" id="card-class-0" data-class="0">
+        <div class="comet-image-container">
+          <svg viewBox="0 0 100 60" class="comet-svg">
+            <ellipse cx="50" cy="30" rx="20" ry="20"
+                     fill="#4a9eff" opacity="0.9"/>
+          </svg>
+        </div>
+        <div class="class-label">Class 0</div>
+        <div class="class-count" id="count-0">0</div>
+        <button class="btn-count">+</button>
+      </div>
+
+      <div class="comet-class-card" id="card-class-1" data-class="1">
+        <div class="comet-image-container">
+          <svg viewBox="0 0 100 60" class="comet-svg">
+            <ellipse cx="45" cy="30" rx="18" ry="18"
+                     fill="#4a9eff" opacity="0.9"/>
+            <ellipse cx="62" cy="30" rx="10" ry="8"
+                     fill="#4a9eff" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="class-label">Class 1</div>
+        <div class="class-count" id="count-1">0</div>
+        <button class="btn-count">+</button>
+      </div>
+
+      <div class="comet-class-card" id="card-class-2" data-class="2">
+        <div class="comet-image-container">
+          <svg viewBox="0 0 100 60" class="comet-svg">
+            <ellipse cx="40" cy="30" rx="16" ry="16"
+                     fill="#4a9eff" opacity="0.9"/>
+            <ellipse cx="62" cy="30" rx="16" ry="10"
+                     fill="#4a9eff" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="class-label">Class 2</div>
+        <div class="class-count" id="count-2">0</div>
+        <button class="btn-count">+</button>
+      </div>
+
+      <div class="comet-class-card" id="card-class-3" data-class="3">
+        <div class="comet-image-container">
+          <svg viewBox="0 0 100 60" class="comet-svg">
+            <ellipse cx="35" cy="30" rx="14" ry="14"
+                     fill="#4a9eff" opacity="0.9"/>
+            <ellipse cx="63" cy="30" rx="22" ry="12"
+                     fill="#4a9eff" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="class-label">Class 3</div>
+        <div class="class-count" id="count-3">0</div>
+        <button class="btn-count">+</button>
+      </div>
+
+      <div class="comet-class-card" id="card-class-4" data-class="4">
+        <div class="comet-image-container">
+          <svg viewBox="0 0 100 60" class="comet-svg">
+            <ellipse cx="28" cy="30" rx="10" ry="10"
+                     fill="#4a9eff" opacity="0.9"/>
+            <ellipse cx="62" cy="30" rx="28" ry="14"
+                     fill="#4a9eff" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="class-label">Class 4</div>
+        <div class="class-count" id="count-4">0</div>
+        <button class="btn-count">+</button>
+      </div>
+
+    </div>
+
+    <!-- Estes dois botões estão fora do grid mas dentro da tela -->
+    <button class="btn-secondary" id="btn-undo"
+            data-i18n="counter.undo">↩ Undo last</button>
+
+    <button class="btn-primary" id="btn-finish-gel"
+            data-i18n="counter.finishGel">Finish Slide</button>
+
+  </div>
+
+
+  <!-- ============================================
+    TELA 4: RESUMO
+  ============================================ -->
+  <div id="screen-summary" class="screen">
+
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-summary"
+              data-i18n="btn.back">← Back</button>
+      <h2 data-i18n="summary.title">Experiment Summary</h2>
+    </div>
+
+    <div id="summary-table-container"></div>
+
+    <div class="summary-buttons">
+      <button class="btn-secondary" id="btn-export-experiment"
+              data-i18n="summary.export">Export Data (.json)</button>
+      <button class="btn-secondary" id="btn-add-replicate"
+              data-i18n="summary.addReplicate">Add Replicate</button>
+      <button class="btn-primary" id="btn-go-to-analysis"
+              data-i18n="summary.goToAnalysis">Statistical Analysis</button>
+    </div>
+
+  </div>
+
+
+  <!-- ============================================
+    TELA 5: ANÁLISE
+  ============================================ -->
+  <div id="screen-analysis" class="screen">
+
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-analysis"
+              data-i18n="btn.back">← Back</button>
+      <h2 data-i18n="analysis.title">Statistical Analysis</h2>
+    </div>
+
+    <div id="analysis-status">
+      <p data-i18n="analysis.loading">Loading Python environment...</p>
+    </div>
+
+    <div id="analysis-results"></div>
+
+    <button class="btn-primary" id="btn-run-analysis"
+            data-i18n="analysis.run">Run Analysis</button>
+
+  </div>
+
+
+  <!-- ============================================
+    SCRIPTS — ordem importa
+  ============================================ -->
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./service-worker.js')
+        .then(() => console.log('CometQuant: Service Worker registered'))
+        .catch(err => console.log('Service Worker error:', err))
+    }
+  </script>
+
+  <script src="./js/i18n.js"></script>
+  <script src="./js/app.js"></script>
+
+</body>
+
+</html>

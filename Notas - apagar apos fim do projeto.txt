@@ -1,0 +1,5 @@
+Ajustes ainda necessários:
+
+- Mudar cor da tela para vermelho ou outra quando atingir a contagem total de cometas.
+- Quando clica no menu iniciar em reotmar experimento, se tiver recarregado, não abre nada. 
+Tem que ter a opção de importar arquivos baixados previamente. Inclusive, consolidar caso tenha 2 ou mais arquivos prévios 
