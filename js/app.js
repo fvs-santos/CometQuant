@@ -421,7 +421,7 @@ function initSummary() {
   document.getElementById('input-load-files')
     .addEventListener('change', handleLoadFiles)
 
-    initAnalysis()
+  initAnalysis()
 }
 
 
