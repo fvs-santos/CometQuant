@@ -420,6 +420,8 @@ function initSummary() {
   // Quando o usuário seleciona os arquivos
   document.getElementById('input-load-files')
     .addEventListener('change', handleLoadFiles)
+
+    initAnalysis()
 }
 
 
