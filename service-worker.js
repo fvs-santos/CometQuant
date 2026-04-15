@@ -1,6 +1,6 @@
 // Nome do "cache" — funciona como um rótulo
 // Quando atualizar o app, mude o número da versão aqui
-const CACHE_NAME = 'cometquant-v1'
+const CACHE_NAME = 'cometquant-v2'
 
 // Lista de todos os arquivos que o Service Worker vai guardar
 const FILES_TO_CACHE = [
