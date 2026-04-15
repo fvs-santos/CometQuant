@@ -313,7 +313,13 @@
     </div>
   </div>
 
-  <!-- Resultados — preenchidos dinamicamente -->
+  <!-- Botão de execução — visível assim que o Pyodide estiver pronto -->
+  <button class="btn-primary" id="btn-run-analysis"
+          data-i18n="analysis.run">
+    Run Analysis
+  </button>
+
+  <!-- Resultados — preenchidos dinamicamente após rodar -->
   <div id="analysis-results" style="display:none">
 
     <div class="result-section" id="section-scores">
