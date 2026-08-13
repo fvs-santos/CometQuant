@@ -102,8 +102,13 @@ def calculate_scores(experiment):
     # scores_by_treatment: {treatment: [score_rep1, score_rep2, ...]}
     scores_by_treatment = {t: [] for t in treatments}
 
+    # Multiple slides are technical subsamples. Aggregate them within each
+    # replicate before inferential analyses to avoid pseudoreplication.
     for rep in replicates:
+        replicate_scores = {t: [] for t in treatments}
         for gel in rep['gels']:
+            if gel.get('status', 'counted') != 'counted' or gel.get('completion', 'complete') != 'complete':
+                continue
             score = (
                 0    * gel['class0'] +
                 0.25 * gel['class1'] +
@@ -111,7 +116,13 @@ def calculate_scores(experiment):
                 0.75 * gel['class3'] +
                 1.00 * gel['class4']
             ) / nucleoids * 100
-            scores_by_treatment[gel['treatment']].append(score)
+            treatment = gel['treatment']
+            if treatment in replicate_scores:
+                replicate_scores[treatment].append(score)
+
+        for treatment, slide_scores in replicate_scores.items():
+            if slide_scores:
+                scores_by_treatment[treatment].append(float(np.mean(slide_scores)))
 
     return scores_by_treatment
 
@@ -304,8 +315,8 @@ def calculate_regression(scores_by_treatment, experiment):
 
 def generate_score_chart(scores_by_treatment, tukey_results, experiment, lang):
     treatments = list(scores_by_treatment.keys())
-    means = [np.nanmean(scores_by_treatment[t]) for t in treatments]
-    sds   = [np.nanstd(scores_by_treatment[t])  for t in treatments]
+    means = [np.nanmean(scores_by_treatment[t]) if scores_by_treatment[t] else 0 for t in treatments]
+    sds   = [np.nanstd(scores_by_treatment[t]) if scores_by_treatment[t] else 0 for t in treatments]
 
     # Referência para símbolos estatísticos
     ref_control = (
@@ -380,13 +391,15 @@ def generate_classes_chart(experiment, lang):
 
     for rep in replicates:
         for gel in rep['gels']:
+            if gel.get('status', 'counted') != 'counted' or gel.get('completion', 'complete') != 'complete':
+                continue
             t = gel['treatment']
             if t in counts:
                 for k in class_keys:
                     counts[t][k].append(gel[k])
 
-    means = {t: [np.nanmean(counts[t][k]) for k in class_keys] for t in treatments}
-    sds   = {t: [np.nanstd(counts[t][k])  for k in class_keys] for t in treatments}
+    means = {t: [np.nanmean(counts[t][k]) if counts[t][k] else 0 for k in class_keys] for t in treatments}
+    sds   = {t: [np.nanstd(counts[t][k]) if counts[t][k] else 0 for k in class_keys] for t in treatments}
 
     x      = np.arange(len(class_names))
     width  = 0.8 / len(treatments)
@@ -488,6 +501,11 @@ async function runAnalysis() {
     return
   }
 
+  if (hasPendingSlides(currentExperiment)) {
+    alert(t('alert.blindingActive'))
+    return
+  }
+
   if (!pyodideReady) {
     alert(currentLanguage === 'pt'
       ? 'O ambiente Python ainda está carregando. Aguarde.'
@@ -550,63 +568,23 @@ function renderAnalysisResults(results) {
 function renderScoresTable(scores) {
   const treatments = Object.keys(scores)
   const container  = document.getElementById('scores-table')
-
-  let html = `<div style="overflow-x:auto">
-    <table class="result-table"><thead><tr>
-    <th>${t('summary.treatment')}</th>`
-
-  // Cabeçalhos dinâmicos por repetição
   const maxReps = Math.max(...treatments.map(tr => scores[tr].length))
-  for (let i = 0; i < maxReps; i++) {
-    html += `<th>${currentLanguage === 'pt' ? 'Rep' : 'Rep'} ${i + 1}</th>`
-  }
-  html += `<th>${t('summary.mean')}</th><th>${t('summary.sd')}</th></tr></thead><tbody>`
-
-  treatments.forEach(tr => {
+  const headers = [t('summary.treatment'), ...Array.from({ length: maxReps }, (_, index) => `Rep ${index + 1}`), t('summary.mean'), t('summary.sd')]
+  const rows = treatments.map(tr => {
     const vals = scores[tr]
-    const mean = vals.reduce((a, b) => a + b, 0) / vals.length
-    const sd   = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length)
-
-    html += `<tr><td>${tr}</td>`
-    for (let i = 0; i < maxReps; i++) {
-      html += `<td>${vals[i] !== undefined ? vals[i].toFixed(2) : '-'}</td>`
-    }
-    html += `<td><strong>${mean.toFixed(2)}</strong></td>
-             <td>${sd.toFixed(2)}</td></tr>`
+    const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+    const sd   = vals.length ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) : null
+    return [tr, ...Array.from({ length: maxReps }, (_, index) => vals[index] === undefined ? '-' : vals[index].toFixed(2)), mean === null ? '-' : mean.toFixed(2), sd === null ? '-' : sd.toFixed(2)]
   })
-
-  html += `</tbody></table></div>`
-  container.innerHTML = html
+  renderResultTable(container, headers, rows)
 }
 
 
 function renderShapiroTable(shapiro) {
   const container = document.getElementById('shapiro-table')
-
-  let html = `<div style="overflow-x:auto">
-    <table class="result-table"><thead><tr>
-    <th>${t('summary.treatment')}</th>
-    <th>W</th><th>p-value</th><th>Normal</th>
-    </tr></thead><tbody>`
-
-  Object.entries(shapiro).forEach(([treatment, res]) => {
-    const normalClass = res.normal === 'True'
-      ? 'td-significant' : 'td-not-significant'
-    html += `<tr>
-      <td>${treatment}</td>
-      <td>${res.W}</td>
-      <td>${res.p}</td>
-      <td class="${normalClass}">${res.normal}</td>
-    </tr>`
-  })
-
-  html += `</tbody></table></div>
-    <p class="result-caption">
-      ${currentLanguage === 'pt'
-        ? 'p > 0,05 indica distribuição normal'
-        : 'p > 0.05 indicates normal distribution'}
-    </p>`
-  container.innerHTML = html
+  const rows = Object.entries(shapiro).map(([treatment, result]) => [treatment, result.W, result.p, result.normal])
+  renderResultTable(container, [t('summary.treatment'), 'W', 'p-value', 'Normal'], rows)
+  appendCaption(container, currentLanguage === 'pt' ? 'p > 0,05 indica distribuição normal' : 'p > 0.05 indicates normal distribution')
 }
 
 
@@ -614,25 +592,11 @@ function renderAnovaTable(anova) {
   const container = document.getElementById('anova-table')
 
   if (!anova) {
-    container.innerHTML = `<p class="result-caption">${t('analysis.notPerformed')}</p>`
+    renderNotPerformed(container)
     return
   }
-
-  const pClass = anova.significant ? 'td-significant' : 'td-not-significant'
-
-  container.innerHTML = `<div style="overflow-x:auto">
-    <table class="result-table"><thead><tr>
-    <th>SS</th><th>DF</th><th>MS</th><th>F</th><th>p-value</th>
-    </tr></thead><tbody>
-    <tr>
-      <td>${anova.SS}</td>
-      <td>${anova.DF}</td>
-      <td>${anova.MS}</td>
-      <td>${anova.F}</td>
-      <td class="${pClass}">${anova.p}</td>
-    </tr>
-    </tbody></table></div>
-    <p class="result-caption">SS: sums of squares; MS: mean squares</p>`
+  renderResultTable(container, ['SS', 'DF', 'MS', 'F', 'p-value'], [[anova.SS, anova.DF, anova.MS, anova.F, anova.p]])
+  appendCaption(container, 'SS: sums of squares; MS: mean squares')
 }
 
 
@@ -640,31 +604,16 @@ function renderTukeyTable(tukey) {
   const container = document.getElementById('tukey-table')
 
   if (!tukey || tukey.length === 0) {
-    container.innerHTML = `<p class="result-caption">${t('analysis.notPerformed')}</p>`
+    renderNotPerformed(container)
     return
   }
-
-  let html = `<div style="overflow-x:auto">
-    <table class="result-table"><thead><tr>
-    <th>A</th><th>B</th><th>p-value</th><th>Result</th>
-    </tr></thead><tbody>`
-
-  tukey.forEach(row => {
-    const sigClass = row.significant ? 'td-significant' : 'td-not-significant'
-    const sigText  = row.significant
+  const rows = tukey.map(row => {
+    const sigText = row.significant
       ? (currentLanguage === 'pt' ? 'Significativo' : 'Significant')
       : (currentLanguage === 'pt' ? 'Não significativo' : 'Not significant')
-
-    html += `<tr>
-      <td>${row.A}</td>
-      <td>${row.B}</td>
-      <td>${row.p}</td>
-      <td class="${sigClass}">${sigText}</td>
-    </tr>`
+    return [row.A, row.B, row.p, sigText]
   })
-
-  html += `</tbody></table></div>`
-  container.innerHTML = html
+  renderResultTable(container, ['A', 'B', 'p-value', 'Result'], rows)
 }
 
 
@@ -672,69 +621,74 @@ function renderRegressionTable(regression) {
   const container = document.getElementById('regression-table')
 
   if (!regression) {
-    container.innerHTML = `<p class="result-caption">${t('analysis.notPerformed')}</p>`
+    renderNotPerformed(container)
     return
   }
-
   const r = regression.regression
   const p = regression.pearson
-
-  container.innerHTML = `
-    <p class="result-caption" style="margin-bottom:8px">
-      ${currentLanguage === 'pt' ? 'Regressão Linear' : 'Linear Regression'}
-    </p>
-    <div style="overflow-x:auto">
-    <table class="result-table"><thead><tr>
-    <th>p-value</th><th>R²</th><th>CI 2.5%</th><th>CI 97.5%</th>
-    </tr></thead><tbody>
-    <tr>
-      <td class="${r.p < 0.05 ? 'td-significant' : ''}">${r.p}</td>
-      <td>${r.r2}</td>
-      <td>${r.ci_low}</td>
-      <td>${r.ci_high}</td>
-    </tr>
-    </tbody></table></div>
-
-    <p class="result-caption" style="margin: 16px 0 8px">
-      ${currentLanguage === 'pt' ? 'Correlação de Pearson' : 'Pearson Correlation'}
-    </p>
-    <div style="overflow-x:auto">
-    <table class="result-table"><thead><tr>
-    <th>r</th><th>p-value</th><th>Power</th>
-    </tr></thead><tbody>
-    <tr>
-      <td>${p.r}</td>
-      <td class="${p.p < 0.05 ? 'td-significant' : ''}">${p.p}</td>
-      <td>${p.power}</td>
-    </tr>
-    </tbody></table></div>
-    <p class="result-caption">
-      ${currentLanguage === 'pt'
-        ? 'r: coeficiente de correlação; Power: poder do teste (α = 0,05)'
-        : 'r: correlation coefficient; Power: test power (α = 0.05)'}
-    </p>`
+  appendCaption(container, currentLanguage === 'pt' ? 'Regressão Linear' : 'Linear Regression')
+  renderResultTable(container, ['p-value', 'R²', 'CI 2.5%', 'CI 97.5%'], [[r.p, r.r2, r.ci_low, r.ci_high]], false)
+  appendCaption(container, currentLanguage === 'pt' ? 'Correlação de Pearson' : 'Pearson Correlation')
+  renderResultTable(container, ['r', 'p-value', 'Power'], [[p.r, p.p, p.power]], false)
+  appendCaption(container, currentLanguage === 'pt' ? 'r: coeficiente de correlação; Power: poder do teste (α = 0,05)' : 'r: correlation coefficient; Power: test power (α = 0.05)')
 }
 
 
 function renderCharts(chartScoreB64, chartClassB64) {
   const container = document.getElementById('charts-container')
+  container.replaceChildren()
+  appendChart(container, chartScoreB64, currentLanguage === 'pt' ? 'Scores Visuais' : 'Visual Scores', 'Score chart')
+  appendChart(container, chartClassB64, currentLanguage === 'pt' ? 'Distribuição por Classes' : 'Class Distribution', 'Classes chart')
+}
 
-  container.innerHTML = `
-    <p class="result-caption">
-      ${currentLanguage === 'pt' ? 'Scores Visuais' : 'Visual Scores'}
-    </p>
-    <img class="chart-img"
-         src="data:image/png;base64,${chartScoreB64}"
-         alt="Score chart">
+function renderResultTable(container, headers, rows, replace = true) {
+  if (replace) container.replaceChildren()
+  const wrapper = document.createElement('div')
+  wrapper.className = 'table-scroll'
+  const table = document.createElement('table')
+  table.className = 'result-table'
+  const thead = document.createElement('thead')
+  const headerRow = document.createElement('tr')
+  headers.forEach(value => appendAnalysisCell(headerRow, 'th', value))
+  thead.appendChild(headerRow)
+  const tbody = document.createElement('tbody')
+  rows.forEach(values => {
+    const row = document.createElement('tr')
+    values.forEach(value => appendAnalysisCell(row, 'td', value))
+    tbody.appendChild(row)
+  })
+  table.append(thead, tbody)
+  wrapper.appendChild(table)
+  container.appendChild(wrapper)
+}
 
-    <p class="result-caption" style="margin-top:16px">
-      ${currentLanguage === 'pt'
-        ? 'Distribuição por Classes'
-        : 'Class Distribution'}
-    </p>
-    <img class="chart-img"
-         src="data:image/png;base64,${chartClassB64}"
-         alt="Classes chart">`
+function appendAnalysisCell(row, tag, value) {
+  const cell = document.createElement(tag)
+  cell.textContent = value
+  if (tag === 'th') cell.scope = 'col'
+  row.appendChild(cell)
+}
+
+function appendCaption(container, text) {
+  const caption = document.createElement('p')
+  caption.className = 'result-caption'
+  caption.textContent = text
+  container.appendChild(caption)
+}
+
+function renderNotPerformed(container) {
+  container.replaceChildren()
+  appendCaption(container, t('analysis.notPerformed'))
+}
+
+function appendChart(container, base64, caption, alt) {
+  appendCaption(container, caption)
+  if (!CometQuantExport.validPngBase64(base64)) return
+  const image = document.createElement('img')
+  image.className = 'chart-img'
+  image.src = `data:image/png;base64,${base64}`
+  image.alt = alt
+  container.appendChild(image)
 }
 
 
@@ -744,173 +698,42 @@ function renderCharts(chartScoreB64, chartClassB64) {
 
 function exportReport() {
   if (!analysisResults || !currentExperiment) return
-
-  const exp  = currentExperiment
-  const res  = analysisResults
-  const lang = currentLanguage
-  const date = new Date().toLocaleDateString(
-    lang === 'pt' ? 'pt-BR' : 'en-US')
-
-  // Monta o HTML do relatório — imprimível como PDF
-  const html = `<!DOCTYPE html>
-<html lang="${lang}">
-<head>
-  <meta charset="UTF-8">
-  <title>CometQuant Lab — ${exp.agent} / ${exp.cells}</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 900px;
-           margin: 0 auto; padding: 40px; color: #1a1a1a; }
-    h1 { color: #1a56a0; border-bottom: 2px solid #1a56a0; padding-bottom: 8px; }
-    h2 { color: #1a56a0; margin-top: 32px; }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
-    th { background: #e8f0fe; padding: 8px; text-align: center; border: 1px solid #ccc; }
-    td { padding: 7px; text-align: center; border: 1px solid #ccc; }
-    .sig { color: #1a7a2e; font-weight: bold; }
-    .meta { color: #555; font-size: 13px; margin: 4px 0; }
-    img { max-width: 100%; margin: 16px 0; }
-    .caption { font-size: 12px; color: #666; margin-top: 4px; }
-    @media print { body { padding: 20px; } }
-  </style>
-</head>
-<body>
-  <h1>CometQuant Lab</h1>
-  <p class="meta"><strong>${lang === 'pt' ? 'Pesquisador' : 'Researcher'}:</strong> ${exp.researcher || '—'}</p>
-  <p class="meta"><strong>${lang === 'pt' ? 'Agente' : 'Agent'}:</strong> ${exp.agent}</p>
-  <p class="meta"><strong>${lang === 'pt' ? 'Linhagem' : 'Cell Type'}:</strong> ${exp.cells}</p>
-  <p class="meta"><strong>${lang === 'pt' ? 'Data do relatório' : 'Report date'}:</strong> ${date}</p>
-  <p class="meta"><strong>${lang === 'pt' ? 'Repetições' : 'Replicates'}:</strong> ${exp.replicates.length}</p>
-
-  <h2>${lang === 'pt' ? 'Scores Visuais' : 'Visual Scores'}</h2>
-  ${buildHtmlTable(
-    [lang === 'pt' ? 'Tratamento' : 'Treatment', 'Mean', 'SD'],
-    Object.entries(res.scores).map(([tr, vals]) => {
-      const m = vals.reduce((a,b) => a+b,0) / vals.length
-      const s = Math.sqrt(vals.reduce((a,b) => a+(b-m)**2,0)/vals.length)
-      return [tr, m.toFixed(2), s.toFixed(2)]
-    })
-  )}
-
-  <h2>Shapiro-Wilk</h2>
-  ${buildHtmlTable(
-    [lang === 'pt' ? 'Tratamento' : 'Treatment', 'W', 'p-value', 'Normal'],
-    Object.entries(res.shapiro).map(([tr, r]) => [tr, r.W, r.p, r.normal])
-  )}
-
-  <h2>ANOVA</h2>
-  ${res.anova
-    ? buildHtmlTable(['SS','DF','MS','F','p-value'],
-        [[res.anova.SS, res.anova.DF, res.anova.MS, res.anova.F, res.anova.p]])
-    : `<p>${lang === 'pt' ? 'Não realizado' : 'Not performed'}</p>`}
-
-  <h2>Tukey</h2>
-  ${res.tukey && res.tukey.length > 0
-    ? buildHtmlTable(['A','B','p-value', lang === 'pt' ? 'Resultado' : 'Result'],
-        res.tukey.map(r => [r.A, r.B, r.p,
-          r.significant
-            ? (lang === 'pt' ? 'Significativo' : 'Significant')
-            : (lang === 'pt' ? 'Não significativo' : 'Not significant')]))
-    : `<p>${lang === 'pt' ? 'Não realizado' : 'Not performed'}</p>`}
-
-  <h2>${lang === 'pt' ? 'Regressão Linear' : 'Linear Regression'}</h2>
-  ${res.regression
-    ? buildHtmlTable(['p-value','R²','CI 2.5%','CI 97.5%'],
-        [[res.regression.regression.p, res.regression.regression.r2,
-          res.regression.regression.ci_low, res.regression.regression.ci_high]])
-    : `<p>${lang === 'pt' ? 'Não realizado' : 'Not performed'}</p>`}
-
-  <h2>${lang === 'pt' ? 'Correlação de Pearson' : 'Pearson Correlation'}</h2>
-  ${res.regression
-    ? buildHtmlTable(['r','p-value','Power'],
-        [[res.regression.pearson.r, res.regression.pearson.p,
-          res.regression.pearson.power]])
-    : `<p>${lang === 'pt' ? 'Não realizado' : 'Not performed'}</p>`}
-
-  <h2>${lang === 'pt' ? 'Gráficos' : 'Charts'}</h2>
-  <img src="data:image/png;base64,${res.chartScore}" alt="Score chart">
-  <img src="data:image/png;base64,${res.chartClass}" alt="Classes chart">
-
-  <p class="caption">Generated by CometQuant Lab — ${date}</p>
-</body>
-</html>`
-
-  downloadFile(html, `CometQuant_${exp.agent}_${exp.cells}_report.html`,
-    'text/html')
-}
-
-
-function buildHtmlTable(headers, rows) {
-  let html = '<table>'
-  html += '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>'
-  rows.forEach(row => {
-    html += '<tr>' + row.map(cell => `<td>${cell}</td>`).join('') + '</tr>'
-  })
-  html += '</table>'
-  return html
+  if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  const html = CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage)
+  downloadFile(html, `${exportBaseName()}_report.html`, 'text/html')
 }
 
 
 function exportCsv() {
   if (!analysisResults || !currentExperiment) return
-
-  const scores = analysisResults.scores
-  const treatments = Object.keys(scores)
-  const maxReps = Math.max(...treatments.map(t => scores[t].length))
-
-  let csv = 'Treatment'
-  for (let i = 0; i < maxReps; i++) csv += `,Rep ${i + 1}`
-  csv += ',Mean,SD\n'
-
-  treatments.forEach(tr => {
-    const vals = scores[tr]
-    const mean = vals.reduce((a, b) => a + b, 0) / vals.length
-    const sd   = Math.sqrt(vals.reduce((a, b) => a + (b-mean)**2, 0) / vals.length)
-    csv += `${tr}`
-    for (let i = 0; i < maxReps; i++) {
-      csv += `,${vals[i] !== undefined ? vals[i].toFixed(4) : ''}`
-    }
-    csv += `,${mean.toFixed(4)},${sd.toFixed(4)}\n`
-  })
-
-  const exp = currentExperiment
-  downloadFile(csv,
-    `CometQuant_${exp.agent}_${exp.cells}_scores.csv`,
-    'text/csv')
+  if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  downloadFile(CometQuantExport.buildRawCsv(currentExperiment), `${exportBaseName()}_raw_slides.csv`, 'text/csv;charset=utf-8')
 }
 
 
 async function exportZip() {
   if (!analysisResults || !currentExperiment) return
-
-  const exp = currentExperiment
-
-  // JSZip via CDN
-  const script = document.createElement('script')
-  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
-  document.head.appendChild(script)
-
-  await new Promise(resolve => { script.onload = resolve })
-
-  const zip = new JSZip()
-
-  // Adiciona o relatório HTML
-  const reportBlob = await fetch(
-    URL.createObjectURL(new Blob([getReportHtml()], {type: 'text/html'})))
-    .then(r => r.blob())
-  zip.file(`CometQuant_${exp.agent}_report.html`, reportBlob)
-
-  // Adiciona o CSV
-  zip.file(`CometQuant_${exp.agent}_scores.csv`, getCsvContent())
-
-  // Adiciona os gráficos
-  zip.file(`CometQuant_${exp.agent}_score_chart.png`,
-    base64ToBlob(analysisResults.chartScore, 'image/png'))
-  zip.file(`CometQuant_${exp.agent}_class_chart.png`,
-    base64ToBlob(analysisResults.chartClass, 'image/png'))
-
-  const zipBlob = await zip.generateAsync({type: 'blob'})
-  downloadFile(zipBlob,
-    `CometQuant_${exp.agent}_${exp.cells}.zip`,
-    'application/zip', true)
+  if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  if (typeof JSZip === 'undefined') return alert(currentLanguage === 'pt' ? 'Não foi possível carregar o gerador ZIP.' : 'Could not load the ZIP generator.')
+  try {
+    const zip = new JSZip()
+    const folder = zip.folder(exportBaseName())
+    folder.file('report.html', CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage))
+    folder.file('README.txt', currentLanguage === 'pt' ? 'Pacote CometQuant: dados brutos, resultados agregados, análise e gráficos.' : 'CometQuant package: raw data, aggregate results, analysis and charts.')
+    const data = folder.folder('data')
+    data.file('experiment.json', JSON.stringify(currentExperiment, null, 2))
+    data.file('analysis.json', JSON.stringify(analysisResults, null, 2))
+    data.file('raw_slides.csv', CometQuantExport.buildRawCsv(currentExperiment))
+    data.file('replicate_scores.csv', CometQuantExport.buildAggregateCsv(currentExperiment))
+    const charts = folder.folder('charts')
+    if (CometQuantExport.validPngBase64(analysisResults.chartScore)) charts.file('visual_scores.png', analysisResults.chartScore, { base64: true })
+    if (CometQuantExport.validPngBase64(analysisResults.chartClass)) charts.file('class_distribution.png', analysisResults.chartClass, { base64: true })
+    const zipBlob = await zip.generateAsync({ type: 'blob' })
+    downloadFile(zipBlob, `${exportBaseName()}.zip`, 'application/zip', true)
+  } catch (error) {
+    console.error('ZIP export error:', error)
+    alert(currentLanguage === 'pt' ? 'Falha ao gerar o arquivo ZIP.' : 'Failed to generate ZIP file.')
+  }
 }
 
 
@@ -922,7 +745,7 @@ function downloadFile(content, filename, mimeType, isBlob = false) {
   a.href       = url
   a.download   = filename
   a.click()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function base64ToBlob(b64, mimeType) {
@@ -932,30 +755,6 @@ function base64ToBlob(b64, mimeType) {
   return new Blob([buffer], {type: mimeType})
 }
 
-function getReportHtml() {
-  // Reutiliza a lógica do exportReport mas retorna a string
-  // Em vez de duplicar, chama exportReport internamente
-  // Implementação simplificada para o zip
-  return `<html><body><h1>CometQuant Lab</h1>
-    <p>Agent: ${currentExperiment.agent}</p>
-    <p>See full report via Export Report button.</p>
-    </body></html>`
-}
-
-function getCsvContent() {
-  const scores = analysisResults.scores
-  const treatments = Object.keys(scores)
-  const maxReps = Math.max(...treatments.map(t => scores[t].length))
-  let csv = 'Treatment'
-  for (let i = 0; i < maxReps; i++) csv += `,Rep ${i+1}`
-  csv += ',Mean,SD\n'
-  treatments.forEach(tr => {
-    const vals = scores[tr]
-    const mean = vals.reduce((a,b) => a+b,0) / vals.length
-    const sd   = Math.sqrt(vals.reduce((a,b) => a+(b-mean)**2,0)/vals.length)
-    csv += tr
-    for (let i = 0; i < maxReps; i++) csv += `,${vals[i]?.toFixed(4) ?? ''}`
-    csv += `,${mean.toFixed(4)},${sd.toFixed(4)}\n`
-  })
-  return csv
+function exportBaseName() {
+  return `CometQuant_${CometQuantExport.safeFilename(currentExperiment.agent)}_${CometQuantExport.safeFilename(currentExperiment.cells)}_${new Date().toISOString().split('T')[0]}`
 }

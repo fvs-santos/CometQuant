@@ -88,6 +88,7 @@
         <label for="input-agent"
                data-i18n="setup.agent">Test Agent</label>
         <input type="text" id="input-agent"
+               required maxlength="120"
                data-i18n-placeholder="setup.agent.placeholder">
       </div>
 
@@ -95,6 +96,7 @@
         <label for="input-cells"
                data-i18n="setup.cells">Cell Type</label>
         <input type="text" id="input-cells"
+               required maxlength="120"
                data-i18n-placeholder="setup.cells.placeholder">
       </div>
 
@@ -124,7 +126,15 @@
                data-i18n="setup.nucleoids">Nucleoids/Slide</label>
         <input type="number" id="input-nucleoids"
                data-i18n-placeholder="setup.nucleoids.placeholder"
-               min="1">
+               min="1" max="10000" step="1" required>
+      </div>
+
+      <div class="form-group">
+        <label for="input-slides-per-treatment"
+               data-i18n="setup.slidesPerTreatment">Slides per Treatment</label>
+        <input type="number" id="input-slides-per-treatment"
+               data-i18n-placeholder="setup.slidesPerTreatment.placeholder"
+               min="1" max="100" step="1" value="1" required>
       </div>
 
       <div class="form-group">
@@ -132,13 +142,13 @@
                data-i18n="setup.conditions">No. of Concentrations</label>
         <input type="number" id="input-conditions"
                data-i18n-placeholder="setup.conditions.placeholder"
-               min="1">
+               min="1" max="100" step="1" required>
       </div>
 
       <div class="form-group">
         <label for="input-conc-unit"
                data-i18n="setup.concUnit">Concentration Unit</label>
-        <select id="input-conc-unit">
+        <select id="input-conc-unit" required>
           <option value="" disabled selected
                   data-i18n="setup.concUnit.placeholder">Select...</option>
           <option value="M">M</option>
@@ -155,12 +165,92 @@
       <div id="concentrations-container"></div>
 
       <button class="btn-primary" id="btn-start-counting"
-              data-i18n="setup.startCounting">
-        Start Counting
+              data-i18n="setup.saveExperiment">
+        Save Experiment
       </button>
 
     </div>
 
+  </div>
+
+
+  <!-- TELA: CODIFICAÇÃO CEGA (exibida uma vez por repetição) -->
+  <div id="screen-blind-codes" class="screen">
+    <div class="screen-header">
+      <h2 data-i18n="blind.title">Blind Slide Codes</h2>
+    </div>
+    <div class="notice-card">
+      <p data-i18n="blind.instructions">Label the slides using only the codes below. This mapping will not be shown again during counting.</p>
+    </div>
+    <h3 id="blind-replicate-title" class="section-title"></h3>
+    <div id="blind-codes-container" class="blind-codes-list"></div>
+    <button class="btn-primary mt-md" id="btn-close-blind-codes"
+            data-i18n="blind.close">I labeled the slides — Close</button>
+  </div>
+
+
+  <!-- TELA: EXPERIMENTOS LOCAIS -->
+  <div id="screen-experiments" class="screen">
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-experiments" data-i18n="btn.back">← Back</button>
+      <h2 data-i18n="experiments.title">Saved Experiments</h2>
+    </div>
+    <div id="experiments-list" class="experiments-list"></div>
+    <button class="btn-secondary mt-md" id="btn-import-experiment"
+            data-i18n="experiments.import">Import JSON</button>
+  </div>
+
+
+  <!-- TELA: REPETIÇÕES DO EXPERIMENTO -->
+  <div id="screen-replicates" class="screen">
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-replicates" data-i18n="btn.back">← Back</button>
+      <h2 data-i18n="replicates.title">Replicates</h2>
+    </div>
+    <div id="replicate-experiment-meta" class="experiment-meta"></div>
+    <div id="replicates-list" class="experiments-list"></div>
+    <button class="btn-secondary mt-md" id="btn-generate-replicate"
+            data-i18n="replicates.generate">Generate Codes for Next Replicate</button>
+    <button class="btn-secondary mt-md" id="btn-open-summary"
+            data-i18n="replicates.summary">Open Experiment Summary</button>
+  </div>
+
+
+  <!-- TELA: IDENTIFICAÇÃO CEGA DA LÂMINA -->
+  <div id="screen-code-entry" class="screen">
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-code-entry" data-i18n="btn.back">← Back</button>
+      <h2 data-i18n="codeEntry.title">Identify Slide</h2>
+    </div>
+    <div class="code-entry-panel">
+      <p id="code-entry-replicate" class="section-title"></p>
+      <p id="code-entry-progress" class="muted-text"></p>
+      <div class="form-group">
+        <label for="input-blind-code" data-i18n="codeEntry.code">Slide code</label>
+        <input type="text" id="input-blind-code" autocomplete="off" autocapitalize="characters"
+               data-i18n-placeholder="codeEntry.code.placeholder">
+      </div>
+      <label class="checkbox-card" for="input-slide-absent">
+        <input type="checkbox" id="input-slide-absent">
+        <span data-i18n="codeEntry.absent">Slide absent</span>
+      </label>
+      <div id="absence-reason-group" class="form-group" hidden>
+        <label for="input-absence-reason" data-i18n="codeEntry.reasonRequired">Reason</label>
+        <select id="input-absence-reason">
+          <option value="" data-i18n="codeEntry.reason.none">Not informed</option>
+          <option value="broken" data-i18n="codeEntry.reason.broken">Broken</option>
+          <option value="lost" data-i18n="codeEntry.reason.lost">Lost</option>
+          <option value="quality" data-i18n="codeEntry.reason.quality">Inadequate quality</option>
+          <option value="insufficient" data-i18n="codeEntry.reason.insufficient">Insufficient material</option>
+          <option value="other" data-i18n="codeEntry.reason.other">Other</option>
+        </select>
+      </div>
+      <div id="absence-detail-group" class="form-group" hidden>
+        <label for="input-absence-detail" data-i18n="reason.detail">Details</label>
+        <textarea id="input-absence-detail" maxlength="500" data-i18n-placeholder="reason.detail.placeholder"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-submit-code" data-i18n="codeEntry.start">Start Counting</button>
+    </div>
   </div>
 
 
@@ -180,7 +270,9 @@
       <span id="counter-progress">0 / 100 <span data-i18n="counter.nucleoids">nucleoids</span></span>
     </div>
 
-    <div class="progress-bar-container">
+    <div id="save-status" class="save-status" role="status" aria-live="polite"></div>
+
+    <div class="progress-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
       <div class="progress-bar" id="progress-bar"></div>
     </div>
 
@@ -262,6 +354,26 @@
 
     <button class="btn-primary" id="btn-finish-gel"
             data-i18n="counter.finishGel">Finish Slide</button>
+
+    <div id="incomplete-reason-panel" class="reason-panel" hidden>
+      <p id="incomplete-warning" class="warning-text"></p>
+      <div class="form-group">
+        <label for="input-incomplete-reason" data-i18n="counter.incompleteReason">Reason for incomplete slide</label>
+        <select id="input-incomplete-reason">
+          <option value="" data-i18n="reason.select">Select...</option>
+          <option value="insufficient-cells" data-i18n="reason.insufficientCells">Insufficient cells</option>
+          <option value="poor-quality" data-i18n="reason.poorQuality">Inadequate quality</option>
+          <option value="damaged" data-i18n="reason.damaged">Damaged slide</option>
+          <option value="technical-error" data-i18n="reason.technicalError">Technical error</option>
+          <option value="time-limit" data-i18n="reason.timeLimit">Time limit</option>
+          <option value="other" data-i18n="reason.other">Other</option>
+        </select>
+      </div>
+      <div id="incomplete-detail-group" class="form-group" hidden>
+        <label for="input-incomplete-detail" data-i18n="reason.detail">Details</label>
+        <textarea id="input-incomplete-detail" maxlength="500" data-i18n-placeholder="reason.detail.placeholder"></textarea>
+      </div>
+    </div>
 
   </div>
 
@@ -400,6 +512,9 @@
     }
   </script>
 
+  <script src="./vendor/jszip.min.js"></script>
+  <script src="./js/core.js"></script>
+  <script src="./js/export.js"></script>
   <script src="./js/i18n.js"></script>
   <script src="./js/analysis.js"></script>
   <script src="./js/app.js"></script>
