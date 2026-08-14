@@ -47,10 +47,10 @@ The current experiment schema is version 3. Each replicate contains a complete
 mapping of blind assignments and counted slides. Assignment states are
 `pending`, `counting`, `counted` or `absent`.
 
-Counts are committed to `localStorage` after every increment and undo. Terminal
-operations only advance the interface after a successful validated write.
-Unknown, future-version and malformed entries are not silently removed when a
-valid experiment is saved.
+Counts are committed atomically to IndexedDB after every increment and undo.
+Terminal operations only advance the interface after a successful validated
+write. Unknown, future-version and malformed legacy entries are quarantined
+and remain available through the storage recovery export.
 
 Blinding prevents accidental disclosure in the normal UI. It is not
 cryptographic protection: treatment mappings remain present in local browser
@@ -104,19 +104,28 @@ the rendered reference results and generated charts.
 ## Deployment And Offline Behavior
 
 The project can be deployed to any HTTPS static host. Keep the existing paths
-relative to the repository root and update `CACHE_NAME` in `service-worker.js`
-when cached resources change.
+relative to the repository root and update the shell cache version in
+`service-worker.js` when cached resources change.
 
-The local application shell and Python analysis source are cached. Pyodide,
-NumPy, SciPy and Matplotlib are still loaded from the configured CDN, so the
-first statistical analysis requires network access. Counting and previously
-cached application resources can continue without the statistical runtime.
+The application shell never downloads Pyodide during startup. Statistical
+analysis is an optional package prepared by explicit user action. Its pinned
+assets are downloaded from jsDelivr, verified with SHA-256 and stored in a
+separate Cache Storage namespace. The transfer is about 35.7 MB and the
+verified content occupies about 104.4 MB; 120-150 MB of free origin storage is
+recommended. Once prepared, the analysis worker and all scientific packages
+run after a fully offline reload. Counting remains available without the
+scientific package.
+
+Experiments are stored atomically in IndexedDB with monotonic revisions.
+Existing `localStorage` data is copied on first use, and malformed, duplicate
+or future-version records are retained in quarantine. When quarantine data is
+present, the experiments screen offers a recovery export. Encrypted backups
+remain the durable transfer and disaster-recovery mechanism.
 
 ## Known Limitations
 
-- `localStorage` remains the only live persistence layer and is not encrypted.
+- IndexedDB data at rest is not encrypted and remains accessible to a user with browser or device access.
 - Encrypted backup protects the exported file, not a device user with access to browser storage or developer tools.
-- Pyodide and scientific packages are not yet hosted locally.
 - Merge rejects active partial progress instead of reconciling concurrent counts.
 - Browser automation currently targets Chromium with Pixel 7 emulation.
 - The comet class illustrations are provisional.

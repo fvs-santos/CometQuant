@@ -3,66 +3,226 @@
 // Módulo de análise estatística via Pyodide
 // =============================================
 
-let pyodide = null
-let pyodideReady = false
 const ANALYSIS_ENGINE_URL = './python/cometquant_analysis.py'
+let analysisState = 'idle'
+let analysisManifest = null
+let analysisWorker = null
+let analysisWorkerPromise = null
+let analysisInitializationReject = null
+let analysisInitController = null
+let installController = null
+let requestSequence = 0
+let activeAnalysisRequest = null
+let analysisRuntimeVersions = null
+let analysisStatusKey = 'analysis.packageMissing'
+let analysisStatusPercent = 0
 
-
-// =============================================
-// INICIALIZAÇÃO DO PYODIDE
-// =============================================
-
-async function initPyodide() {
+function updatePyodideStatus(messageText, pct, icon = '...') {
+  const status = document.getElementById('pyodide-status')
   const message = document.getElementById('pyodide-message')
   const progress = document.getElementById('pyodide-progress')
-  const icon = document.getElementById('pyodide-icon')
-
-  try {
-    updatePyodideStatus(message, progress, icon,
-      t('analysis.loading'), '🐍', 15)
-
-    pyodide = await loadPyodide()
-
-    updatePyodideStatus(message, progress, icon,
-      currentLanguage === 'pt'
-        ? 'Instalando pacotes científicos...'
-        : 'Installing scientific packages...', '📦', 45)
-
-    await pyodide.loadPackage(['numpy', 'scipy', 'matplotlib'])
-
-    updatePyodideStatus(message, progress, icon,
-      currentLanguage === 'pt'
-        ? 'Preparando ambiente...'
-        : 'Preparing environment...', '⚙️', 80)
-
-    const response = await fetch(ANALYSIS_ENGINE_URL)
-    if (!response.ok) {
-      throw new Error(`Could not load analysis engine (${response.status})`)
-    }
-    const analysisEngine = await response.text()
-    await pyodide.runPythonAsync(analysisEngine)
-
-    updatePyodideStatus(message, progress, icon,
-      t('analysis.done'), '✅', 100)
-
-    pyodideReady = true
-
-    setTimeout(() => {
-      const statusDiv = document.getElementById('pyodide-status')
-      if (statusDiv) statusDiv.style.display = 'none'
-    }, 1200)
-  } catch (err) {
-    updatePyodideStatus(message, progress, icon,
-      `Error loading Python: ${err.message}`, '❌', 0)
-    console.error('Pyodide init error:', err)
+  const progressContainer = document.getElementById('pyodide-progress-container')
+  const iconElement = document.getElementById('pyodide-icon')
+  const percent = Math.max(0, Math.min(100, Math.round(pct)))
+  if (message) message.textContent = messageText
+  if (progress) progress.style.width = `${percent}%`
+  if (progressContainer) progressContainer.setAttribute('aria-valuenow', String(percent))
+  if (iconElement) iconElement.textContent = icon
+  if (status) {
+    status.classList.toggle('ready', analysisState === 'ready')
+    status.classList.toggle('error', analysisState === 'error')
   }
 }
 
+function translatedStatus() {
+  if (analysisState === 'downloading') {
+    return t('analysis.downloading').replace('{percent}', String(analysisStatusPercent))
+  }
+  return t(analysisStatusKey)
+}
 
-function updatePyodideStatus(messageEl, progressEl, iconEl, msg, icon, pct) {
-  if (messageEl) messageEl.textContent = msg
-  if (progressEl) progressEl.style.width = `${pct}%`
-  if (iconEl) iconEl.textContent = icon
+function renderAnalysisState() {
+  const button = document.getElementById('btn-run-analysis')
+  const cancel = document.getElementById('btn-cancel-analysis')
+  if (!button || !cancel) return
+
+  const disabledStates = new Set(['idle', 'checking', 'downloading', 'initializing', 'running'])
+  button.disabled = disabledStates.has(analysisState)
+  cancel.hidden = !['downloading', 'initializing', 'running'].includes(analysisState)
+  if (analysisState === 'missing') button.textContent = t('analysis.install')
+  else if (analysisState === 'error') button.textContent = t('analysis.retry')
+  else if (analysisState === 'running') button.textContent = t('analysis.running')
+  else button.textContent = t('analysis.run')
+
+  const icons = { missing: '-', checking: '...', downloading: 'v', initializing: '...', ready: 'OK', running: '...', error: '!' }
+  updatePyodideStatus(translatedStatus(), analysisStatusPercent, icons[analysisState] || '...')
+}
+
+function setAnalysisState(state, statusKey, percent = 0) {
+  analysisState = state
+  analysisStatusKey = statusKey
+  analysisStatusPercent = percent
+  if (state !== 'error') document.getElementById('analysis-error').textContent = ''
+  renderAnalysisState()
+}
+
+function showAnalysisError(error) {
+  console.error('Scientific runtime error:', error)
+  const detail = error instanceof Error ? error.message : String(error)
+  document.getElementById('analysis-error').textContent = `${t('analysis.error')}: ${detail}`
+  setAnalysisState('error', 'analysis.failed', 0)
+}
+
+async function waitForServiceWorkerControl(signal) {
+  if (!('serviceWorker' in navigator)) throw new Error('service-worker-unavailable')
+  await withTimeout(withAbort(navigator.serviceWorker.ready, signal), 15000, 'service-worker-ready-timeout')
+  if (navigator.serviceWorker.controller) return
+  const controllerChange = new Promise(resolve => {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      resolve()
+    }, { once: true })
+  })
+  await withTimeout(withAbort(controllerChange, signal), 10000, 'service-worker-not-controlling')
+}
+
+function withTimeout(promise, timeout, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeout)
+    promise.then(value => {
+      clearTimeout(timer)
+      resolve(value)
+    }, error => {
+      clearTimeout(timer)
+      reject(error)
+    })
+  })
+}
+
+function withAbort(promise, signal) {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    promise.then(value => {
+      signal.removeEventListener('abort', abort)
+      resolve(value)
+    }, error => {
+      signal.removeEventListener('abort', abort)
+      reject(error)
+    })
+  })
+}
+
+async function enterAnalysisScreen() {
+  if (analysisState === 'ready' || analysisState === 'running' || analysisState === 'initializing' || analysisState === 'downloading') return
+  setAnalysisState('checking', 'analysis.checking', 0)
+  try {
+    analysisManifest = await CometQuantScience.fetchManifest()
+    if (!await CometQuantScience.isInstalled(analysisManifest)) {
+      setAnalysisState('missing', 'analysis.packageMissing', 0)
+      return
+    }
+    await initializeAnalysisWorker()
+  } catch (error) {
+    showAnalysisError(error)
+  }
+}
+
+async function installSciencePackage() {
+  installController = new AbortController()
+  setAnalysisState('downloading', 'analysis.downloading', 0)
+  try {
+    analysisManifest = analysisManifest || await CometQuantScience.fetchManifest()
+    await CometQuantScience.install(analysisManifest, {
+      signal: installController.signal,
+      onProgress: ({ downloaded, total }) => {
+        analysisStatusPercent = Math.min(100, Math.round((downloaded / total) * 100))
+        renderAnalysisState()
+      }
+    })
+    await initializeAnalysisWorker()
+  } catch (error) {
+    if (error.name === 'AbortError') setAnalysisState('missing', 'analysis.cancelled', 0)
+    else showAnalysisError(error)
+  } finally {
+    installController = null
+  }
+}
+
+function verifyRuntimeVersions(versions) {
+  const expected = analysisManifest.expectedVersions
+  Object.keys(expected).forEach(name => {
+    if (versions[name] !== expected[name]) throw new Error(`science-version-${name}-${versions[name]}`)
+  })
+}
+
+async function initializeAnalysisWorker() {
+  if (analysisWorkerPromise) return analysisWorkerPromise
+  setAnalysisState('initializing', 'analysis.initializing', 0)
+  analysisInitController = new AbortController()
+  const initSignal = analysisInitController.signal
+  analysisWorkerPromise = (async () => {
+    await waitForServiceWorkerControl(initSignal)
+    initSignal.throwIfAborted()
+    analysisWorker = new Worker('./js/analysis-worker.js')
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('analysis-worker-init-timeout')), 120000)
+      const finishInitialization = callback => value => {
+        clearTimeout(timeout)
+        analysisInitializationReject = null
+        callback(value)
+      }
+      const resolveInitialization = finishInitialization(resolve)
+      const rejectInitialization = finishInitialization(reject)
+      analysisInitializationReject = rejectInitialization
+      analysisWorker.addEventListener('message', event => {
+        const message = event.data
+        if (message.type === 'status') {
+          const phases = { runtime: ['analysis.loadingRuntime', 25], packages: ['analysis.loadingPackages', 65], engine: ['analysis.loadingEngine', 90] }
+          const phase = phases[message.phase]
+          if (phase) setAnalysisState('initializing', phase[0], phase[1])
+        } else if (message.type === 'ready') {
+          try {
+            verifyRuntimeVersions(message.versions)
+            analysisRuntimeVersions = message.versions
+            resolveInitialization()
+          } catch (error) {
+            rejectInitialization(error)
+          }
+        } else if (message.type === 'error' && !message.requestId) {
+          rejectInitialization(new Error(message.message))
+        } else {
+          handleAnalysisWorkerMessage(message)
+        }
+      })
+      analysisWorker.addEventListener('error', event => rejectInitialization(new Error(event.message || 'analysis-worker-crashed')), { once: true })
+      analysisWorker.postMessage({
+        type: 'init',
+        indexUrl: CometQuantScience.indexUrl(analysisManifest),
+        packages: analysisManifest.packages,
+        engineUrl: new URL(ANALYSIS_ENGINE_URL, document.baseURI).href
+      })
+    })
+    analysisInitController = null
+    setAnalysisState('ready', 'analysis.ready', 100)
+  })().catch(error => {
+    terminateAnalysisWorker()
+    if (error.name === 'AbortError') setAnalysisState('error', 'analysis.cancelled', 0)
+    else showAnalysisError(error)
+    throw error
+  })
+  return analysisWorkerPromise
+}
+
+function terminateAnalysisWorker() {
+  analysisInitController?.abort(new DOMException('Aborted', 'AbortError'))
+  analysisInitController = null
+  if (analysisWorker) analysisWorker.terminate()
+  analysisWorker = null
+  analysisWorkerPromise = null
+  analysisInitializationReject = null
+  activeAnalysisRequest = null
 }
 
 
@@ -71,10 +231,15 @@ function updatePyodideStatus(messageEl, progressEl, iconEl, msg, icon, pct) {
 // =============================================
 
 function initAnalysis() {
-  initPyodide()
-
   document.getElementById('btn-run-analysis')
-    .addEventListener('click', runAnalysis)
+    .addEventListener('click', () => {
+      if (analysisState === 'missing') installSciencePackage()
+      else if (analysisState === 'error') enterAnalysisScreen()
+      else if (analysisState === 'ready') runAnalysis()
+    })
+
+  document.getElementById('btn-cancel-analysis')
+    .addEventListener('click', cancelAnalysis)
 
   document.getElementById('btn-export-report')
     .addEventListener('click', exportReport)
@@ -84,10 +249,12 @@ function initAnalysis() {
 
   document.getElementById('btn-export-zip')
     .addEventListener('click', exportZip)
+
+  setAnalysisState('idle', 'analysis.packageMissing', 0)
 }
 
 
-async function runAnalysis() {
+function runAnalysis() {
   if (!currentExperiment) {
     alert(t('analysis.errorNoData'))
     return
@@ -98,46 +265,70 @@ async function runAnalysis() {
     return
   }
 
-  if (!pyodideReady) {
-    alert(currentLanguage === 'pt'
-      ? 'O ambiente Python ainda está carregando. Aguarde.'
-      : 'Python environment is still loading. Please wait.')
-    return
-  }
-
-  const btn = document.getElementById('btn-run-analysis')
-  btn.disabled = true
-  btn.textContent = t('analysis.running')
   const experimentContext = {
     id: currentExperiment.id,
-    updatedAt: currentExperiment.updatedAt
+    updatedAt: currentExperiment.updatedAt,
+    lang: currentLanguage
   }
 
+  const requestId = ++requestSequence
+  activeAnalysisRequest = { requestId, context: experimentContext }
+  setAnalysisState('running', 'analysis.running', 100)
+  analysisWorker.postMessage({
+    type: 'analyze',
+    requestId,
+    context: experimentContext,
+    experimentJson: JSON.stringify(currentExperiment),
+    lang: currentLanguage
+  })
+}
+
+function handleAnalysisWorkerMessage(message) {
+  if (!activeAnalysisRequest || message.requestId !== activeAnalysisRequest.requestId) return
+  if (message.type === 'error') {
+    activeAnalysisRequest = null
+    setAnalysisState('ready', 'analysis.ready', 100)
+    document.getElementById('analysis-error').textContent = `${t('analysis.error')}: ${message.message}`
+    return
+  }
+  if (message.type !== 'result') return
+  const context = activeAnalysisRequest.context
+  activeAnalysisRequest = null
+  if (!currentExperiment || currentExperiment.id !== context.id || currentExperiment.updatedAt !== context.updatedAt || currentLanguage !== context.lang) {
+    invalidateAnalysisResults()
+    setAnalysisState('ready', 'analysis.ready', 100)
+    return
+  }
   try {
-    pyodide.globals.set('experiment_json',
-      JSON.stringify(currentExperiment))
-    pyodide.globals.set('lang', currentLanguage)
-
-    const resultJson = await pyodide.runPythonAsync(
-      `run_all_analyses(experiment_json, lang)`
-    )
-
-    // Descarta o resultado se o experimento mudou enquanto o Python executava.
-    if (!currentExperiment || currentExperiment.id !== experimentContext.id || currentExperiment.updatedAt !== experimentContext.updatedAt) {
-      invalidateAnalysisResults()
-      return
-    }
-
-    analysisResults = JSON.parse(resultJson)
-    analysisResultsContext = experimentContext
+    analysisResults = JSON.parse(message.resultJson)
+    analysisResultsContext = context
     renderAnalysisResults(analysisResults)
     document.getElementById('analysis-results').style.display = 'block'
-  } catch (err) {
-    console.error('Analysis error:', err)
-    alert(`Analysis error: ${err.message}`)
-  } finally {
-    btn.disabled = false
-    btn.textContent = t('analysis.run')
+    setAnalysisState('ready', 'analysis.done', 100)
+  } catch (error) {
+    setAnalysisState('ready', 'analysis.ready', 100)
+    document.getElementById('analysis-error').textContent = `${t('analysis.error')}: ${error.message}`
+  }
+}
+
+async function cancelAnalysis() {
+  if (analysisState === 'downloading' && installController) {
+    installController.abort()
+    return
+  }
+  if (analysisState === 'initializing') {
+    analysisInitController?.abort(new DOMException('Aborted', 'AbortError'))
+    analysisInitializationReject?.(new DOMException('Aborted', 'AbortError'))
+    return
+  }
+  if (analysisState === 'running') {
+    terminateAnalysisWorker()
+    setAnalysisState('initializing', 'analysis.cancelled', 0)
+    try {
+      await initializeAnalysisWorker()
+    } catch (_) {
+      // initializeAnalysisWorker already reports the recoverable error.
+    }
   }
 }
 
@@ -159,7 +350,8 @@ function hasCurrentAnalysisResults() {
     analysisResultsContext &&
     currentExperiment &&
     analysisResultsContext.id === currentExperiment.id &&
-    analysisResultsContext.updatedAt === currentExperiment.updatedAt
+    analysisResultsContext.updatedAt === currentExperiment.updatedAt &&
+    analysisResultsContext.lang === currentLanguage
   )
 }
 

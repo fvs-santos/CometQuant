@@ -1,5 +1,12 @@
 const { test, expect } = require('@playwright/test')
 
+async function seedLegacyData(page, experiments) {
+  await page.addInitScript(data => {
+    localStorage.setItem('cometquant-experiments', JSON.stringify(data))
+  }, experiments)
+  await page.goto('/')
+}
+
 test('creates a blinded mobile experiment and blocks revealing summary', async ({ page }) => {
   await page.addInitScript(() => localStorage.clear())
   await page.goto('/')
@@ -42,23 +49,21 @@ test('autosaves each count and restores the current blinded slide', async ({ pag
     progress: null,
     replicates: [{ replicateNumber: 1, date: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', gels: [], assignments: [{ blindCode: 'ABCD-01', treatmentIndex: 0, gelNumber: 1, status: 'pending' }] }]
   }
-  await page.goto('/')
-  await page.evaluate(experiment => localStorage.setItem('cometquant-experiments', JSON.stringify([experiment])), data)
-  await page.reload()
+  await seedLegacyData(page, [data])
   await page.getByRole('button', { name: 'Resume Experiment' }).click()
   await page.getByRole('button', { name: 'Open' }).click()
   await page.getByRole('button', { name: 'Analyze Slides' }).click()
   await page.locator('#input-blind-code').fill('abcd-01')
   await page.getByRole('button', { name: 'Start Counting' }).click()
-  await page.locator('#card-class-2').click()
-  await expect(page.locator('#count-2')).toHaveText('1')
+  await page.locator('#card-class-2').click({ clickCount: 2 })
+  await expect(page.locator('#count-2')).toHaveText('2')
   await page.reload()
   await page.getByRole('button', { name: 'Resume Experiment' }).click()
   await page.getByRole('button', { name: 'Continue Counting' }).click()
   await expect(page.locator('#counter-treatment-name')).toHaveText('ABCD-01')
-  await expect(page.locator('#count-2')).toHaveText('1')
+  await expect(page.locator('#count-2')).toHaveText('2')
   await page.getByRole('button', { name: /Undo last/ }).click()
-  await expect(page.locator('#count-2')).toHaveText('0')
+  await expect(page.locator('#count-2')).toHaveText('1')
 })
 
 test('reveals generated mappings before continuing a partial legacy experiment', async ({ page }) => {
@@ -71,9 +76,7 @@ test('reveals generated mappings before continuing a partial legacy experiment',
       gels: [{ treatment: 'Control', gelNumber: 1, class0: 1, class1: 0, class2: 0, class3: 0, class4: 0, total: 1, status: 'counted', completion: 'complete' }]
     }]
   }
-  await page.goto('/')
-  await page.evaluate(experiment => localStorage.setItem('cometquant-experiments', JSON.stringify([experiment])), legacy)
-  await page.reload()
+  await seedLegacyData(page, [legacy])
   await page.getByRole('button', { name: 'Resume Experiment' }).click()
   await page.getByRole('button', { name: 'Open' }).click()
   await page.getByRole('button', { name: 'Analyze Slides' }).click()
@@ -91,10 +94,10 @@ test('keeps the previous state when storage commits fail and allows retry', asyn
     nucleoidsPerGel: 1, slidesPerTreatment: 1, concUnit: 'µM', treatments: ['PBS'], progress: null,
     replicates: [{ replicateNumber: 1, date: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', gels: [], assignments: [{ blindCode: 'ABCD-01', treatmentIndex: 0, gelNumber: 1, status: 'pending' }] }]
   }
-  await page.goto('/')
-  await page.evaluate(experiment => localStorage.setItem('cometquant-experiments', JSON.stringify([null, experiment, { schemaVersion: 999, id: 'future-version' }])), data)
-  await page.reload()
+  page.once('dialog', dialog => dialog.accept())
+  await seedLegacyData(page, [null, data, { schemaVersion: 999, id: 'future-version' }])
   await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await expect(page.getByRole('button', { name: 'Export Storage Recovery' })).toBeVisible()
   await page.getByRole('button', { name: 'Open' }).click()
   await page.getByRole('button', { name: 'Analyze Slides' }).click()
   await page.locator('#input-blind-code').fill('ABCD-01')
@@ -102,12 +105,10 @@ test('keeps the previous state when storage commits fail and allows retry', asyn
 
   await page.evaluate(() => {
     window.__failStorageWrites = true
-    window.__originalStorageSetItem = Storage.prototype.setItem
-    Storage.prototype.setItem = function (key, value) {
-      if (window.__failStorageWrites && key === 'cometquant-experiments') {
-        throw new DOMException('Quota exceeded', 'QuotaExceededError')
-      }
-      return window.__originalStorageSetItem.call(this, key, value)
+    window.__originalRepositoryPut = CometQuantRepository.put
+    CometQuantRepository.put = function (...args) {
+      if (window.__failStorageWrites) return Promise.reject(new DOMException('Quota exceeded', 'QuotaExceededError'))
+      return window.__originalRepositoryPut(...args)
     }
   })
 
@@ -145,8 +146,17 @@ test('keeps the previous state when storage commits fail and allows retry', asyn
   await expect(page.locator('#screen-blind-codes')).toHaveClass(/active/)
   stored = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments')).find(item => item?.id === 'transaction-test'))
   expect(stored.replicates).toHaveLength(2)
-  const futureVersion = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments')).find(item => item?.id === 'future-version'))
-  expect(futureVersion).toEqual({ schemaVersion: 999, id: 'future-version' })
-  const preservedNull = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments')).some(item => item === null))
-  expect(preservedNull).toBe(true)
+  const quarantined = await page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('cometquant', 1)
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const getAll = request.result.transaction('quarantine', 'readonly').objectStore('quarantine').getAll()
+      getAll.onerror = () => reject(getAll.error)
+      getAll.onsuccess = () => resolve(getAll.result)
+    }
+  }))
+  expect(quarantined).toEqual(expect.arrayContaining([
+    expect.objectContaining({ reason: expect.stringContaining('invalid') }),
+    expect.objectContaining({ reason: 'future-schema-version' })
+  ]))
 })

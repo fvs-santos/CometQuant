@@ -7,7 +7,7 @@ module.exports = defineConfig({
     environment: 'jsdom',
     coverage: {
       provider: 'v8',
-      include: ['js/core.js', 'js/backup.js', 'js/export.js'],
+      include: ['js/core.js', 'js/repository.js', 'js/backup.js', 'js/export.js'],
       thresholds: { statements: 80, branches: 50, functions: 80, lines: 80 }
     }
   }

@@ -11,11 +11,29 @@ let currentGelIndex = 0
 let currentReplicateNumber = null
 let clickHistory = []
 let currentCounts = emptyCounts()
+let currentExperimentRevision = 0
+let countMutationQueue = Promise.resolve()
+let countingClosing = false
+let recoveryAvailable = false
+let creatingExperiment = false
+let blindCodeCommitPending = false
+let replicateCommitPending = false
 const revealedLegacyMappings = new Set()
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   applyLanguage()
   updateLanguageButtons()
+  try {
+    const storage = await CometQuantRepository.init({ storageKey: STORAGE_KEY })
+    CometQuantRepository.subscribe(handleRepositoryEvent)
+    recoveryAvailable = storage.quarantined > 0
+    document.getElementById('btn-export-recovery').hidden = !recoveryAvailable
+    if (recoveryAvailable) alert(t('storage.quarantine').replace('{count}', String(storage.quarantined)))
+  } catch (error) {
+    console.error('Storage initialization error:', error)
+    alert(t('storage.unavailable'))
+    return
+  }
   initNavigation()
   initSetup()
   initCounter()
@@ -39,12 +57,15 @@ function updateLanguageButtons() {
 
 const originalSetLanguage = setLanguage
 window.setLanguage = function (lang) {
+  const previousLanguage = currentLanguage
   originalSetLanguage(lang)
+  if (previousLanguage !== currentLanguage) invalidateAnalysisResults()
   updateLanguageButtons()
   if (document.getElementById('screen-experiments').classList.contains('active')) renderExperimentsList()
   if (document.getElementById('screen-replicates').classList.contains('active')) renderReplicatesScreen()
   if (document.getElementById('screen-code-entry').classList.contains('active')) renderCodeEntry()
   if (document.getElementById('screen-summary').classList.contains('active')) renderSummaryTable()
+  if (document.getElementById('screen-analysis').classList.contains('active')) renderAnalysisState()
 }
 
 function initNavigation() {
@@ -60,8 +81,14 @@ function initNavigation() {
     renderReplicatesScreen()
     showScreen('screen-replicates')
   })
-  document.getElementById('btn-back-counter').addEventListener('click', () => {
-    if (!persistProgress()) return
+  document.getElementById('btn-back-counter').addEventListener('click', async () => {
+    if (countingClosing) return
+    countingClosing = true
+    await countMutationQueue
+    if (!await persistProgress()) {
+      countingClosing = false
+      return
+    }
     renderReplicatesScreen()
     showScreen('screen-replicates')
   })
@@ -70,7 +97,10 @@ function initNavigation() {
     showScreen('screen-replicates')
   })
   document.getElementById('btn-back-analysis').addEventListener('click', () => showScreen('screen-summary'))
-  document.getElementById('btn-go-to-analysis').addEventListener('click', () => showScreen('screen-analysis'))
+  document.getElementById('btn-go-to-analysis').addEventListener('click', () => {
+    showScreen('screen-analysis')
+    enterAnalysisScreen()
+  })
 }
 
 function initSetup() {
@@ -105,7 +135,8 @@ function generateConcentrationInputs() {
   }
 }
 
-function handleCreateExperiment() {
+async function handleCreateExperiment() {
+  if (creatingExperiment) return
   const researcher = valueOf('input-researcher')
   const agent = valueOf('input-agent')
   const cells = valueOf('input-cells')
@@ -158,7 +189,10 @@ function handleCreateExperiment() {
   }
 
   experiment.replicates.push(createBlindReplicate(1, experiment))
-  if (!saveExperiment(experiment)) return
+  creatingExperiment = true
+  const saved = await saveExperiment(experiment)
+  creatingExperiment = false
+  if (!saved) return
   showBlindCodes(currentExperiment.replicates[0])
 }
 
@@ -242,6 +276,7 @@ function initExperimentScreens() {
     showScreen('screen-replicates')
   })
   document.getElementById('btn-import-experiment').addEventListener('click', () => document.getElementById('input-load-files').click())
+  document.getElementById('btn-export-recovery').addEventListener('click', exportStorageRecovery)
   document.getElementById('input-load-files').addEventListener('change', handleLoadFiles)
   document.getElementById('btn-generate-replicate').addEventListener('click', handleAddReplicate)
   document.getElementById('btn-open-summary').addEventListener('click', showSummary)
@@ -296,7 +331,9 @@ function renderExperimentsList() {
 
 function openExperiment(id) {
   invalidateAnalysisResults()
-  currentExperiment = getAllExperiments().find(item => item.id === id) || null
+  const record = CometQuantRepository.getRecord(id)
+  currentExperiment = record?.data || null
+  currentExperimentRevision = record?.revision || 0
   if (!currentExperiment) return showExperimentsScreen()
   if (currentExperiment.progress) {
     restoreProgress()
@@ -307,17 +344,18 @@ function openExperiment(id) {
   showScreen('screen-replicates')
 }
 
-function deleteExperiment(id) {
+async function deleteExperiment(id) {
   if (!confirm(t('experiments.deleteConfirm'))) return
-  const experiments = getStoredExperiments().filter(item => item?.id !== id)
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(experiments))
+    await CometQuantRepository.remove(id, CometQuantRepository.getRevision(id))
     if (currentExperiment && currentExperiment.id === id) {
       currentExperiment = null
+      currentExperimentRevision = 0
       invalidateAnalysisResults()
     }
     renderExperimentsList()
-  } catch {
+  } catch (error) {
+    if (error instanceof CometQuantRepository.ConflictError) return handleStorageConflict()
     alert(t('counter.saveFailed'))
   }
 }
@@ -410,7 +448,8 @@ function updateReasonDetails() {
   document.getElementById('incomplete-detail-group').hidden = !incompleteOther
 }
 
-function handleBlindCode() {
+async function handleBlindCode() {
+  if (blindCodeCommitPending) return
   const replicate = findReplicate(currentReplicateNumber)
   if (!replicate) return
   const code = valueOf('input-blind-code').toUpperCase().replace(/\s/g, '')
@@ -431,7 +470,10 @@ function handleBlindCode() {
     candidateAssignment.absenceReason = { code: reasonCode, detail }
     candidateAssignment.recordedAt = new Date().toISOString()
     candidate.status = hasPendingSlides(candidate) ? 'in-progress' : 'completed'
-    if (!saveExperiment(candidate)) return
+    blindCodeCommitPending = true
+    const saved = await saveExperiment(candidate)
+    blindCodeCommitPending = false
+    if (!saved) return
     afterSlideProcessed(replicate.replicateNumber)
     return
   }
@@ -441,7 +483,10 @@ function handleBlindCode() {
   currentReplicateNumber = replicate.replicateNumber
   currentCounts = emptyCounts()
   clickHistory = []
-  if (!persistProgress(false)) return
+  blindCodeCommitPending = true
+  const saved = await persistProgress(false)
+  blindCodeCommitPending = false
+  if (!saved) return
   startCounting(true)
 }
 
@@ -456,11 +501,12 @@ function initCounter() {
   document.getElementById('input-incomplete-reason').addEventListener('change', updateReasonDetails)
 }
 
-function startCounting(restoring = false) {
+async function startCounting(restoring = false) {
+  countingClosing = false
   if (!restoring) {
     currentCounts = emptyCounts()
     clickHistory = []
-    if (!persistProgress()) return false
+    if (!await persistProgress()) return false
   }
   document.getElementById('screen-counter').classList.remove('complete')
   document.getElementById('input-incomplete-reason').value = ''
@@ -472,32 +518,43 @@ function startCounting(restoring = false) {
   return true
 }
 
+function enqueueCountMutation(operation) {
+  countMutationQueue = countMutationQueue.catch(() => {}).then(operation)
+  return countMutationQueue
+}
+
 function registerCount(cometClass) {
-  if (!currentExperiment || getTotalCount() >= currentExperiment.nucleoidsPerGel) return
-  currentCounts[cometClass]++
-  clickHistory.push(cometClass)
-  updateCounterDisplay()
-  if (!persistProgress()) {
-    clickHistory.pop()
-    currentCounts[cometClass]--
+  if (countingClosing) return
+  return enqueueCountMutation(async () => {
+    if (!currentExperiment || getTotalCount() >= currentExperiment.nucleoidsPerGel) return
+    currentCounts[cometClass]++
+    clickHistory.push(cometClass)
     updateCounterDisplay()
-    return
-  }
-  const card = document.getElementById(`card-class-${cometClass}`)
-  card.classList.add('pulse')
-  setTimeout(() => card.classList.remove('pulse'), 300)
+    if (!await persistProgress()) {
+      clickHistory.pop()
+      currentCounts[cometClass]--
+      if (currentExperiment) updateCounterDisplay()
+      return
+    }
+    const card = document.getElementById(`card-class-${cometClass}`)
+    card.classList.add('pulse')
+    setTimeout(() => card.classList.remove('pulse'), 300)
+  })
 }
 
 function undoLastCount() {
-  if (!clickHistory.length) return
-  const lastClass = clickHistory.pop()
-  if (currentCounts[lastClass] > 0) currentCounts[lastClass]--
-  updateCounterDisplay()
-  if (!persistProgress()) {
-    currentCounts[lastClass]++
-    clickHistory.push(lastClass)
+  if (countingClosing) return
+  return enqueueCountMutation(async () => {
+    if (!currentExperiment || !clickHistory.length) return
+    const lastClass = clickHistory.pop()
+    if (currentCounts[lastClass] > 0) currentCounts[lastClass]--
     updateCounterDisplay()
-  }
+    if (!await persistProgress()) {
+      currentCounts[lastClass]++
+      clickHistory.push(lastClass)
+      if (currentExperiment) updateCounterDisplay()
+    }
+  })
 }
 
 function getTotalCount() {
@@ -522,7 +579,14 @@ function updateCounterDisplay() {
   if (total >= target) document.getElementById('incomplete-reason-panel').hidden = true
 }
 
-function handleFinishGel() {
+async function handleFinishGel() {
+  if (countingClosing) return
+  countingClosing = true
+  await countMutationQueue
+  if (!currentExperiment) {
+    countingClosing = false
+    return
+  }
   const total = getTotalCount()
   const target = currentExperiment.nucleoidsPerGel
   if (total < target) {
@@ -530,13 +594,22 @@ function handleFinishGel() {
     document.getElementById('incomplete-warning').textContent = `${total} / ${target}: ${t('counter.incompleteWarning')}`
     const reasonCode = valueOf('input-incomplete-reason')
     const detail = valueOf('input-incomplete-detail')
-    if (!reasonCode) return alert(t('counter.incompleteWarning'))
-    if (reasonCode === 'other' && !detail) return alert(t('reason.detailRequired'))
+    if (!reasonCode) {
+      countingClosing = false
+      return alert(t('counter.incompleteWarning'))
+    }
+    if (reasonCode === 'other' && !detail) {
+      countingClosing = false
+      return alert(t('reason.detailRequired'))
+    }
   }
 
   const replicate = findReplicate(currentReplicateNumber)
   const assignment = findCurrentAssignment()
-  if (!replicate || !assignment) return
+  if (!replicate || !assignment) {
+    countingClosing = false
+    return
+  }
   const gelData = {
     blindCode: assignment.blindCode,
     treatment: currentExperiment.treatments[currentTreatmentIndex],
@@ -564,7 +637,10 @@ function handleFinishGel() {
   candidateReplicate.updatedAt = gelData.recordedAt
   candidate.progress = null
   candidate.status = hasPendingSlides(candidate) ? 'in-progress' : 'completed'
-  if (!saveExperiment(candidate)) return
+  if (!await saveExperiment(candidate)) {
+    countingClosing = false
+    return
+  }
   afterSlideProcessed(replicate.replicateNumber)
 }
 
@@ -582,7 +658,7 @@ function afterSlideProcessed(replicateNumber) {
   }
 }
 
-function persistProgress(showStatus = true) {
+async function persistProgress(showStatus = true) {
   if (!currentExperiment || currentReplicateNumber === null) return false
   const candidate = cloneExperiment(currentExperiment)
   const assignment = findCurrentAssignment(candidate)
@@ -615,7 +691,7 @@ function restoreProgress() {
   clickHistory = Array.isArray(progress.clickHistory) ? [...progress.clickHistory] : []
 }
 
-function saveExperiment(candidate, showStatus = false, notify = true) {
+async function saveExperiment(candidate, showStatus = false, notify = true) {
   if (!candidate) return false
   const pendingExperiment = cloneExperiment(candidate)
   pendingExperiment.updatedAt = new Date().toISOString()
@@ -626,17 +702,21 @@ function saveExperiment(candidate, showStatus = false, notify = true) {
     else if (notify) alert(t('alert.invalidData'))
     return false
   }
-  const experiments = getStoredExperiments()
-  const index = experiments.findIndex(item => item?.id === validation.experiment.id)
-  if (index >= 0) experiments[index] = validation.experiment
-  else experiments.push(validation.experiment)
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(experiments))
-    currentExperiment = validation.experiment
+    const expectedRevision = currentExperiment?.id === validation.experiment.id
+      ? currentExperimentRevision
+      : CometQuantRepository.getRevision(validation.experiment.id)
+    const record = await CometQuantRepository.put(validation.experiment, expectedRevision)
+    currentExperiment = record.data
+    currentExperimentRevision = record.revision
     invalidateAnalysisResults()
     if (showStatus) setSaveStatus(t('counter.saved'), false)
     return true
-  } catch {
+  } catch (error) {
+    if (error instanceof CometQuantRepository.ConflictError) {
+      handleStorageConflict()
+      return false
+    }
     if (showStatus) setSaveStatus(t('counter.saveFailed'), true)
     else if (notify) alert(t('counter.saveFailed'))
     return false
@@ -644,16 +724,11 @@ function saveExperiment(candidate, showStatus = false, notify = true) {
 }
 
 function getAllExperiments() {
-  return getStoredExperiments().map(normalizeExperiment).filter(Boolean)
+  return CometQuantRepository.list().map(normalizeExperiment).filter(Boolean)
 }
 
 function getStoredExperiments() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
+  return CometQuantRepository.list()
 }
 
 function normalizeExperiment(experiment) {
@@ -684,7 +759,8 @@ function initSummary() {
   initAnalysis()
 }
 
-function handleAddReplicate() {
+async function handleAddReplicate() {
+  if (replicateCommitPending) return
   if (!currentExperiment) return
   if (currentExperiment.progress) {
     restoreProgress()
@@ -699,7 +775,10 @@ function handleAddReplicate() {
   const candidate = cloneExperiment(currentExperiment)
   candidate.replicates.push(createBlindReplicate(nextNumber, candidate))
   candidate.status = 'in-progress'
-  if (!saveExperiment(candidate)) return
+  replicateCommitPending = true
+  const saved = await saveExperiment(candidate)
+  replicateCommitPending = false
+  if (!saved) return
   showBlindCodes(findReplicate(nextNumber))
 }
 
@@ -764,11 +843,11 @@ async function exportEncryptedBackup(experiment) {
   if (passphrase === null) return
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const latest = getAllExperiments().find(item => item.id === experiment.id)
+      const latest = await CometQuantRepository.readRecord(experiment.id)
       if (!latest) throw new Error('experiment-not-found')
-      const encrypted = await CometQuantBackup.encryptExperiment(latest, passphrase)
-      const current = getAllExperiments().find(item => item.id === experiment.id)
-      if (current && JSON.stringify(current) === JSON.stringify(latest)) {
+      const encrypted = await CometQuantBackup.encryptExperiment(latest.data, passphrase)
+      const current = await CometQuantRepository.readRecord(experiment.id)
+      if (current && current.revision === latest.revision) {
         downloadJson(encrypted, `CometQuant_blinded_${new Date().toISOString().split('T')[0]}.cqbackup.json`)
         return
       }
@@ -788,6 +867,17 @@ function downloadJson(data, filename) {
   anchor.download = filename
   anchor.click()
   setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+async function exportStorageRecovery() {
+  if (!recoveryAvailable) return
+  try {
+    const recovery = await CometQuantRepository.getRecoveryData()
+    downloadJson(recovery, `CometQuant_storage_recovery_${new Date().toISOString().split('T')[0]}.json`)
+  } catch (error) {
+    console.error('Storage recovery export error:', error)
+    alert(t('storage.recoveryFailed'))
+  }
 }
 
 function requestBackupPassphrase(requireConfirmation) {
@@ -870,7 +960,7 @@ async function handleLoadFiles(event) {
     const imported = []
     for (const file of files) imported.push(await readJsonFile(file))
     const experiments = imported.length > 1 ? [consolidateExperiments(imported)] : imported
-    for (const raw of experiments) saveImportedExperiment(raw)
+    for (const raw of experiments) await saveImportedExperiment(raw)
     showExperimentsScreen()
   } catch (error) {
     if (error.message === 'backup-cancelled') return
@@ -882,14 +972,14 @@ async function handleLoadFiles(event) {
   }
 }
 
-function saveImportedExperiment(raw) {
+async function saveImportedExperiment(raw) {
   const validation = CometQuantCore.validateExperiment(raw, { source: 'import' })
   if (!validation.valid) throw new Error(`Invalid experiment: ${validation.errors.join(',')}`)
   const experiment = validation.experiment
   const existingIds = new Set(getStoredExperiments().map(item => item?.id).filter(id => typeof id === 'string'))
   if (existingIds.has(experiment.id)) experiment.id = createId()
   experiment.updatedAt = new Date().toISOString()
-  if (!saveExperiment(experiment, false, false)) throw new Error('Could not persist imported experiment')
+  if (!await saveExperiment(experiment, false, false)) throw new Error('Could not persist imported experiment')
 }
 
 function consolidateExperiments(experiments) {
@@ -923,6 +1013,26 @@ function readJsonFile(file) {
     reader.onerror = reject
     reader.readAsText(file)
   })
+}
+
+function handleRepositoryEvent(event) {
+  if (event.type === 'versionchange') {
+    alert(t('storage.reloadRequired'))
+    return
+  }
+  if (currentExperiment?.id === event.id) {
+    handleStorageConflict()
+    return
+  }
+  if (document.getElementById('screen-experiments').classList.contains('active')) renderExperimentsList()
+}
+
+function handleStorageConflict() {
+  currentExperiment = null
+  currentExperimentRevision = 0
+  invalidateAnalysisResults()
+  alert(t('storage.conflict'))
+  showExperimentsScreen()
 }
 
 function findReplicate(number, experiment = currentExperiment) {

@@ -26,8 +26,11 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 
 - `js/core.js`: regras de dominio, schema, migracao, validacao, score, agregacao de laminas tecnicas e consolidacao de experimentos. Tambem oferece compatibilidade CommonJS para os testes em Node.
 - `js/app.js`: navegacao, estado da interface, setup, geracao dos codigos cegos, contagem, undo, autosave, resumo, importacao e exportacao JSON.
+- `js/repository.js`: IndexedDB autoritativo, migracao do `localStorage`, quarentena, revisoes, tombstones, mirror de transicao e notificacao entre abas.
 - `js/export.js`: serializacao canonica de CSV e relatorio, escape HTML, neutralizacao de formulas de planilha, validacao de PNG e nomes de arquivo seguros.
-- `js/analysis.js`: inicializacao do Pyodide, codigo Python das analises, apresentacao dos resultados, graficos e exportacao do pacote final.
+- `js/analysis.js`: estados da interface cientifica, comunicacao com o worker, apresentacao dos resultados, graficos e exportacao do pacote final.
+- `js/analysis-worker.js`: inicializacao isolada do Pyodide e execucao do motor estatistico fora da thread principal.
+- `js/science-package.js`: instalacao opcional, verificacao SHA-256 e gerenciamento do cache cientifico.
 - `js/i18n.js`: traducoes em portugues e ingles e persistencia do idioma escolhido.
 - `css/style.css`: interface mobile-first e tema escuro pensado para uso proximo ao microscopio.
 - `service-worker.js`: cache do shell da PWA.
@@ -36,9 +39,9 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 ### Dependencias e runtime
 
 - HTML5, CSS3 e JavaScript sem framework.
-- APIs de DOM, `localStorage`, FileReader, Blob, Web Crypto, Cache API e Service Worker.
-- Pyodide 0.26.2 por CDN.
-- NumPy, SciPy e Matplotlib carregados pelo Pyodide.
+- APIs de DOM, IndexedDB, `localStorage`, BroadcastChannel, Web Locks, FileReader, Blob, Web Crypto, Cache API, Web Worker e Service Worker.
+- Pyodide 0.26.2 baixado sob demanda de URLs pinadas e executado do cache local apos verificacao.
+- NumPy 1.26.4, SciPy 1.12.0 e Matplotlib 3.5.2 carregados pelo Pyodide.
 - JSZip 3.10.1 vendorizado em `vendor/jszip.min.js`.
 - Vitest 3.2.4 com jsdom para testes unitarios e de integracao.
 - Playwright 1.54.2 para o fluxo E2E em emulacao de Pixel 7.
@@ -139,15 +142,15 @@ O JSZip e copiado para `vendor/` durante `npm install`, permitindo a geracao do 
 
 ## Persistencia local
 
-Os experimentos sao armazenados em `localStorage` na chave `cometquant-experiments`. O idioma usa `cometquant-language`.
+Os experimentos sao armazenados como documentos atomicos no IndexedDB. A chave legada `cometquant-experiments` e migrada na primeira abertura e mantida temporariamente como espelho de compatibilidade. O idioma usa `cometquant-language`.
 
-O autosave atual privilegia resiliencia imediata: todo clique e todo undo atualizam e persistem o experimento. Entretanto, a implementacao valida e serializa novamente o conjunto completo de experimentos em cada gravacao. Essa escolha e simples, mas pode causar latencia e atingir a quota do navegador em bases maiores.
+O autosave privilegia resiliencia imediata: todo clique e todo undo entram em uma fila e persistem um documento validado. Revisoes monotonicas e compare-and-swap impedem sobrescritas silenciosas entre abas.
 
 ## PWA e operacao offline
 
-O shell local e armazenado pelo service worker, cujo cache atual e `cometquant-v4`. A interface de contagem pode funcionar offline depois de instalada e carregada, desde que os recursos locais estejam no cache.
+O shell local e armazenado pelo service worker em um cache separado do runtime cientifico. A interface de contagem funciona offline depois de instalada e carregada.
 
-A analise estatistica nao e garantida offline: Pyodide e seus pacotes vem de CDN e nao fazem parte do precache local. O service worker tambem usa uma estrategia cache-first que exige a atualizacao manual do nome do cache quando arquivos locais mudam.
+A analise estatistica usa um pacote opcional pinado e verificado por SHA-256. Depois da preparacao explicita, Pyodide, NumPy, SciPy e Matplotlib executam em Web Worker apos reload totalmente offline.
 
 ## Trabalho realizado na sessao mais recente
 
@@ -209,71 +212,37 @@ Existe um resultado local do Playwright indicando uma execucao sem falhas, mas e
 
 ## Armadilhas e riscos conhecidos
 
-### Resultados de analise podem ficar obsoletos
-
-`analysisResults` e uma variavel global e nao esta vinculada de forma robusta ao ID e ao `updatedAt` do experimento. Abrir outro experimento ou modificar os dados depois de analisar pode manter resultados e graficos anteriores em memoria. Isso pode produzir uma exportacao combinando o experimento atual com uma analise antiga.
-
-Antes de ampliar exportacoes, vincular resultados ao experimento e invalidar a analise sempre que os dados relevantes mudarem.
-
 ### O blinding nao e criptografico
 
-Apesar do nome do commit mencionar tratamento seguro de dados, o mapeamento entre codigos e tratamentos e armazenado em texto claro no `localStorage`. O bloqueio existe somente na interface. DevTools, acesso ao perfil do navegador ou uma copia do storage revelam o mapa.
+O mapeamento entre codigos e tratamentos e armazenado em texto claro no IndexedDB. O bloqueio existe somente na interface. DevTools, acesso ao perfil do navegador ou uma copia do perfil revelam o mapa.
 
 O modelo atual deve ser descrito como **blinding operacional contra revelacao acidental**, nao como protecao contra um usuario adversarial. Nao ha autenticacao, criptografia, assinatura, controle de acesso ou separacao tecnica entre codificador e avaliador.
 
-### Nao ha backup durante o blinding
+### Concorrencia nao faz merge automatico
 
-A exportacao JSON e bloqueada enquanto existem assignments pendentes. Como o `localStorage` e a unica persistencia, um experimento longo em andamento nao possui um fluxo oficial de backup ou transferencia que preserve o cegamento. Resolver essa tensao e prioritario antes de uso critico.
+Revisoes monotonicas, compare-and-swap e `BroadcastChannel` impedem last-write-wins silencioso. Se duas abas alterarem o mesmo experimento, a aba desatualizada interrompe a edicao e exige recarga. Nao existe merge automatico de contagens concorrentes.
 
-### Analise estatistica sem testes automatizados
+### IndexedDB e Cache Storage nao sao backup
 
-O Python executado por Pyodide nao possui fixtures de referencia automatizadas. Casos de variancia zero, grupos constantes, grupos insuficientes, apenas uma concentracao, correlacao perfeita e retornos `NaN` ou `Infinity` precisam de tratamento explicito.
+Os dois compartilham a quota da origem e podem ser removidos sob pressao de armazenamento ou por acao do usuario. O mirror em `localStorage` existe apenas para a transicao e nao e fonte autoritativa. O backup criptografado continua necessario para recuperacao e transferencia.
 
-`json.dumps` pode emitir `NaN`, que nao e JSON valido para `JSON.parse` no JavaScript. Uma analise degenerada pode, portanto, falhar na fronteira Python/JavaScript.
+### Pacote cientifico depende de instalacao inicial
 
-### Unidade experimental inconsistente no grafico de classes
+O shell e a contagem nao carregam Pyodide. Para analisar, o usuario precisa preparar uma vez o pacote pinado: cerca de 35,7 MB transferidos e 104,4 MB armazenados. Os artefatos vem inicialmente do jsDelivr, mas cada corpo e validado por tamanho e SHA-256 antes de ser ativado. Alterar Pyodide ou pacotes exige nova revisao do manifesto `science-assets.json`, novas URLs virtuais e repeticao da validacao cientifica.
 
-A inferencia agrega laminas tecnicas por repeticao, mas o grafico de classes agrega diretamente todas as laminas completas. Isso pode dar maior peso a repeticoes com mais laminas validas e mostrar variabilidade entre laminas tecnicas, em vez de variabilidade entre repeticoes. A unidade e o significado do desvio-padrao devem ser definidos cientificamente antes de alterar o grafico.
+### Compatibilidade inicial restrita ao Chromium
 
-### Nova repeticao pode ser criada cedo demais
+A automacao usa Chromium com emulacao Pixel 7. Safari/iOS ainda nao foi validado para quota, Cache Storage, Web Locks, service worker ou memoria do runtime cientifico.
 
-O fluxo de adicionar repeticao nao impede de forma clara a criacao enquanto a repeticao anterior ainda possui assignments pendentes. Isso pode gerar varias repeticoes abertas e manter todas as funcoes reveladoras bloqueadas.
+### Uso cientifico critico exige revisao externa
 
-### Consolidacao pode perder progresso parcial
+As referencias automatizadas com SciPy, R e Pyodide reduzem risco de regressao, mas nao substituem validacao regulatoria, revisao independente do protocolo estatistico ou politica formal de deploy.
 
-O merge zera `result.progress`, embora assignments possam permanecer com status `counting`. Contagens parciais existentes apenas no objeto de progresso podem ser descartadas ao consolidar arquivos. Nao alterar essa area sem definir uma politica explicita para progresso concorrente.
+### Assets das classes aguardam otimizacao
 
-### Invariantes do schema ainda sao incompletas
+O usuario criou `icons/class_0.png` a `icons/class_4.png`, com mapeamento direto para as cinco classes. Os originais sao PNG RGB de 1254 x 1254, sem transparencia, com moldura e fundo incorporados e total aproximado de 2,66 MiB. `class_3.png` possui escala visual maior que as demais.
 
-A validacao nao garante integralmente:
-
-- exatamente `tratamentos x laminas` assignments por repeticao;
-- unicidade de `(treatmentIndex, gelNumber)`;
-- uma lamina correspondente para toda assignment `counted`;
-- ausencia de laminas duplicadas;
-- correspondencia bidirecional completa entre assignment e lamina.
-
-Um JSON estruturalmente parcial pode parecer concluido se nao contiver assignments `pending` ou `counting`.
-
-### Dados locais nao sao sempre validados integralmente
-
-A leitura do `localStorage` realiza migracao, mas nao necessariamente a validacao completa antes de listar os experimentos. Dados corrompidos podem ser exibidos e falhar apenas durante gravacao ou processamento posterior.
-
-### Autosave pode nao escalar
-
-Cada clique valida o experimento, recupera os demais, serializa o conjunto completo e grava sincronicamente no `localStorage`. Monitorar responsividade e quota antes de aumentar o volume suportado. IndexedDB ou persistencia por experimento podem ser necessarios.
-
-### PWA pode servir versoes antigas
-
-A estrategia cache-first pode manter arquivos anteriores se `CACHE_NAME` nao mudar. Nao ha fluxo sofisticado de atualizacao com `skipWaiting()` e `clients.claim()`. Toda release que altere recursos precacheados deve revisar o service worker.
-
-### Dependencia externa da analise
-
-Pyodide e carregado por CDN sem SRI e nao existe Content Security Policy. Isso afeta reproducibilidade, disponibilidade offline e o modelo de seguranca para dados de pesquisa potencialmente sensiveis.
-
-### Documentacao e assets
-
-A versao da interface foi sincronizada com `package.json`, o README foi expandido e a nota obsoleta foi removida. Os botoes das classes ainda usam SVGs esquematicos provisorios e precisam de imagens cientificamente adequadas.
+A decisao para a proxima continuidade e **otimizar antes de usar**: reexportar em 512 x 512, com transparencia, margens e enquadramento uniformes; depois substituir apenas os SVGs inline, manter IDs e `data-class`, adicionar os assets ao precache e incrementar o cache do shell. `teste_icones.png` e `teste_icones_azul.png` sao apenas montagens de comparacao e nao devem integrar o produto.
 
 ## Proximos passos recomendados
 
@@ -295,12 +264,24 @@ Concluido na continuidade de 14/08/2026:
 - README expandido e versao da interface sincronizada em `1.1.0`;
 - backup cego criptografado implementado com PBKDF2-SHA-256 e AES-256-GCM, incluindo restauracao testada no navegador.
 
+Concluido na continuidade posterior de 14/08/2026:
+
+- IndexedDB passou a ser a camada autoritativa, com migracao copy-first do `localStorage`, quarentena e exportacao de recuperacao;
+- revisoes monotonicas e compare-and-swap impedem sobrescrita silenciosa entre abas;
+- autosave permanece por clique e cada operacao aguarda o commit antes de avancar a interface;
+- Pyodide deixou de ser carregado na abertura da PWA e passou a executar em Web Worker;
+- o pacote cientifico opcional e pinado por versao e SHA-256, com 35,7 MB transferidos e cerca de 104,4 MB armazenados;
+- apos a preparacao explicita, a analise estatistica funciona depois de reload totalmente offline;
+- caches de shell e ciencia foram separados e atualizacoes do shell preservam o runtime cientifico;
+- toques rapidos sao enfileirados, migracoes iniciais entre abas sao serializadas e exclusoes mantem tombstones revisionados;
+- Playwright cobre migracao, falha de commit, conflito entre abas e analise offline real;
+- a verificacao final passou com 37 testes JavaScript, 94,49% de cobertura global, 12 testes Python, 28 metricas comparadas com R e 7 cenarios Playwright.
+
 Ordem sugerida para a proxima continuidade:
 
-1. Avaliar IndexedDB ou persistencia granular para reduzir custo de autosave e risco de quota.
-2. Definir se a analise precisa funcionar totalmente offline; se sim, hospedar Pyodide e pacotes localmente.
-3. Substituir os SVGs provisorios por imagens cientificamente adequadas e testar acessibilidade/touch.
-4. Definir politica de deploy, matriz formal de navegadores e revisao externa do protocolo cientifico.
+1. Otimizar `icons/class_0.png` a `icons/class_4.png`, substituir os SVGs e testar acessibilidade, touch, 320 px, Pixel 7 e reload offline.
+2. Definir politica de deploy e revisao externa do protocolo cientifico.
+3. Avaliar Safari/iOS em uma fase especifica de compatibilidade e quota.
 
 ## Arquivos de referencia
 
@@ -309,22 +290,30 @@ Ordem sugerida para a proxima continuidade:
 - `index.html`
 - `js/core.js`
 - `js/app.js`
+- `js/repository.js`
 - `js/backup.js`
 - `js/analysis.js`
+- `js/analysis-worker.js`
+- `js/science-package.js`
+- `science-assets.json`
 - `python/cometquant_analysis.py`
 - `js/export.js`
 - `js/i18n.js`
 - `css/style.css`
+- `icons/class_0.png` a `icons/class_4.png` (fontes para a proxima otimizacao; ainda nao referenciadas pela interface)
 - `service-worker.js`
 - `manifest.json`
 - `vitest.config.js`
 - `playwright.config.js`
 - `tests/unit/core.test.js`
 - `tests/unit/export.test.js`
+- `tests/unit/repository.test.js`
+- `tests/unit/science-package.test.js`
 - `tests/integration/persistence.test.js`
 - `tests/e2e/experiment-flow.spec.js`
 - `tests/e2e/analysis-flow.spec.js`
 - `tests/e2e/backup-flow.spec.js`
+- `tests/e2e/storage-concurrency.spec.js`
 - `tests/python/test_cometquant_analysis.py`
 - `tests/reference/v1/`
 - `.github/workflows/ci.yml`
@@ -332,7 +321,7 @@ Ordem sugerida para a proxima continuidade:
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- Referencia principal: commit `48ef84e` de 14/08/2026; as alteracoes posteriores de merge, CI e documentacao ainda nao foram commitadas.
+- A continuidade atual implementa IndexedDB, pacote cientifico offline opcional, Web Worker, concorrencia entre abas e os testes correspondentes; consultar `git log` para o commit publicado ao fim da sessao.
 - A implementacao possui validacao estatistica automatizada independente, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada, mas ainda nao ha politica de deploy, matriz formal de navegadores ou protocolo cientifico revisado externamente.
-- O backup exportado e criptografado, mas o `localStorage` permanece em texto claro; os principais riscos remanescentes sao dependencia da CDN para Pyodide e persistencia integral no `localStorage`.
+- O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

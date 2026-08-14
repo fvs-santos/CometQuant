@@ -35,10 +35,10 @@ describe('browser-facing contracts', () => {
 
   it('only advances terminal operations after a successful storage commit', () => {
     const app = fs.readFileSync(path.resolve(__dirname, '../../js/app.js'), 'utf8')
-    expect(app).toMatch(/function handleBlindCode[\s\S]*?if \(!saveExperiment\(candidate\)\) return[\s\S]*?afterSlideProcessed/)
-    expect(app).toMatch(/function handleFinishGel[\s\S]*?if \(!saveExperiment\(candidate\)\) return[\s\S]*?afterSlideProcessed/)
-    expect(app).toMatch(/function handleAddReplicate[\s\S]*?if \(!saveExperiment\(candidate\)\) return[\s\S]*?showBlindCodes/)
-    expect(app).toMatch(/function saveImportedExperiment[\s\S]*?if \(!saveExperiment\(experiment, false, false\)\) throw/)
+    expect(app).toMatch(/async function handleBlindCode[\s\S]*?await saveExperiment\(candidate\)[\s\S]*?afterSlideProcessed/)
+    expect(app).toMatch(/async function handleFinishGel[\s\S]*?await saveExperiment\(candidate\)[\s\S]*?afterSlideProcessed/)
+    expect(app).toMatch(/async function handleAddReplicate[\s\S]*?await saveExperiment\(candidate\)[\s\S]*?showBlindCodes/)
+    expect(app).toMatch(/async function saveImportedExperiment[\s\S]*?if \(!await saveExperiment\(experiment, false, false\)\) throw/)
     expect(app).toMatch(/function saveImportedExperiment[\s\S]*?getStoredExperiments\(\)/)
   })
 })

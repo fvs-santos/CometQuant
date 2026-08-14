@@ -827,7 +827,7 @@ button:disabled {
   gap: var(--space-md);
   padding: var(--space-xl) var(--space-md);
   text-align: center;
-  flex: 1;
+  min-height: 220px;
 }
 
 .pyodide-status-icon {
@@ -854,6 +854,14 @@ button:disabled {
 /* Estado: pronto */
 .pyodide-status.ready .pyodide-status-icon::after {
   content: '✓';
+}
+
+#analysis-error:empty {
+  display: none;
+}
+
+#btn-cancel-analysis {
+  margin-top: var(--space-sm);
 }
 
 /* Seções de resultado */

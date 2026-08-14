@@ -1,0 +1,31 @@
+{
+  "version": "pyodide-0.26.2-r1",
+  "pyodideVersion": "0.26.2",
+  "cacheName": "cometquant-science-pyodide-0.26.2-r1",
+  "indexPath": "./__science__/pyodide/0.26.2-r1/",
+  "packages": ["numpy", "scipy", "matplotlib"],
+  "expectedVersions": {"pyodide":"0.26.2","numpy":"1.26.4","scipy":"1.12.0","matplotlib":"3.5.2"},
+  "downloadBytes": 35683806,
+  "totalBytes": 104399681,
+  "assets": [
+    {"path":"pyodide.js","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js","bytes":14767,"sha256":"037907919d58ac79dbee2eee57e96507b79fad58260ab847dc6200443915c20f"},
+    {"path":"pyodide.asm.js","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.asm.js","bytes":1229628,"sha256":"704e56d209d8b867c8dd42e754a246db0175e448d59a46530803bdddfdfc78e0"},
+    {"path":"pyodide.asm.wasm","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.asm.wasm","bytes":10087885,"sha256":"8f631d8453672664131b2d4c9c41f3adf5d32e9efda2cb421d3fdf38cab57a21"},
+    {"path":"python_stdlib.zip","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/python_stdlib.zip","bytes":2341761,"sha256":"0dd443755a0244ae3052f2e0834413d68c43f362c651edd47b785ea9d26e4853"},
+    {"path":"pyodide-lock.json","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide-lock.json","bytes":105980,"sha256":"0cb7ca8faf9c35af92b4d261996ddd51dd9a6c1074ee59279f1570d67af29644"},
+    {"path":"cycler-0.12.1-py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/cycler-0.12.1-py3-none-any.whl","bytes":23552,"sha256":"8f792dd570cd61065b1b0c2d159a1db0b22decbf1f0d5e76c279dadf1b1968cc"},
+    {"path":"fonttools-4.51.0-py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/fonttools-4.51.0-py3-none-any.whl","bytes":4266602,"sha256":"b7d28f625ce7b8d90a4fce3d6af6fc6d86efd86d0c6591667f5687b7c98e9340"},
+    {"path":"kiwisolver-1.4.5-cp312-cp312-pyodide_2024_0_wasm32.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/kiwisolver-1.4.5-cp312-cp312-pyodide_2024_0_wasm32.whl","bytes":133465,"sha256":"ece362ebe2e2805091d82f4bdae35789bd014b1c6ca83022a3ca8304551a17cc"},
+    {"path":"matplotlib-3.5.2-cp312-cp312-pyodide_2024_0_wasm32.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/matplotlib-3.5.2-cp312-cp312-pyodide_2024_0_wasm32.whl","bytes":15742868,"sha256":"30c97e6d60be94e12d2a2f180605378167ec6301405bb25506cfddc4f5f6a65f"},
+    {"path":"matplotlib_pyodide-0.2.2-py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/matplotlib_pyodide-0.2.2-py3-none-any.whl","bytes":77772,"sha256":"204a3a683cab15c30e9d4b56b18ea0d6a09c35787ce7dcec249a21c7a6be7193"},
+    {"path":"numpy-1.26.4-cp312-cp312-pyodide_2024_0_wasm32.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/numpy-1.26.4-cp312-cp312-pyodide_2024_0_wasm32.whl","bytes":11959233,"sha256":"c10c9f822e30a4d266da8af4538c528517886756ef4bda847777eda7a104142b"},
+    {"path":"openblas-0.3.26.zip","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/openblas-0.3.26.zip","bytes":6117592,"sha256":"84b0cfb85c82a12c3c613624d55a85af0fb70bf61db156900d44997e39cf861d"},
+    {"path":"packaging-23.2-py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/packaging-23.2-py3-none-any.whl","bytes":194235,"sha256":"86884228b6bdea119d430dc08ab208aa19c3682da6edfafb397ca3eb20089cbd"},
+    {"path":"pillow-10.2.0-cp312-cp312-pyodide_2024_0_wasm32.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pillow-10.2.0-cp312-cp312-pyodide_2024_0_wasm32.whl","bytes":3042026,"sha256":"1fe8eba67033fde889723bdb9135f417ea3d9cc9030cbb61ec6d32abb0638bd1"},
+    {"path":"pyparsing-3.1.2-py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyparsing-3.1.2-py3-none-any.whl","bytes":394748,"sha256":"78648036d980e15a34bb9b433e6f9ed17b2763530e98ae151bf69a6312c8b1fe"},
+    {"path":"python_dateutil-2.9.0.post0-py2.py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/python_dateutil-2.9.0.post0-py2.py3-none-any.whl","bytes":444927,"sha256":"72124fefc19129b4700363d4cf7a6b19ec8607d6c1871cb897c5902ffe8a75e6"},
+    {"path":"pytz-2024.1-py2.py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pytz-2024.1-py2.py3-none-any.whl","bytes":1083571,"sha256":"61fad9ab18df0cdc918f896176f04bddcf6af3e69b0a3ee079d1c8c2296c2eb9"},
+    {"path":"scipy-1.12.0-cp312-cp312-pyodide_2024_0_wasm32.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/scipy-1.12.0-cp312-cp312-pyodide_2024_0_wasm32.whl","bytes":47100332,"sha256":"fd43c9ebcb0001bde4c8c0a3a2b3bb1aa6ed40ba32a98cbbb07cecfaa7b0bab0"},
+    {"path":"six-1.16.0-py2.py3-none-any.whl","source":"https://cdn.jsdelivr.net/pyodide/v0.26.2/full/six-1.16.0-py2.py3-none-any.whl","bytes":38737,"sha256":"0a83210b1701d580d02ef41faed649acadd852beb3444b267454136596ef00e7"}
+  ]
+}

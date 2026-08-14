@@ -14,11 +14,12 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "check": "node --check js/core.js && node --check js/backup.js && node --check js/export.js && node --check js/app.js && node --check js/analysis.js && node --check js/i18n.js"
+    "check": "node --check js/core.js && node --check js/repository.js && node --check js/backup.js && node --check js/export.js && node --check js/science-package.js && node --check js/analysis-worker.js && node --check js/app.js && node --check js/analysis.js && node --check js/i18n.js && node --check service-worker.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",
     "@vitest/coverage-v8": "^3.2.4",
+    "fake-indexeddb": "^6.2.5",
     "http-server": "^14.1.1",
     "jsdom": "^26.1.0",
     "jszip": "^3.10.1",

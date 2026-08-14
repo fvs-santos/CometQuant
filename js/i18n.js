@@ -138,6 +138,20 @@ const translations = {
     // Tela 5 — Análise
     'analysis.title': 'Análise Estatística',
     'analysis.loading': 'Carregando ambiente Python...',
+    'analysis.checking': 'Verificando o pacote científico...',
+    'analysis.packageMissing': 'Prepare o pacote científico para executar análises offline (35,7 MB).',
+    'analysis.install': 'Preparar Análise Offline (35,7 MB)',
+    'analysis.downloading': 'Baixando e verificando o pacote científico: {percent}%',
+    'analysis.initializing': 'Inicializando o ambiente científico...',
+    'analysis.loadingRuntime': 'Carregando o runtime Python...',
+    'analysis.loadingPackages': 'Carregando NumPy, SciPy e Matplotlib...',
+    'analysis.loadingEngine': 'Preparando o motor estatístico...',
+    'analysis.ready': 'Ambiente científico pronto para uso offline.',
+    'analysis.failed': 'Não foi possível preparar o ambiente científico.',
+    'analysis.error': 'Erro na análise',
+    'analysis.retry': 'Tentar Novamente',
+    'analysis.cancel': 'Cancelar',
+    'analysis.cancelled': 'Operação cancelada.',
     'analysis.run': 'Rodar Análise',
     'analysis.scoresTitle': 'Scores Visuais',
     'analysis.shapiroTitle': 'Teste de Normalidade Shapiro-Wilk',
@@ -177,6 +191,12 @@ const translations = {
     'alert.gelComplete': 'Lâmina completa! Verifique os dados e finalize.',
     'alert.noExperiments': 'Nenhum experimento salvo encontrado.',
     'alert.importSuccess': 'Experimento importado com sucesso!',
+    'storage.quarantine': '{count} entrada(s) antiga(s) inválida(s) foram preservadas para recuperação.',
+    'storage.unavailable': 'Não foi possível abrir o armazenamento seguro. Recarregue o aplicativo antes de continuar.',
+    'storage.conflict': 'Este experimento foi alterado em outra aba. A edição foi interrompida para evitar perda de dados.',
+    'storage.reloadRequired': 'O armazenamento foi atualizado. Recarregue o aplicativo para continuar.',
+    'storage.exportRecovery': 'Exportar Recuperação do Armazenamento',
+    'storage.recoveryFailed': 'Não foi possível exportar os dados preservados para recuperação.',
     'alert.importError': 'Arquivo inválido. Verifique o arquivo .json.',
     'alert.invalidAgent': 'Os arquivos selecionados são de experimentos diferentes (agente ou célula diferente). Selecione apenas arquivos do mesmo experimento.',
     'alert.duplicateRep': 'Atenção: repetição duplicada detectada. Apenas a versão mais recente foi mantida.',
@@ -329,6 +349,20 @@ const translations = {
     // Screen 5 — Analysis
     'analysis.title': 'Statistical Analysis',
     'analysis.loading': 'Loading Python environment...',
+    'analysis.checking': 'Checking the scientific package...',
+    'analysis.packageMissing': 'Prepare the scientific package to run analyses offline (35.7 MB).',
+    'analysis.install': 'Prepare Offline Analysis (35.7 MB)',
+    'analysis.downloading': 'Downloading and verifying the scientific package: {percent}%',
+    'analysis.initializing': 'Initializing the scientific environment...',
+    'analysis.loadingRuntime': 'Loading the Python runtime...',
+    'analysis.loadingPackages': 'Loading NumPy, SciPy and Matplotlib...',
+    'analysis.loadingEngine': 'Preparing the statistical engine...',
+    'analysis.ready': 'Scientific environment ready for offline use.',
+    'analysis.failed': 'Could not prepare the scientific environment.',
+    'analysis.error': 'Analysis error',
+    'analysis.retry': 'Try Again',
+    'analysis.cancel': 'Cancel',
+    'analysis.cancelled': 'Operation cancelled.',
     'analysis.run': 'Run Analysis',
     'analysis.scoresTitle': 'Visual Scores',
     'analysis.shapiroTitle': 'Shapiro-Wilk Normality Test',
@@ -368,6 +402,12 @@ const translations = {
     'alert.gelComplete': 'Slide complete! Review the data and finish.',
     'alert.noExperiments': 'No saved experiments found.',
     'alert.importSuccess': 'Experiment imported successfully!',
+    'storage.quarantine': '{count} invalid legacy record(s) were preserved for recovery.',
+    'storage.unavailable': 'Could not open secure storage. Reload the application before continuing.',
+    'storage.conflict': 'This experiment changed in another tab. Editing was stopped to prevent data loss.',
+    'storage.reloadRequired': 'Storage was updated. Reload the application to continue.',
+    'storage.exportRecovery': 'Export Storage Recovery',
+    'storage.recoveryFailed': 'Could not export the preserved recovery data.',
     'alert.importError': 'Invalid file. Please check the .json file.',
     'alert.invalidAgent': 'Selected files belong to different experiments (different agent or cell type). Please select files from the same experiment only.',
     'alert.duplicateRep': 'Warning: duplicate replicate detected. Only the most recent version was kept.',
@@ -396,7 +436,8 @@ const translations = {
 // =============================================
 
 // Idioma ativo — tenta recuperar o salvo, senão usa inglês como padrão
-let currentLanguage = localStorage.getItem('cometquant-language') || 'en'
+let currentLanguage = 'en'
+try { currentLanguage = localStorage.getItem('cometquant-language') || 'en' } catch (_) {}
 
 
 // Retorna o texto traduzido para uma chave
@@ -431,6 +472,6 @@ function applyLanguage() {
 // Troca o idioma e salva a preferência no localStorage
 function setLanguage(lang) {
   currentLanguage = lang
-  localStorage.setItem('cometquant-language', lang)
+  try { localStorage.setItem('cometquant-language', lang) } catch (_) {}
   applyLanguage()
 }

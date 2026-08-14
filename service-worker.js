@@ -1,6 +1,8 @@
 // Nome do "cache" — funciona como um rótulo
 // Quando atualizar o app, mude o número da versão aqui
-const CACHE_NAME = 'cometquant-v6'
+const SHELL_CACHE_PREFIX = 'cometquant-shell-'
+const SCIENCE_CACHE_PREFIX = 'cometquant-science-'
+const CACHE_NAME = `${SHELL_CACHE_PREFIX}v7`
 
 // Lista de todos os arquivos que o Service Worker vai guardar
 const FILES_TO_CACHE = [
@@ -11,9 +13,13 @@ const FILES_TO_CACHE = [
   './js/app.js',
   './js/backup.js',
   './js/core.js',
+  './js/repository.js',
   './js/export.js',
   './js/i18n.js',
+  './js/science-package.js',
   './js/analysis.js',
+  './js/analysis-worker.js',
+  './science-assets.json',
   './python/cometquant_analysis.py',
   './vendor/jszip.min.js',
   './icons/icon-192.png',
@@ -24,6 +30,7 @@ const FILES_TO_CACHE = [
 // Executado uma única vez, quando o app é aberto pela primeira vez
 // Aqui o Service Worker salva todos os arquivos na memória do celular
 self.addEventListener('install', event => {
+  self.skipWaiting()
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -40,12 +47,12 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keyList => {
       return Promise.all(keyList.map(key => {
-        if (key !== CACHE_NAME) {
+        if (key.startsWith(SHELL_CACHE_PREFIX) && key !== CACHE_NAME) {
           console.log('CometQuant: removendo cache antigo', key)
           return caches.delete(key)
         }
       }))
-    })
+    }).then(() => self.clients.claim())
   )
 })
 
@@ -53,6 +60,7 @@ self.addEventListener('activate', event => {
 // Executado toda vez que o app tenta buscar qualquer arquivo
 // A lógica é: tenta buscar da internet; se não tiver, usa o cache
 self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return
   event.respondWith(
     caches.match(event.request)
       .then(response => {

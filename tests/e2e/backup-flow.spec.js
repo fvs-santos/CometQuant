@@ -29,9 +29,8 @@ test('exports and restores a blinded experiment only through encrypted backup', 
     }]
   }
   const passphrase = 'a secure backup password'
+  await page.addInitScript(data => localStorage.setItem('cometquant-experiments', JSON.stringify([data])), experiment)
   await page.goto('/')
-  await page.evaluate(data => localStorage.setItem('cometquant-experiments', JSON.stringify([data])), experiment)
-  await page.reload()
   await page.getByRole('button', { name: 'Resume Experiment' }).click()
 
   const downloadPromise = page.waitForEvent('download')
@@ -53,9 +52,8 @@ test('exports and restores a blinded experiment only through encrypted backup', 
   expect(contents).not.toContain(experiment.negControl)
   expect(contents).not.toContain('ABCD-01')
 
-  await page.evaluate(() => localStorage.clear())
-  await page.reload()
-  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: 'Delete' }).click()
   await page.locator('#input-load-files').setInputFiles(downloadPath)
   await expect(passwordDialog).toBeVisible()
   await expect(page.locator('#backup-password')).toHaveAttribute('type', 'password')
