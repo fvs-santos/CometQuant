@@ -9,6 +9,7 @@ let currentGelIndex = 0
 let currentReplicateNumber = null
 let clickHistory = []
 let currentCounts = emptyCounts()
+const revealedLegacyMappings = new Set()
 
 document.addEventListener('DOMContentLoaded', () => {
   applyLanguage()
@@ -58,7 +59,7 @@ function initNavigation() {
     showScreen('screen-replicates')
   })
   document.getElementById('btn-back-counter').addEventListener('click', () => {
-    persistProgress()
+    if (!persistProgress()) return
     renderReplicatesScreen()
     showScreen('screen-replicates')
   })
@@ -113,7 +114,8 @@ function handleCreateExperiment() {
   const slidesPerTreatment = Number(valueOf('input-slides-per-treatment'))
   const conditions = Number(valueOf('input-conditions'))
   const concUnit = valueOf('input-conc-unit')
-  const concentrations = Array.from({ length: Number.isInteger(conditions) && conditions > 0 ? conditions : 0 }, (_, index) => Number(valueOf(`input-conc-${index}`)))
+  const concentrationValues = Array.from({ length: Number.isInteger(conditions) && conditions > 0 ? conditions : 0 }, (_, index) => valueOf(`input-conc-${index}`))
+  const concentrations = concentrationValues.map(value => value === '' ? NaN : Number(value))
   const validation = CometQuantCore.validateSetup({ researcher, agent, cells, negControl, posControl, solControl, nucleoidsPerGel: nucleoids, slidesPerTreatment, conditions, concUnit, concentrations })
   if (!validation.valid) {
     if (validation.errors.includes('agent-required') || validation.errors.includes('cells-required')) return alert(t('alert.needAgentCells'))
@@ -133,7 +135,7 @@ function handleCreateExperiment() {
   }
 
   const now = new Date().toISOString()
-  currentExperiment = {
+  const experiment = {
     schemaVersion: SCHEMA_VERSION,
     id: createId(),
     createdAt: now,
@@ -153,10 +155,9 @@ function handleCreateExperiment() {
     progress: null
   }
 
-  const replicate = createBlindReplicate(1)
-  currentExperiment.replicates.push(replicate)
-  if (!saveExperiment()) return
-  showBlindCodes(replicate)
+  experiment.replicates.push(createBlindReplicate(1, experiment))
+  if (!saveExperiment(experiment)) return
+  showBlindCodes(currentExperiment.replicates[0])
 }
 
 function resetSetupForm() {
@@ -169,16 +170,16 @@ function resetSetupForm() {
   document.getElementById('concentrations-container').replaceChildren()
 }
 
-function createBlindReplicate(replicateNumber) {
+function createBlindReplicate(replicateNumber, experiment = currentExperiment) {
   const usedCodes = new Set()
   const assignments = []
-  currentExperiment.treatments.forEach((treatment, treatmentIndex) => {
+  experiment.treatments.forEach((treatment, treatmentIndex) => {
     let baseCode
     do baseCode = randomBlindCode()
     while (usedCodes.has(baseCode))
     usedCodes.add(baseCode)
 
-    for (let gelIndex = 0; gelIndex < currentExperiment.slidesPerTreatment; gelIndex++) {
+    for (let gelIndex = 0; gelIndex < experiment.slidesPerTreatment; gelIndex++) {
       assignments.push({
         blindCode: `${baseCode}-${String(gelIndex + 1).padStart(2, '0')}`,
         treatmentIndex,
@@ -294,6 +295,7 @@ function renderExperimentsList() {
 }
 
 function openExperiment(id) {
+  invalidateAnalysisResults()
   currentExperiment = getAllExperiments().find(item => item.id === id) || null
   if (!currentExperiment) return showExperimentsScreen()
   if (currentExperiment.progress) {
@@ -307,10 +309,13 @@ function openExperiment(id) {
 
 function deleteExperiment(id) {
   if (!confirm(t('experiments.deleteConfirm'))) return
-  const experiments = getAllExperiments().filter(item => item.id !== id)
+  const experiments = getStoredExperiments().filter(item => item?.id !== id)
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(experiments))
-    if (currentExperiment && currentExperiment.id === id) currentExperiment = null
+    if (currentExperiment && currentExperiment.id === id) {
+      currentExperiment = null
+      invalidateAnalysisResults()
+    }
     renderExperimentsList()
   } catch {
     alert(t('counter.saveFailed'))
@@ -364,6 +369,13 @@ function openReplicate(replicateNumber) {
     startCounting(true)
     return
   }
+  const replicate = findReplicate(replicateNumber)
+  const legacyKey = `${currentExperiment.id}:${replicateNumber}`
+  if (Number(currentExperiment.migration?.sourceSchemaVersion) < 3 && replicate && !revealedLegacyMappings.has(legacyKey)) {
+    revealedLegacyMappings.add(legacyKey)
+    showBlindCodes(replicate)
+    return
+  }
   currentReplicateNumber = replicateNumber
   renderCodeEntry()
   showScreen('screen-code-entry')
@@ -412,11 +424,15 @@ function handleBlindCode() {
     if (!reasonCode) return alert(t('codeEntry.reasonRequiredAlert'))
     if (reasonCode === 'other' && !detail) return alert(t('reason.detailRequired'))
     if (!confirm(`${assignment.blindCode}: ${t('codeEntry.confirmAbsent')}`)) return
-    assignment.status = 'absent'
-    assignment.absenceReason = { code: reasonCode, detail }
-    assignment.recordedAt = new Date().toISOString()
-    saveExperiment()
-    afterSlideProcessed(replicate)
+    const candidate = cloneExperiment(currentExperiment)
+    const candidateReplicate = findReplicate(replicate.replicateNumber, candidate)
+    const candidateAssignment = candidateReplicate.assignments.find(item => item.blindCode === assignment.blindCode)
+    candidateAssignment.status = 'absent'
+    candidateAssignment.absenceReason = { code: reasonCode, detail }
+    candidateAssignment.recordedAt = new Date().toISOString()
+    candidate.status = hasPendingSlides(candidate) ? 'in-progress' : 'completed'
+    if (!saveExperiment(candidate)) return
+    afterSlideProcessed(replicate.replicateNumber)
     return
   }
 
@@ -425,8 +441,7 @@ function handleBlindCode() {
   currentReplicateNumber = replicate.replicateNumber
   currentCounts = emptyCounts()
   clickHistory = []
-  assignment.status = 'counting'
-  persistProgress()
+  if (!persistProgress(false)) return
   startCounting(true)
 }
 
@@ -445,7 +460,7 @@ function startCounting(restoring = false) {
   if (!restoring) {
     currentCounts = emptyCounts()
     clickHistory = []
-    persistProgress()
+    if (!persistProgress()) return false
   }
   document.getElementById('screen-counter').classList.remove('complete')
   document.getElementById('input-incomplete-reason').value = ''
@@ -454,6 +469,7 @@ function startCounting(restoring = false) {
   updateReasonDetails()
   updateCounterDisplay()
   showScreen('screen-counter')
+  return true
 }
 
 function registerCount(cometClass) {
@@ -461,7 +477,12 @@ function registerCount(cometClass) {
   currentCounts[cometClass]++
   clickHistory.push(cometClass)
   updateCounterDisplay()
-  persistProgress()
+  if (!persistProgress()) {
+    clickHistory.pop()
+    currentCounts[cometClass]--
+    updateCounterDisplay()
+    return
+  }
   const card = document.getElementById(`card-class-${cometClass}`)
   card.classList.add('pulse')
   setTimeout(() => card.classList.remove('pulse'), 300)
@@ -472,7 +493,11 @@ function undoLastCount() {
   const lastClass = clickHistory.pop()
   if (currentCounts[lastClass] > 0) currentCounts[lastClass]--
   updateCounterDisplay()
-  persistProgress()
+  if (!persistProgress()) {
+    currentCounts[lastClass]++
+    clickHistory.push(lastClass)
+    updateCounterDisplay()
+  }
 }
 
 function getTotalCount() {
@@ -528,22 +553,25 @@ function handleFinishGel() {
     ...(total < target ? { incompleteReason: { code: valueOf('input-incomplete-reason'), detail: valueOf('input-incomplete-detail') } } : {}),
     recordedAt: new Date().toISOString()
   }
-  const existing = replicate.gels.findIndex(gel => gel.blindCode === assignment.blindCode)
-  if (existing >= 0) replicate.gels[existing] = gelData
-  else replicate.gels.push(gelData)
-  assignment.status = 'counted'
-  assignment.recordedAt = gelData.recordedAt
-  replicate.updatedAt = gelData.recordedAt
-  currentExperiment.progress = null
-  saveExperiment()
-  afterSlideProcessed(replicate)
+  const candidate = cloneExperiment(currentExperiment)
+  const candidateReplicate = findReplicate(currentReplicateNumber, candidate)
+  const candidateAssignment = findCurrentAssignment(candidate)
+  const existing = candidateReplicate.gels.findIndex(gel => gel.blindCode === candidateAssignment.blindCode)
+  if (existing >= 0) candidateReplicate.gels[existing] = gelData
+  else candidateReplicate.gels.push(gelData)
+  candidateAssignment.status = 'counted'
+  candidateAssignment.recordedAt = gelData.recordedAt
+  candidateReplicate.updatedAt = gelData.recordedAt
+  candidate.progress = null
+  candidate.status = hasPendingSlides(candidate) ? 'in-progress' : 'completed'
+  if (!saveExperiment(candidate)) return
+  afterSlideProcessed(replicate.replicateNumber)
 }
 
-function afterSlideProcessed(replicate) {
+function afterSlideProcessed(replicateNumber) {
+  const replicate = findReplicate(replicateNumber)
+  if (!replicate) return
   const pending = (replicate.assignments || []).some(item => item.status === 'pending' || item.status === 'counting')
-  currentExperiment.progress = null
-  currentExperiment.status = hasPendingSlides() ? 'in-progress' : 'completed'
-  saveExperiment()
   if (pending) {
     currentReplicateNumber = replicate.replicateNumber
     renderCodeEntry()
@@ -554,11 +582,12 @@ function afterSlideProcessed(replicate) {
   }
 }
 
-function persistProgress() {
+function persistProgress(showStatus = true) {
   if (!currentExperiment || currentReplicateNumber === null) return false
-  const assignment = findCurrentAssignment()
+  const candidate = cloneExperiment(currentExperiment)
+  const assignment = findCurrentAssignment(candidate)
   if (!assignment) return false
-  currentExperiment.progress = {
+  candidate.progress = {
     replicateNumber: currentReplicateNumber,
     treatmentIndex: currentTreatmentIndex,
     gelIndex: currentGelIndex,
@@ -568,7 +597,7 @@ function persistProgress() {
     updatedAt: new Date().toISOString()
   }
   assignment.status = 'counting'
-  return saveExperiment(true)
+  return saveExperiment(candidate, showStatus)
 }
 
 function restoreProgress() {
@@ -586,36 +615,42 @@ function restoreProgress() {
   clickHistory = Array.isArray(progress.clickHistory) ? [...progress.clickHistory] : []
 }
 
-function saveExperiment(showStatus = false) {
-  if (!currentExperiment) return false
-  currentExperiment.updatedAt = new Date().toISOString()
-  const validation = CometQuantCore.validateExperiment(currentExperiment, { source: 'local' })
+function saveExperiment(candidate, showStatus = false, notify = true) {
+  if (!candidate) return false
+  const pendingExperiment = cloneExperiment(candidate)
+  pendingExperiment.updatedAt = new Date().toISOString()
+  const validation = CometQuantCore.validateExperiment(pendingExperiment, { source: 'local' })
   if (!validation.valid) {
     console.error('Invalid experiment:', validation.errors)
     if (showStatus) setSaveStatus(t('counter.saveFailed'), true)
-    else alert(t('alert.invalidData'))
+    else if (notify) alert(t('alert.invalidData'))
     return false
   }
-  currentExperiment = validation.experiment
-  const experiments = getAllExperiments()
-  const index = experiments.findIndex(item => item.id === currentExperiment.id)
-  if (index >= 0) experiments[index] = currentExperiment
-  else experiments.push(currentExperiment)
+  const experiments = getStoredExperiments()
+  const index = experiments.findIndex(item => item?.id === validation.experiment.id)
+  if (index >= 0) experiments[index] = validation.experiment
+  else experiments.push(validation.experiment)
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(experiments))
+    currentExperiment = validation.experiment
+    invalidateAnalysisResults()
     if (showStatus) setSaveStatus(t('counter.saved'), false)
     return true
   } catch {
     if (showStatus) setSaveStatus(t('counter.saveFailed'), true)
-    else alert(t('counter.saveFailed'))
+    else if (notify) alert(t('counter.saveFailed'))
     return false
   }
 }
 
 function getAllExperiments() {
+  return getStoredExperiments().map(normalizeExperiment).filter(Boolean)
+}
+
+function getStoredExperiments() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-    return Array.isArray(parsed) ? parsed.map(normalizeExperiment).filter(Boolean) : []
+    return Array.isArray(parsed) ? parsed : []
   } catch {
     return []
   }
@@ -623,9 +658,14 @@ function getAllExperiments() {
 
 function normalizeExperiment(experiment) {
   try {
-    return CometQuantCore.migrateExperiment(experiment)
+    const validation = CometQuantCore.validateExperiment(experiment, { source: 'local' })
+    if (!validation.valid) {
+      console.error('Ignoring invalid local experiment:', validation.errors)
+      return null
+    }
+    return validation.experiment
   } catch (error) {
-    console.error('Could not migrate experiment:', error)
+    console.error('Could not validate local experiment:', error)
     return null
   }
 }
@@ -652,11 +692,11 @@ function handleAddReplicate() {
     return
   }
   const nextNumber = Math.max(0, ...currentExperiment.replicates.map(rep => Number(rep.replicateNumber) || 0)) + 1
-  const replicate = createBlindReplicate(nextNumber)
-  currentExperiment.replicates.push(replicate)
-  currentExperiment.status = 'in-progress'
-  saveExperiment()
-  showBlindCodes(replicate)
+  const candidate = cloneExperiment(currentExperiment)
+  candidate.replicates.push(createBlindReplicate(nextNumber, candidate))
+  candidate.status = 'in-progress'
+  if (!saveExperiment(candidate)) return
+  showBlindCodes(findReplicate(nextNumber))
 }
 
 function showSummary() {
@@ -738,11 +778,10 @@ function saveImportedExperiment(raw) {
   const validation = CometQuantCore.validateExperiment(raw, { source: 'import' })
   if (!validation.valid) throw new Error(`Invalid experiment: ${validation.errors.join(',')}`)
   const experiment = validation.experiment
-  const existingIds = new Set(getAllExperiments().map(item => item.id))
+  const existingIds = new Set(getStoredExperiments().map(item => item?.id).filter(id => typeof id === 'string'))
   if (existingIds.has(experiment.id)) experiment.id = createId()
   experiment.updatedAt = new Date().toISOString()
-  currentExperiment = experiment
-  saveExperiment()
+  if (!saveExperiment(experiment, false, false)) throw new Error('Could not persist imported experiment')
 }
 
 function consolidateExperiments(experiments) {
@@ -767,15 +806,15 @@ function readJsonFile(file) {
   })
 }
 
-function findReplicate(number) {
-  return currentExperiment && currentExperiment.replicates.find(rep => Number(rep.replicateNumber) === Number(number))
+function findReplicate(number, experiment = currentExperiment) {
+  return experiment && experiment.replicates.find(rep => Number(rep.replicateNumber) === Number(number))
 }
 
-function findCurrentAssignment() {
-  const replicate = findReplicate(currentReplicateNumber)
+function findCurrentAssignment(experiment = currentExperiment) {
+  const replicate = findReplicate(currentReplicateNumber, experiment)
   if (!replicate || !replicate.assignments) return null
-  if (currentExperiment.progress && currentExperiment.progress.blindCode) {
-    const byCode = replicate.assignments.find(item => item.blindCode === currentExperiment.progress.blindCode)
+  if (experiment.progress && experiment.progress.blindCode) {
+    const byCode = replicate.assignments.find(item => item.blindCode === experiment.progress.blindCode)
     if (byCode) return byCode
   }
   return replicate.assignments.find(item => item.treatmentIndex === currentTreatmentIndex && item.gelNumber === currentGelIndex + 1)
@@ -787,6 +826,10 @@ function hasPendingSlides(experiment = currentExperiment) {
 
 function emptyCounts() {
   return { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 }
+}
+
+function cloneExperiment(experiment) {
+  return JSON.parse(JSON.stringify(experiment))
 }
 
 function valueOf(id) {

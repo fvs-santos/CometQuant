@@ -280,21 +280,30 @@ Pyodide e carregado por CDN sem SRI e nao existe Content Security Policy. Isso a
 
 ## Proximos passos recomendados
 
-Ordem sugerida para continuidade:
+Concluido na continuidade de 14/08/2026:
 
-1. Vincular `analysisResults` ao ID e a versao/timestamp do experimento e invalidar resultados em qualquer alteracao relevante.
-2. Definir formalmente o modelo de ameaca do blinding e implementar um backup cego que nao exponha tratamentos.
-3. Criar testes de referencia para o codigo estatistico, incluindo casos degenerados e comparacao com resultados conhecidos em Python ou R.
-4. Decidir e documentar a unidade experimental usada por cada grafico e estatistica.
-5. Fortalecer as invariantes do schema e validar integralmente dados recuperados do storage.
-6. Rever o merge para preservar ou rejeitar explicitamente progresso parcial, sem descarte silencioso.
-7. Impedir ou confirmar explicitamente a criacao de nova repeticao antes da conclusao da anterior.
-8. Avaliar IndexedDB ou persistencia granular para reduzir custo de autosave e risco de quota.
-9. Definir se a analise precisa funcionar offline; se sim, hospedar e cachear Pyodide e pacotes de forma controlada.
-10. Criar CI para `npm run check`, testes unitarios, cobertura e E2E.
-11. Expandir o README com arquitetura, schema, fluxo cego, protocolo estatistico, deploy e estrategia de atualizacao da PWA.
-12. Substituir os SVGs provisorios por imagens cientificamente adequadas e testar acessibilidade/touch.
-13. Sincronizar a versao exibida na UI com `package.json` e remover notas obsoletas.
+- resultados estatisticos vinculados ao ID e timestamp do experimento;
+- persistencia transacional com bloqueio da navegacao e tentativa posterior em caso de falha;
+- invariantes bidirecionais entre assignments e laminas, validacao do storage e migracao pre-v3 idempotente;
+- limite de 100 laminas e concentracoes vazias corrigidos;
+- motor estatistico extraido para `python/cometquant_analysis.py` e executado pelo Pyodide;
+- casos estatisticos degenerados retornam motivos explicitos e nao serializam valores nao finitos;
+- valores-p preservam precisao e o poder de Pearson usa distribuicao t nao central;
+- laminas tecnicas sao agregadas por repeticao tanto na inferencia quanto no grafico de classes;
+- fixture estatistica versionada foi comparada automaticamente com SciPy e R 4.6.1;
+- testes reais cobrem Python, R, Pyodide no navegador, falha de quota e legado parcial.
+
+Ordem sugerida para a proxima continuidade:
+
+1. Definir formalmente o modelo de ameaca do blinding e implementar um backup cego que nao exponha tratamentos.
+2. Rever o merge para preservar ou rejeitar explicitamente progresso parcial, sem descarte silencioso.
+3. Impedir ou confirmar explicitamente a criacao de nova repeticao antes da conclusao da anterior.
+4. Avaliar IndexedDB ou persistencia granular para reduzir custo de autosave e risco de quota.
+5. Definir se a analise precisa funcionar totalmente offline; se sim, hospedar Pyodide e pacotes localmente.
+6. Criar CI para `npm run check`, testes JavaScript, Python, referencia R, cobertura e E2E.
+7. Expandir o README com arquitetura, schema, fluxo cego, protocolo estatistico, deploy e atualizacao da PWA.
+8. Substituir os SVGs provisorios por imagens cientificamente adequadas e testar acessibilidade/touch.
+9. Sincronizar a versao exibida na UI com `package.json` e remover notas obsoletas.
 
 ## Arquivos de referencia
 
@@ -305,6 +314,7 @@ Ordem sugerida para continuidade:
 - `js/core.js`
 - `js/app.js`
 - `js/analysis.js`
+- `python/cometquant_analysis.py`
 - `js/export.js`
 - `js/i18n.js`
 - `css/style.css`
@@ -316,11 +326,14 @@ Ordem sugerida para continuidade:
 - `tests/unit/export.test.js`
 - `tests/integration/persistence.test.js`
 - `tests/e2e/experiment-flow.spec.js`
+- `tests/e2e/analysis-flow.spec.js`
+- `tests/python/test_cometquant_analysis.py`
+- `tests/reference/v1/`
 
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- Referencia principal: commit `0b0779a` de 13/08/2026.
-- A implementacao aparenta estar funcional, mas ainda nao deve ser tratada como software cientifico validado para producao.
-- Nao ha CI, politica de deploy, matriz formal de navegadores, protocolo estatistico versionado ou validacao independente da analise.
-- O principal item funcional remanescente registrado pelo projeto e melhorar as imagens das classes de cometas.
+- Referencia principal anterior: commit `0b0779a` de 13/08/2026; as alteracoes descritas acima ainda nao foram commitadas.
+- A implementacao possui validacao estatistica automatizada independente, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
+- Nao ha CI, politica de deploy, matriz formal de navegadores ou protocolo cientifico revisado externamente.
+- Os principais riscos remanescentes sao backup durante o cegamento, merge de progresso parcial, dependencia da CDN para Pyodide e persistencia integral no `localStorage`.

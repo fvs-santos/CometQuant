@@ -1,0 +1,41 @@
+replicate,treatment,concentration,is_control,slide,score
+1,Control,,true,1,4
+1,Control,,true,2,6
+1,1 uM,1,false,1,9
+1,1 uM,1,false,2,11
+1,5 uM,5,false,1,19
+1,5 uM,5,false,2,21
+1,10 uM,10,false,1,34
+1,10 uM,10,false,2,36
+2,Control,,true,1,5
+2,Control,,true,2,7
+2,1 uM,1,false,1,10
+2,1 uM,1,false,2,12
+2,5 uM,5,false,1,22
+2,5 uM,5,false,2,24
+2,10 uM,10,false,1,38
+2,10 uM,10,false,2,40
+3,Control,,true,1,3
+3,Control,,true,2,5
+3,1 uM,1,false,1,8
+3,1 uM,1,false,2,10
+3,5 uM,5,false,1,18
+3,5 uM,5,false,2,20
+3,10 uM,10,false,1,35
+3,10 uM,10,false,2,37
+4,Control,,true,1,4
+4,Control,,true,2,6
+4,1 uM,1,false,1,11
+4,1 uM,1,false,2,13
+4,5 uM,5,false,1,21
+4,5 uM,5,false,2,23
+4,10 uM,10,false,1,39
+4,10 uM,10,false,2,41
+5,Control,,true,1,6
+5,Control,,true,2,8
+5,1 uM,1,false,1,9
+5,1 uM,1,false,2,11
+5,5 uM,5,false,1,20
+5,5 uM,5,false,2,22
+5,10 uM,10,false,1,37
+5,10 uM,10,false,2,39

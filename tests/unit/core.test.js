@@ -25,6 +25,32 @@ describe('migration and validation', () => {
     expect(migrated.replicates[0].gels[0].incompleteReason.code).toBe('legacy-unjustified')
   })
 
+  it('migrates pre-v3 data without assignments idempotently', () => {
+    const legacy = experiment({ schemaVersion: 2, agent: '', cells: '' })
+    delete legacy.replicates[0].assignments
+    delete legacy.replicates[0].gels[0].blindCode
+    delete legacy.replicates[0].gels[0].treatmentIndex
+
+    const first = core.validateExperiment(legacy, { source: 'import' })
+    expect(first.valid).toBe(true)
+    expect(first.experiment.replicates[0].assignments).toEqual([
+      expect.objectContaining({ blindCode: 'AAAA-01', treatmentIndex: 0, gelNumber: 1, status: 'counted' })
+    ])
+    expect(first.experiment.migration.missingRequiredFields).toEqual(['agent', 'cells'])
+
+    const second = core.validateExperiment(first.experiment, { source: 'local' })
+    expect(second.valid).toBe(true)
+  })
+
+  it('keeps missing legacy treatments pending instead of inventing absences', () => {
+    const legacy = experiment({ schemaVersion: 2, treatments: ['Control', 'Dose'] })
+    delete legacy.replicates[0].assignments
+    const result = core.validateExperiment(legacy, { source: 'import' })
+    expect(result.valid).toBe(true)
+    expect(result.experiment.replicates[0].assignments.map(item => item.status)).toEqual(['counted', 'pending'])
+    expect(result.experiment.status).toBe('in-progress')
+  })
+
   it('rejects inconsistent totals and progress history', () => {
     const invalid = experiment()
     invalid.replicates[0].gels[0].total = 99
@@ -33,10 +59,50 @@ describe('migration and validation', () => {
     expect(result.errors).toContain('replicate-1-gel-1-total')
   })
 
+  it('requires a complete, unique assignment map in schema v3', () => {
+    const invalid = experiment()
+    invalid.replicates[0].assignments[0].status = 'counted'
+    invalid.replicates[0].gels = []
+    const result = core.validateExperiment(invalid, { source: 'import' })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('replicate-1-assignment-1-gel-correspondence')
+
+    const duplicate = experiment({ slidesPerTreatment: 2 })
+    duplicate.replicates[0].assignments.push({ ...duplicate.replicates[0].assignments[0], blindCode: 'EFGH-02' })
+    duplicate.replicates[0].gels.push(completeGel({ blindCode: 'EFGH-02', gelNumber: 1 }))
+    const duplicateResult = core.validateExperiment(duplicate, { source: 'import' })
+    expect(duplicateResult.valid).toBe(false)
+    expect(duplicateResult.errors).toContain('replicate-1-assignment-2-duplicate-laminate')
+  })
+
+  it('rejects duplicate gels and gels linked to the wrong assignment', () => {
+    const invalid = experiment()
+    invalid.replicates[0].gels.push(completeGel({ blindCode: 'EFGH-02' }))
+    const result = core.validateExperiment(invalid, { source: 'import' })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('replicate-1-gel-2-duplicate-laminate')
+    expect(result.errors).toContain('replicate-1-gel-2-assignment')
+  })
+
   it('requires agent, cells, unit and valid concentrations', () => {
     const result = core.validateSetup({ agent: '', cells: '', negControl: 'PBS', posControl: '', solControl: '', nucleoidsPerGel: 100, slidesPerTreatment: 1, conditions: 1, concUnit: '', concentrations: [NaN] })
     expect(result.valid).toBe(false)
     expect(result.errors).toEqual(expect.arrayContaining(['agent-required', 'cells-required', 'unit-required', 'invalid-concentrations']))
+  })
+
+  it('accepts the 100th slide code without accepting zero-padded overflow', () => {
+    const data = experiment({ slidesPerTreatment: 100 })
+    data.replicates[0].assignments = Array.from({ length: 100 }, (_, index) => ({
+      blindCode: `ABCD-${String(index + 1).padStart(2, '0')}`,
+      treatmentIndex: 0,
+      gelNumber: index + 1,
+      status: 'pending'
+    }))
+    data.replicates[0].gels = []
+    expect(core.validateExperiment(data, { source: 'import' }).valid).toBe(true)
+
+    data.replicates[0].assignments[99].blindCode = 'ABCD-00'
+    expect(core.validateExperiment(data, { source: 'import' }).valid).toBe(false)
   })
 })
 

@@ -3,31 +3,26 @@
 // Módulo de análise estatística via Pyodide
 // =============================================
 
-// Instância global do Pyodide
-// Declarada fora de qualquer função para persistir
-// entre chamadas — equivalente a uma variável de módulo em Python
 let pyodide = null
 let pyodideReady = false
+const ANALYSIS_ENGINE_URL = './python/cometquant_analysis.py'
 
 
 // =============================================
 // INICIALIZAÇÃO DO PYODIDE
-// Chamada automaticamente quando o app abre
 // =============================================
 
 async function initPyodide() {
-  const message   = document.getElementById('pyodide-message')
-  const progress  = document.getElementById('pyodide-progress')
-  const icon      = document.getElementById('pyodide-icon')
+  const message = document.getElementById('pyodide-message')
+  const progress = document.getElementById('pyodide-progress')
+  const icon = document.getElementById('pyodide-icon')
 
   try {
-    // Passo 1 — Carrega o runtime Python (o maior download)
     updatePyodideStatus(message, progress, icon,
       t('analysis.loading'), '🐍', 15)
 
     pyodide = await loadPyodide()
 
-    // Passo 2 — Instala os pacotes científicos
     updatePyodideStatus(message, progress, icon,
       currentLanguage === 'pt'
         ? 'Instalando pacotes científicos...'
@@ -35,27 +30,27 @@ async function initPyodide() {
 
     await pyodide.loadPackage(['numpy', 'scipy', 'matplotlib'])
 
-    // Passo 3 — Pré-carrega o código Python de análise
     updatePyodideStatus(message, progress, icon,
       currentLanguage === 'pt'
         ? 'Preparando ambiente...'
         : 'Preparing environment...', '⚙️', 80)
 
-    // Executa o código de setup — importações e definições de funções
-    await pyodide.runPythonAsync(PYTHON_SETUP_CODE)
+    const response = await fetch(ANALYSIS_ENGINE_URL)
+    if (!response.ok) {
+      throw new Error(`Could not load analysis engine (${response.status})`)
+    }
+    const analysisEngine = await response.text()
+    await pyodide.runPythonAsync(analysisEngine)
 
-    // Pronto
     updatePyodideStatus(message, progress, icon,
       t('analysis.done'), '✅', 100)
 
     pyodideReady = true
 
-    // Pequena pausa para o usuário ver o "✅" antes de sumir
     setTimeout(() => {
       const statusDiv = document.getElementById('pyodide-status')
       if (statusDiv) statusDiv.style.display = 'none'
     }, 1200)
-
   } catch (err) {
     updatePyodideStatus(message, progress, icon,
       `Error loading Python: ${err.message}`, '❌', 0)
@@ -67,406 +62,8 @@ async function initPyodide() {
 function updatePyodideStatus(messageEl, progressEl, iconEl, msg, icon, pct) {
   if (messageEl) messageEl.textContent = msg
   if (progressEl) progressEl.style.width = `${pct}%`
-  if (iconEl)    iconEl.textContent = icon
+  if (iconEl) iconEl.textContent = icon
 }
-
-
-// =============================================
-// CÓDIGO PYTHON — embutido como string
-// Roda dentro do Pyodide no navegador
-// É Python real: mesma sintaxe, mesmas bibliotecas
-// =============================================
-
-const PYTHON_SETUP_CODE = `
-import numpy as np
-import json
-from scipy import stats
-import matplotlib
-matplotlib.use('Agg')  # backend sem janela — obrigatório no browser
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import base64
-import io
-
-# ---------------------------------------------------
-# CÁLCULO DO SCORE VISUAL
-# Fórmula idêntica ao app.py original
-# score = (0*c0 + 0.25*c1 + 0.5*c2 + 0.75*c3 + 1*c4) / nucleoids * 100
-# ---------------------------------------------------
-
-def calculate_scores(experiment):
-    nucleoids = experiment['nucleoidsPerGel']
-    treatments = experiment['treatments']
-    replicates = experiment['replicates']
-
-    # scores_by_treatment: {treatment: [score_rep1, score_rep2, ...]}
-    scores_by_treatment = {t: [] for t in treatments}
-
-    # Multiple slides are technical subsamples. Aggregate them within each
-    # replicate before inferential analyses to avoid pseudoreplication.
-    for rep in replicates:
-        replicate_scores = {t: [] for t in treatments}
-        for gel in rep['gels']:
-            if gel.get('status', 'counted') != 'counted' or gel.get('completion', 'complete') != 'complete':
-                continue
-            score = (
-                0    * gel['class0'] +
-                0.25 * gel['class1'] +
-                0.50 * gel['class2'] +
-                0.75 * gel['class3'] +
-                1.00 * gel['class4']
-            ) / nucleoids * 100
-            treatment = gel['treatment']
-            if treatment in replicate_scores:
-                replicate_scores[treatment].append(score)
-
-        for treatment, slide_scores in replicate_scores.items():
-            if slide_scores:
-                scores_by_treatment[treatment].append(float(np.mean(slide_scores)))
-
-    return scores_by_treatment
-
-
-# ---------------------------------------------------
-# SHAPIRO-WILK
-# scipy.stats.shapiro — equivalente ao pg.normality()
-# Requer ao menos 3 valores por grupo
-# ---------------------------------------------------
-
-def calculate_shapiro(scores_by_treatment):
-    results = {}
-
-    for treatment, scores in scores_by_treatment.items():
-        clean = [s for s in scores if s is not None and not np.isnan(s)]
-
-        if len(clean) < 3:
-            results[treatment] = {
-                'W': 'ND',
-                'p': 'ND',
-                'normal': 'n < 3'
-            }
-        else:
-            stat, p = stats.shapiro(clean)
-            results[treatment] = {
-                'W': round(float(stat), 5),
-                'p': round(float(p), 5),
-                'normal': str(p > 0.05)
-            }
-
-    return results
-
-
-# ---------------------------------------------------
-# ONE-WAY ANOVA
-# scipy.stats.f_oneway — equivalente ao pg.anova()
-# ---------------------------------------------------
-
-def calculate_anova(scores_by_treatment):
-    groups = []
-    labels = []
-
-    for treatment, scores in scores_by_treatment.items():
-        clean = [s for s in scores if s is not None and not np.isnan(s)]
-        if len(clean) >= 2:
-            groups.append(clean)
-            labels.append(treatment)
-
-    if len(groups) < 2:
-        return None
-
-    f_stat, p_value = stats.f_oneway(*groups)
-
-    # Calcula SS, DF, MS manualmente — mesmos valores do pingouin
-    all_values = [v for g in groups for v in g]
-    grand_mean = np.mean(all_values)
-    n_total    = len(all_values)
-    k          = len(groups)
-
-    ss_between = sum(len(g) * (np.mean(g) - grand_mean)**2 for g in groups)
-    ss_within  = sum(sum((v - np.mean(g))**2 for v in g) for g in groups)
-    df_between = k - 1
-    df_within  = n_total - k
-    ms_between = ss_between / df_between
-    ms_within  = ss_within  / df_within
-
-    return {
-        'F':    round(float(f_stat), 5),
-        'p':    round(float(p_value), 5),
-        'SS':   round(float(ss_between), 5),
-        'MS':   round(float(ms_between), 5),
-        'DF':   int(df_between),
-        'significant': bool(p_value < 0.05)
-    }
-
-
-# ---------------------------------------------------
-# TUKEY HSD
-# scipy.stats.tukey_hsd — realizado só se ANOVA p < 0.05
-# ---------------------------------------------------
-
-def calculate_tukey(scores_by_treatment, anova_result):
-    if anova_result is None or not anova_result['significant']:
-        return []
-
-    groups = []
-    labels = []
-
-    for treatment, scores in scores_by_treatment.items():
-        clean = [s for s in scores if s is not None and not np.isnan(s)]
-        if len(clean) >= 2:
-            groups.append(clean)
-            labels.append(treatment)
-
-    if len(groups) < 2:
-        return []
-
-    result = stats.tukey_hsd(*groups)
-    tukey_results = []
-
-    for i in range(len(labels)):
-        for j in range(i + 1, len(labels)):
-            p = float(result.pvalue[i][j])
-            tukey_results.append({
-                'A':            labels[i],
-                'B':            labels[j],
-                'p':            round(p, 5),
-                'significant':  bool(p < 0.05)
-            })
-
-    return tukey_results
-
-
-# ---------------------------------------------------
-# REGRESSÃO LINEAR + PEARSON
-# Realizada apenas sobre as concentrações numéricas
-# Controles são excluídos — igual ao app.py original
-# ---------------------------------------------------
-
-def calculate_regression(scores_by_treatment, experiment):
-    controls = [
-        experiment.get('negControl', ''),
-        experiment.get('posControl', ''),
-        experiment.get('solControl', '')
-    ]
-    controls = [c for c in controls if c]
-
-    x_vals = []
-    y_vals = []
-
-    for treatment, scores in scores_by_treatment.items():
-        if treatment in controls:
-            continue
-        try:
-            # Extrai o número da string de concentração (ex: "5 µM" → 5.0)
-            numeric = float(treatment.split()[0])
-            clean   = [s for s in scores if s is not None and not np.isnan(s)]
-            for score in clean:
-                x_vals.append(numeric)
-                y_vals.append(score)
-        except (ValueError, IndexError):
-            continue
-
-    if len(x_vals) < 3:
-        return None
-
-    x = np.array(x_vals)
-    y = np.array(y_vals)
-
-    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
-    r2 = r_value ** 2
-
-    # Intervalo de confiança 95% para o slope
-    n  = len(x)
-    df = n - 2
-    t_crit  = float(stats.t.ppf(0.975, df))
-    ci_low  = slope - t_crit * std_err
-    ci_high = slope + t_crit * std_err
-
-    # Pearson
-    r_pearson, p_pearson = stats.pearsonr(x, y)
-
-    # Power (aproximação pelo tamanho de efeito)
-    from scipy.stats import norm as scipy_norm
-    effect_size = abs(r_pearson) / np.sqrt(1 - r_pearson**2) * np.sqrt(n)
-    power = float(1 - stats.norm.cdf(1.96 - effect_size) +
-                  stats.norm.cdf(-1.96 - effect_size))
-
-    return {
-        'regression': {
-            'slope':     round(float(slope), 5),
-            'intercept': round(float(intercept), 5),
-            'r2':        round(float(r2), 5),
-            'p':         round(float(p_value), 5),
-            'ci_low':    round(float(ci_low), 5),
-            'ci_high':   round(float(ci_high), 5),
-        },
-        'pearson': {
-            'r':     round(float(r_pearson), 5),
-            'p':     round(float(p_pearson), 5),
-            'power': round(float(power), 3)
-        }
-    }
-
-
-# ---------------------------------------------------
-# GRÁFICO 1 — Scores por tratamento (barras + SD)
-# Estilo escuro para consistência com o app
-# ---------------------------------------------------
-
-def generate_score_chart(scores_by_treatment, tukey_results, experiment, lang):
-    treatments = list(scores_by_treatment.keys())
-    means = [np.nanmean(scores_by_treatment[t]) if scores_by_treatment[t] else 0 for t in treatments]
-    sds   = [np.nanstd(scores_by_treatment[t]) if scores_by_treatment[t] else 0 for t in treatments]
-
-    # Referência para símbolos estatísticos
-    ref_control = (
-        experiment.get('negControl') or
-        experiment.get('solControl') or
-        experiment.get('posControl') or
-        treatments[0]
-    )
-
-    fig, ax = plt.subplots(figsize=(9, 5))
-    fig.patch.set_facecolor('#161b22')
-    ax.set_facecolor('#161b22')
-
-    bars = ax.bar(treatments, means, yerr=sds,
-                  color='#4a9eff', alpha=0.85,
-                  error_kw={'ecolor': '#8b949e', 'capsize': 4})
-
-    # Símbolos de significância em relação ao controle de referência
-    for res in tukey_results:
-        other = None
-        if res['A'] == ref_control:
-            other = res['B']
-        elif res['B'] == ref_control:
-            other = res['A']
-
-        if other and other in treatments:
-            idx  = treatments.index(other)
-            top  = means[idx] + sds[idx]
-            sym  = '**' if res['p'] <= 0.01 else ('*' if res['p'] <= 0.05 else '')
-            if sym:
-                ax.annotate(sym, xy=(idx, top),
-                            ha='center', va='bottom',
-                            fontsize=13, color='#f0f6fc',
-                            fontweight='bold')
-
-    ax.set_xlabel('Treatments' if lang == 'en' else 'Tratamentos',
-                  color='#8b949e', fontsize=12)
-    ax.set_ylabel('Visual Score (AU)' if lang == 'en' else 'Score Visual (UA)',
-                  color='#8b949e', fontsize=12)
-    ax.tick_params(colors='#8b949e', labelsize=9)
-    ax.set_xticklabels(treatments, rotation=30, ha='right')
-
-    for spine in ax.spines.values():
-        spine.set_edgecolor('#30363d')
-
-    caption = (f'** p < 0.01; * p < 0.05; Reference: {ref_control}')
-    fig.text(0.5, -0.02, caption, ha='center',
-             fontsize=9, color='#8b949e')
-
-    plt.tight_layout()
-
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=150,
-                bbox_inches='tight', facecolor='#161b22')
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode('utf-8')
-
-
-# ---------------------------------------------------
-# GRÁFICO 2 — Distribuição por classes (barras agrupadas)
-# ---------------------------------------------------
-
-def generate_classes_chart(experiment, lang):
-    treatments  = experiment['treatments']
-    replicates  = experiment['replicates']
-    class_names = ['Class 0', 'Class 1', 'Class 2', 'Class 3', 'Class 4']
-    class_keys  = ['class0', 'class1', 'class2', 'class3', 'class4']
-
-    # Agrega contagens por tratamento e classe
-    counts = {t: {k: [] for k in class_keys} for t in treatments}
-
-    for rep in replicates:
-        for gel in rep['gels']:
-            if gel.get('status', 'counted') != 'counted' or gel.get('completion', 'complete') != 'complete':
-                continue
-            t = gel['treatment']
-            if t in counts:
-                for k in class_keys:
-                    counts[t][k].append(gel[k])
-
-    means = {t: [np.nanmean(counts[t][k]) if counts[t][k] else 0 for k in class_keys] for t in treatments}
-    sds   = {t: [np.nanstd(counts[t][k]) if counts[t][k] else 0 for k in class_keys] for t in treatments}
-
-    x      = np.arange(len(class_names))
-    width  = 0.8 / len(treatments)
-    colors = ['#4a9eff', '#3fb950', '#d29922', '#f85149', '#bc8cff']
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    fig.patch.set_facecolor('#161b22')
-    ax.set_facecolor('#161b22')
-
-    for i, treatment in enumerate(treatments):
-        offset = (i - len(treatments) / 2 + 0.5) * width
-        ax.bar(x + offset, means[treatment], width,
-               yerr=sds[treatment], label=treatment,
-               color=colors[i % len(colors)], alpha=0.85,
-               error_kw={'ecolor': '#8b949e', 'capsize': 3})
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(class_names)
-    ax.set_ylabel('Mean Nucleoids' if lang == 'en' else 'Média de Nucleoides',
-                  color='#8b949e', fontsize=12)
-    ax.set_xlabel('Comet Class' if lang == 'en' else 'Classe do Cometa',
-                  color='#8b949e', fontsize=12)
-    ax.tick_params(colors='#8b949e', labelsize=9)
-    ax.legend(loc='best', fontsize=8,
-              facecolor='#21262d', labelcolor='#e6edf3')
-
-    for spine in ax.spines.values():
-        spine.set_edgecolor('#30363d')
-
-    plt.tight_layout()
-
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=150,
-                bbox_inches='tight', facecolor='#161b22')
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode('utf-8')
-
-
-# ---------------------------------------------------
-# FUNÇÃO PRINCIPAL — orquestra todas as análises
-# Chamada pelo JavaScript com os dados do experimento
-# ---------------------------------------------------
-
-def run_all_analyses(experiment_json, lang):
-    experiment = json.loads(experiment_json)
-
-    scores      = calculate_scores(experiment)
-    shapiro     = calculate_shapiro(scores)
-    anova       = calculate_anova(scores)
-    tukey       = calculate_tukey(scores, anova)
-    regression  = calculate_regression(scores, experiment)
-    chart_score = generate_score_chart(scores, tukey, experiment, lang)
-    chart_class = generate_classes_chart(experiment, lang)
-
-    return json.dumps({
-        'scores':     scores,
-        'shapiro':    shapiro,
-        'anova':      anova,
-        'tukey':      tukey,
-        'regression': regression,
-        'chartScore': chart_score,
-        'chartClass': chart_class
-    })
-
-print("CometQuant Python environment ready")
-`
 
 
 // =============================================
@@ -474,9 +71,6 @@ print("CometQuant Python environment ready")
 // =============================================
 
 function initAnalysis() {
-
-  // Inicia o carregamento do Pyodide em segundo plano
-  // assim que o módulo é carregado — Estratégia A
   initPyodide()
 
   document.getElementById('btn-run-analysis')
@@ -493,9 +87,7 @@ function initAnalysis() {
 }
 
 
-// Executa as análises ao clicar em "Run Analysis"
 async function runAnalysis() {
-
   if (!currentExperiment) {
     alert(t('analysis.errorNoData'))
     return
@@ -516,27 +108,30 @@ async function runAnalysis() {
   const btn = document.getElementById('btn-run-analysis')
   btn.disabled = true
   btn.textContent = t('analysis.running')
+  const experimentContext = {
+    id: currentExperiment.id,
+    updatedAt: currentExperiment.updatedAt
+  }
 
   try {
-    // Passa o experimento para o Python via globals
     pyodide.globals.set('experiment_json',
       JSON.stringify(currentExperiment))
     pyodide.globals.set('lang', currentLanguage)
 
-    // Chama a função principal Python
     const resultJson = await pyodide.runPythonAsync(
       `run_all_analyses(experiment_json, lang)`
     )
 
-    // Recebe os resultados de volta como objeto JavaScript
+    // Descarta o resultado se o experimento mudou enquanto o Python executava.
+    if (!currentExperiment || currentExperiment.id !== experimentContext.id || currentExperiment.updatedAt !== experimentContext.updatedAt) {
+      invalidateAnalysisResults()
+      return
+    }
+
     analysisResults = JSON.parse(resultJson)
-
-    // Renderiza tudo na interface
+    analysisResultsContext = experimentContext
     renderAnalysisResults(analysisResults)
-
-    // Mostra a área de resultados
     document.getElementById('analysis-results').style.display = 'block'
-
   } catch (err) {
     console.error('Analysis error:', err)
     alert(`Analysis error: ${err.message}`)
@@ -547,8 +142,26 @@ async function runAnalysis() {
 }
 
 
-// Armazena os resultados para uso nas exportações
+// Armazena os resultados e o estado exato do experimento que os gerou.
 let analysisResults = null
+let analysisResultsContext = null
+
+function invalidateAnalysisResults() {
+  analysisResults = null
+  analysisResultsContext = null
+  const results = document.getElementById('analysis-results')
+  if (results) results.style.display = 'none'
+}
+
+function hasCurrentAnalysisResults() {
+  return Boolean(
+    analysisResults &&
+    analysisResultsContext &&
+    currentExperiment &&
+    analysisResultsContext.id === currentExperiment.id &&
+    analysisResultsContext.updatedAt === currentExperiment.updatedAt
+  )
+}
 
 
 // =============================================
@@ -582,7 +195,12 @@ function renderScoresTable(scores) {
 
 function renderShapiroTable(shapiro) {
   const container = document.getElementById('shapiro-table')
-  const rows = Object.entries(shapiro).map(([treatment, result]) => [treatment, result.W, result.p, result.normal])
+  const rows = Object.entries(shapiro).map(([treatment, result]) => {
+    if (result.performed === false) {
+      return [treatment, 'ND', 'ND', result.reason.detail]
+    }
+    return [treatment, result.W, formatProbability(result.p), result.normal]
+  })
   renderResultTable(container, [t('summary.treatment'), 'W', 'p-value', 'Normal'], rows)
   appendCaption(container, currentLanguage === 'pt' ? 'p > 0,05 indica distribuição normal' : 'p > 0.05 indicates normal distribution')
 }
@@ -591,27 +209,28 @@ function renderShapiroTable(shapiro) {
 function renderAnovaTable(anova) {
   const container = document.getElementById('anova-table')
 
-  if (!anova) {
-    renderNotPerformed(container)
+  if (!anova || anova.performed === false) {
+    renderNotPerformed(container, anova)
     return
   }
-  renderResultTable(container, ['SS', 'DF', 'MS', 'F', 'p-value'], [[anova.SS, anova.DF, anova.MS, anova.F, anova.p]])
+  renderResultTable(container, ['SS', 'DF', 'MS', 'F', 'p-value'], [[anova.SS, anova.DF, anova.MS, anova.F, formatProbability(anova.p)]])
   appendCaption(container, 'SS: sums of squares; MS: mean squares')
 }
 
 
 function renderTukeyTable(tukey) {
   const container = document.getElementById('tukey-table')
+  const comparisons = Array.isArray(tukey) ? tukey : tukey?.comparisons
 
-  if (!tukey || tukey.length === 0) {
-    renderNotPerformed(container)
+  if (!tukey || tukey.performed === false || !comparisons || comparisons.length === 0) {
+    renderNotPerformed(container, tukey)
     return
   }
-  const rows = tukey.map(row => {
+  const rows = comparisons.map(row => {
     const sigText = row.significant
       ? (currentLanguage === 'pt' ? 'Significativo' : 'Significant')
       : (currentLanguage === 'pt' ? 'Não significativo' : 'Not significant')
-    return [row.A, row.B, row.p, sigText]
+    return [row.A, row.B, formatProbability(row.p), sigText]
   })
   renderResultTable(container, ['A', 'B', 'p-value', 'Result'], rows)
 }
@@ -620,16 +239,16 @@ function renderTukeyTable(tukey) {
 function renderRegressionTable(regression) {
   const container = document.getElementById('regression-table')
 
-  if (!regression) {
-    renderNotPerformed(container)
+  if (!regression || regression.performed === false) {
+    renderNotPerformed(container, regression)
     return
   }
   const r = regression.regression
   const p = regression.pearson
   appendCaption(container, currentLanguage === 'pt' ? 'Regressão Linear' : 'Linear Regression')
-  renderResultTable(container, ['p-value', 'R²', 'CI 2.5%', 'CI 97.5%'], [[r.p, r.r2, r.ci_low, r.ci_high]], false)
+  renderResultTable(container, ['p-value', 'R²', 'CI 2.5%', 'CI 97.5%'], [[formatProbability(r.p), r.r2, r.ci_low, r.ci_high]], false)
   appendCaption(container, currentLanguage === 'pt' ? 'Correlação de Pearson' : 'Pearson Correlation')
-  renderResultTable(container, ['r', 'p-value', 'Power'], [[p.r, p.p, p.power]], false)
+  renderResultTable(container, ['r', 'p-value', 'Power'], [[p.r, formatProbability(p.p), p.power]], false)
   appendCaption(container, currentLanguage === 'pt' ? 'r: coeficiente de correlação; Power: poder do teste (α = 0,05)' : 'r: correlation coefficient; Power: test power (α = 0.05)')
 }
 
@@ -676,9 +295,17 @@ function appendCaption(container, text) {
   container.appendChild(caption)
 }
 
-function renderNotPerformed(container) {
+function formatProbability(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '-'
+  if (numeric <= 0.00001) return '< 0.00001'
+  return numeric.toFixed(5)
+}
+
+function renderNotPerformed(container, result) {
   container.replaceChildren()
   appendCaption(container, t('analysis.notPerformed'))
+  if (result?.reason) appendCaption(container, result.reason.detail || result.reason.code)
 }
 
 function appendChart(container, base64, caption, alt) {
@@ -697,7 +324,7 @@ function appendChart(container, base64, caption, alt) {
 // =============================================
 
 function exportReport() {
-  if (!analysisResults || !currentExperiment) return
+  if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
   const html = CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage)
   downloadFile(html, `${exportBaseName()}_report.html`, 'text/html')
@@ -705,14 +332,14 @@ function exportReport() {
 
 
 function exportCsv() {
-  if (!analysisResults || !currentExperiment) return
+  if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
   downloadFile(CometQuantExport.buildRawCsv(currentExperiment), `${exportBaseName()}_raw_slides.csv`, 'text/csv;charset=utf-8')
 }
 
 
 async function exportZip() {
-  if (!analysisResults || !currentExperiment) return
+  if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
   if (typeof JSZip === 'undefined') return alert(currentLanguage === 'pt' ? 'Não foi possível carregar o gerador ZIP.' : 'Could not load the ZIP generator.')
   try {
@@ -737,7 +364,6 @@ async function exportZip() {
 }
 
 
-// Helpers para exportação
 function downloadFile(content, filename, mimeType, isBlob = false) {
   const blob   = isBlob ? content : new Blob([content], {type: mimeType})
   const url    = URL.createObjectURL(blob)

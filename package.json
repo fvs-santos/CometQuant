@@ -6,6 +6,8 @@
     "vendor": "node scripts/vendor.js",
     "postinstall": "npm run vendor",
     "test": "vitest run",
+    "test:analysis": "python -m unittest discover -s tests/python -p \"test_*.py\"",
+    "test:reference:r": "python scripts/validate_reference_with_r.py",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",

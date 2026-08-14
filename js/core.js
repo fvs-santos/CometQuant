@@ -8,6 +8,7 @@
   const SCHEMA_VERSION = 3
   const MAX_FILE_SIZE = 5 * 1024 * 1024
   const LIMITS = { nucleoids: 10000, slides: 100, concentrations: 100, text: 120, detail: 500 }
+  const BLIND_CODE_PATTERN = /^[A-Z2-9]{4}-(?:0[1-9]|[1-9]\d|100)$/
   const ASSIGNMENT_STATUSES = new Set(['pending', 'counting', 'counted', 'absent'])
   const ABSENCE_REASONS = new Set(['broken', 'lost', 'quality', 'insufficient', 'other', 'legacy-unjustified'])
   const INCOMPLETE_REASONS = new Set(['insufficient-cells', 'poor-quality', 'damaged', 'technical-error', 'time-limit', 'other', 'legacy-unjustified'])
@@ -46,6 +47,17 @@
     return { code: fallbackCode, detail: '' }
   }
 
+  function legacyBlindCode(treatmentIndex, gelNumber) {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    let value = treatmentIndex
+    let base = ''
+    for (let index = 0; index < 4; index++) {
+      base = alphabet[value % alphabet.length] + base
+      value = Math.floor(value / alphabet.length)
+    }
+    return `${base}-${String(gelNumber).padStart(2, '0')}`
+  }
+
   function migrateExperiment(raw) {
     if (!isObject(raw)) throw new Error('invalid-root')
     const version = raw.schemaVersion === undefined ? 1 : Number(raw.schemaVersion)
@@ -53,6 +65,14 @@
     if (version > SCHEMA_VERSION) throw new Error('future-schema-version')
 
     const experiment = clone(raw)
+    if (version < 3) {
+      const missingRequiredFields = ['agent', 'cells'].filter(field => !cleanText(experiment[field]))
+      experiment.migration = {
+        ...(isObject(experiment.migration) ? experiment.migration : {}),
+        sourceSchemaVersion: version,
+        missingRequiredFields
+      }
+    }
     experiment.schemaVersion = SCHEMA_VERSION
     experiment.slidesPerTreatment = Number.isInteger(Number(experiment.slidesPerTreatment))
       ? Number(experiment.slidesPerTreatment) : 1
@@ -77,6 +97,31 @@
           delete gel.incompleteReason
         }
       })
+      if (version < 3 && !Array.isArray(replicate.assignments) && Array.isArray(experiment.treatments) && experiment.slidesPerTreatment >= 1 && experiment.slidesPerTreatment <= LIMITS.slides) {
+        const nextGelNumber = new Map()
+        replicate.gels.forEach(gel => {
+          const treatmentIndex = Number.isInteger(gel.treatmentIndex)
+            ? gel.treatmentIndex
+            : experiment.treatments.indexOf(gel.treatment)
+          if (treatmentIndex < 0 || treatmentIndex >= experiment.treatments.length) return
+          const next = (nextGelNumber.get(treatmentIndex) || 0) + 1
+          if (!Number.isInteger(gel.gelNumber) || gel.gelNumber < 1) gel.gelNumber = next
+          nextGelNumber.set(treatmentIndex, Math.max(next, gel.gelNumber))
+          gel.treatmentIndex = treatmentIndex
+          gel.treatment = experiment.treatments[treatmentIndex]
+          gel.blindCode = legacyBlindCode(treatmentIndex, gel.gelNumber)
+        })
+        replicate.assignments = []
+        experiment.treatments.forEach((treatment, treatmentIndex) => {
+          for (let gelNumber = 1; gelNumber <= experiment.slidesPerTreatment; gelNumber++) {
+            const blindCode = legacyBlindCode(treatmentIndex, gelNumber)
+            const gel = replicate.gels.find(item => item.treatmentIndex === treatmentIndex && item.gelNumber === gelNumber)
+            replicate.assignments.push(gel
+              ? { blindCode, treatmentIndex, gelNumber, status: 'counted', ...(gel.recordedAt ? { recordedAt: gel.recordedAt } : {}) }
+              : { blindCode, treatmentIndex, gelNumber, status: 'pending' })
+          }
+        })
+      }
       ;(replicate.assignments || []).forEach(assignment => {
         if (assignment.status === 'absent') {
           assignment.absenceReason = reasonObject(assignment.absenceReason, 'legacy-unjustified')
@@ -95,6 +140,8 @@
 
   function validateExperiment(raw, options = {}) {
     const errors = []
+    const sourceVersion = raw && raw.schemaVersion === undefined ? 1 : Number(raw?.schemaVersion)
+    const requiresAssignmentMapping = sourceVersion >= 3
     let experiment
     try {
       experiment = migrateExperiment(raw)
@@ -103,10 +150,13 @@
     }
     const imported = options.source === 'import'
     const push = (condition, code) => { if (!condition) errors.push(code) }
+    const legacyMissingFields = isObject(experiment.migration) && Number(experiment.migration.sourceSchemaVersion) < 3 && Array.isArray(experiment.migration.missingRequiredFields)
+      ? new Set(experiment.migration.missingRequiredFields)
+      : new Set()
 
     push(typeof experiment.id === 'string' && experiment.id.length > 0 && experiment.id.length <= 200, 'invalid-id')
-    push(cleanText(experiment.agent).length > 0, 'agent-required')
-    push(cleanText(experiment.cells).length > 0, 'cells-required')
+    push(cleanText(experiment.agent).length > 0 || legacyMissingFields.has('agent'), 'agent-required')
+    push(cleanText(experiment.cells).length > 0 || legacyMissingFields.has('cells'), 'cells-required')
     push(validIsoDate(experiment.createdAt) && validIsoDate(experiment.updatedAt), 'invalid-dates')
     push(Number.isInteger(experiment.nucleoidsPerGel) && experiment.nucleoidsPerGel >= 1 && experiment.nucleoidsPerGel <= LIMITS.nucleoids, 'invalid-nucleoids')
     push(Number.isInteger(experiment.slidesPerTreatment) && experiment.slidesPerTreatment >= 1 && experiment.slidesPerTreatment <= LIMITS.slides, 'invalid-slides')
@@ -127,21 +177,29 @@
       replicateNumbers.add(replicate.replicateNumber)
       push(Array.isArray(replicate.gels), `${prefix}-gels`)
       const assignments = Array.isArray(replicate.assignments) ? replicate.assignments : null
+      push(Boolean(assignments) || !requiresAssignmentMapping, `${prefix}-assignments`)
       const codes = new Set()
+      const assignmentKeys = new Set()
       if (assignments) {
+        push(assignments.length === treatments.length * experiment.slidesPerTreatment, `${prefix}-assignment-count`)
         assignments.forEach((assignment, assignmentIndex) => {
           const item = `${prefix}-assignment-${assignmentIndex + 1}`
           push(isObject(assignment), `${item}-invalid`)
           if (!isObject(assignment)) return
-          push(typeof assignment.blindCode === 'string' && /^[A-Z2-9]{4}-\d{2}$/.test(assignment.blindCode), `${item}-code`)
+          push(typeof assignment.blindCode === 'string' && BLIND_CODE_PATTERN.test(assignment.blindCode), `${item}-code`)
           push(!codes.has(assignment.blindCode), `${item}-duplicate-code`)
           codes.add(assignment.blindCode)
           push(Number.isInteger(assignment.treatmentIndex) && assignment.treatmentIndex >= 0 && assignment.treatmentIndex < treatments.length, `${item}-treatment`)
           push(Number.isInteger(assignment.gelNumber) && assignment.gelNumber >= 1 && assignment.gelNumber <= experiment.slidesPerTreatment, `${item}-gel`)
+          const assignmentKey = `${assignment.treatmentIndex}:${assignment.gelNumber}`
+          push(!assignmentKeys.has(assignmentKey), `${item}-duplicate-laminate`)
+          assignmentKeys.add(assignmentKey)
           push(ASSIGNMENT_STATUSES.has(assignment.status), `${item}-status`)
           if (assignment.status === 'absent') push(validateReason(assignment.absenceReason, ABSENCE_REASONS, true), `${item}-absence-reason`)
         })
       }
+      const gelKeys = new Set()
+      const gelCodes = new Set()
       ;(replicate.gels || []).forEach((gel, gelIndex) => {
         const item = `${prefix}-gel-${gelIndex + 1}`
         push(isObject(gel), `${item}-invalid`)
@@ -153,12 +211,29 @@
         push(gel.status === 'counted', `${item}-status`)
         push(gel.completion === (gel.total === experiment.nucleoidsPerGel ? 'complete' : 'incomplete'), `${item}-completion`)
         if (gel.completion === 'incomplete') push(validateReason(gel.incompleteReason, INCOMPLETE_REASONS, true), `${item}-incomplete-reason`)
-        if (Number.isInteger(gel.treatmentIndex)) push(gel.treatment === treatments[gel.treatmentIndex], `${item}-treatment`)
-        if (assignments && gel.blindCode) {
+        if (assignments) {
+          push(typeof gel.blindCode === 'string' && BLIND_CODE_PATTERN.test(gel.blindCode), `${item}-code`)
+          push(Number.isInteger(gel.treatmentIndex) && gel.treatmentIndex >= 0 && gel.treatmentIndex < treatments.length, `${item}-treatment-index`)
+          push(Number.isInteger(gel.gelNumber) && gel.gelNumber >= 1 && gel.gelNumber <= experiment.slidesPerTreatment, `${item}-gel-number`)
+          push(gel.treatment === treatments[gel.treatmentIndex], `${item}-treatment`)
+          const gelKey = `${gel.treatmentIndex}:${gel.gelNumber}`
+          push(!gelKeys.has(gelKey), `${item}-duplicate-laminate`)
+          gelKeys.add(gelKey)
+          push(!gelCodes.has(gel.blindCode), `${item}-duplicate-code`)
+          gelCodes.add(gel.blindCode)
           const assignment = assignments.find(value => value.blindCode === gel.blindCode)
-          push(Boolean(assignment) && assignment.status === 'counted', `${item}-assignment`)
+          push(Boolean(assignment) && assignment.status === 'counted' && assignment.treatmentIndex === gel.treatmentIndex && assignment.gelNumber === gel.gelNumber, `${item}-assignment`)
+        } else if (Number.isInteger(gel.treatmentIndex)) {
+          push(gel.treatment === treatments[gel.treatmentIndex], `${item}-treatment`)
         }
       })
+      if (assignments) {
+        assignments.forEach((assignment, assignmentIndex) => {
+          const item = `${prefix}-assignment-${assignmentIndex + 1}`
+          const gel = (replicate.gels || []).find(value => value && value.blindCode === assignment.blindCode)
+          push(assignment.status === 'counted' ? Boolean(gel) : !gel, `${item}-gel-correspondence`)
+        })
+      }
     })
 
     if (experiment.progress) {
