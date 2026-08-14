@@ -244,6 +244,14 @@ O usuario criou `icons/class_0.png` a `icons/class_4.png`, com mapeamento direto
 
 A decisao para a proxima continuidade e **otimizar antes de usar**: reexportar em 512 x 512, com transparencia, margens e enquadramento uniformes; depois substituir apenas os SVGs inline, manter IDs e `data-class`, adicionar os assets ao precache e incrementar o cache do shell. `teste_icones.png` e `teste_icones_azul.png` sao apenas montagens de comparacao e nao devem integrar o produto.
 
+### Feedback tatil planejado
+
+E viavel adicionar um pulso curto com `navigator.vibrate(10)` em Android/Chromium. A vibracao deve ocorrer somente quando um clique de contagem for aceito, nunca para cliques ignorados, durante o fechamento da lamina ou depois de atingir a meta. A indisponibilidade ou falha da API nao pode bloquear nem alterar a persistencia da contagem.
+
+O plano e oferecer uma preferencia local **Feedback tatil**, habilitada por padrao apenas quando `navigator.vibrate` existir e com opcao para desativar. A chamada deve permanecer separada do commit IndexedDB para nao atrasar o feedback nem enfraquecer o autosave. Safari/iOS nao possui suporte confiavel e deve usar fallback silencioso.
+
+Os testes automatizados devem injetar um mock de `navigator.vibrate`, confirmar um pulso de 10 ms por contagem aceita e ausencia de chamadas em operacoes rejeitadas. A sensacao, intensidade e comportamento com configuracoes do sistema precisam de verificacao manual em um dispositivo Android real; Playwright nao consegue validar o motor fisico.
+
 ## Proximos passos recomendados
 
 Concluido na continuidade de 14/08/2026:
@@ -280,8 +288,9 @@ Concluido na continuidade posterior de 14/08/2026:
 Ordem sugerida para a proxima continuidade:
 
 1. Otimizar `icons/class_0.png` a `icons/class_4.png`, substituir os SVGs e testar acessibilidade, touch, 320 px, Pixel 7 e reload offline.
-2. Definir politica de deploy e revisao externa do protocolo cientifico.
-3. Avaliar Safari/iOS em uma fase especifica de compatibilidade e quota.
+2. Implementar a preferencia de feedback tatil e o pulso de 10 ms para cada contagem aceita, com testes automatizados e validacao manual em Android.
+3. Definir politica de deploy e revisao externa do protocolo cientifico.
+4. Avaliar Safari/iOS em uma fase especifica de compatibilidade e quota.
 
 ## Arquivos de referencia
 
