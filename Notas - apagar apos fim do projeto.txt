@@ -1,4 +1,0 @@
-Ajustes ainda necessários:
-
-- Codificação das lâminas para teste cego
-- Trocar icones dos botões das classes de cometas por imagens melhores

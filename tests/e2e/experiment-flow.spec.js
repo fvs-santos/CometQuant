@@ -17,6 +17,14 @@ test('creates a blinded mobile experiment and blocks revealing summary', async (
   await expect(page.locator('#screen-blind-codes')).toHaveClass(/active/)
   await expect(page.locator('.blind-code-card')).toHaveCount(2)
   await page.getByRole('button', { name: /Identifiquei as lâminas/ }).click()
+  let replicateMessage = ''
+  page.once('dialog', async dialog => {
+    replicateMessage = dialog.message()
+    await dialog.accept()
+  })
+  await page.getByRole('button', { name: 'Gerar Códigos para Próxima Repetição' }).click()
+  expect(replicateMessage).toContain('Conclua todas as lâminas pendentes')
+  await expect(page.locator('#screen-replicates')).toHaveClass(/active/)
   let message = ''
   page.once('dialog', async dialog => {
     message = dialog.message()

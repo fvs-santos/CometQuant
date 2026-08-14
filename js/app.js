@@ -2,6 +2,8 @@
 
 const STORAGE_KEY = 'cometquant-experiments'
 const SCHEMA_VERSION = CometQuantCore.SCHEMA_VERSION
+const MAX_IMPORT_FILES = 20
+const MAX_IMPORT_BATCH_SIZE = 25 * 1024 * 1024
 
 let currentExperiment = null
 let currentTreatmentIndex = 0
@@ -281,12 +283,10 @@ function renderExperimentsList() {
     status.textContent = `${experiment.progress || hasPendingSlides(experiment) ? t('experiments.inProgress') : t('experiments.completed')} · ${t('experiments.updated')}: ${formatDate(experiment.updatedAt)}`
     const actions = document.createElement('div')
     actions.className = 'card-actions'
+    const pending = hasPendingSlides(experiment)
     actions.append(
       actionButton(experiment.progress ? t('experiments.continue') : t('experiments.open'), 'btn-primary', () => openExperiment(experiment.id)),
-      actionButton(t('experiments.export'), 'btn-secondary', () => {
-        if (hasPendingSlides(experiment)) return alert(t('alert.blindingActive'))
-        exportExperimentData(experiment)
-      }),
+      actionButton(pending ? t('experiments.encryptedBackup') : t('experiments.export'), 'btn-secondary', () => pending ? exportEncryptedBackup(experiment) : exportExperimentData(experiment)),
       actionButton(t('experiments.delete'), 'btn-danger', () => deleteExperiment(experiment.id))
     )
     card.append(heading, meta, status, actions)
@@ -691,6 +691,10 @@ function handleAddReplicate() {
     startCounting(true)
     return
   }
+  if (hasPendingSlides(currentExperiment)) {
+    alert(t('alert.pendingReplicate'))
+    return
+  }
   const nextNumber = Math.max(0, ...currentExperiment.replicates.map(rep => Number(rep.replicateNumber) || 0)) + 1
   const candidate = cloneExperiment(currentExperiment)
   candidate.replicates.push(createBlindReplicate(nextNumber, candidate))
@@ -750,27 +754,131 @@ function calculateScore(gel) {
 
 function exportExperimentData(experiment) {
   if (!experiment) return
-  const blob = new Blob([JSON.stringify(experiment, null, 2)], { type: 'application/json' })
+  const safeAgent = (experiment.agent || 'Experiment').replace(/[^a-z0-9_-]+/gi, '_')
+  downloadJson(experiment, `CometQuant_${safeAgent}_${new Date().toISOString().split('T')[0]}.json`)
+}
+
+async function exportEncryptedBackup(experiment) {
+  if (!experiment || typeof CometQuantBackup === 'undefined') return alert(t('backup.failed'))
+  const passphrase = await requestBackupPassphrase(true)
+  if (passphrase === null) return
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const latest = getAllExperiments().find(item => item.id === experiment.id)
+      if (!latest) throw new Error('experiment-not-found')
+      const encrypted = await CometQuantBackup.encryptExperiment(latest, passphrase)
+      const current = getAllExperiments().find(item => item.id === experiment.id)
+      if (current && JSON.stringify(current) === JSON.stringify(latest)) {
+        downloadJson(encrypted, `CometQuant_blinded_${new Date().toISOString().split('T')[0]}.cqbackup.json`)
+        return
+      }
+    }
+    throw new Error('concurrent-update')
+  } catch (error) {
+    console.error('Encrypted backup error:', error)
+    alert(t('backup.failed'))
+  }
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
-  const safeAgent = (experiment.agent || 'Experiment').replace(/[^a-z0-9_-]+/gi, '_')
   anchor.href = url
-  anchor.download = `CometQuant_${safeAgent}_${new Date().toISOString().split('T')[0]}.json`
+  anchor.download = filename
   anchor.click()
   setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function requestBackupPassphrase(requireConfirmation) {
+  const dialog = document.getElementById('backup-password-dialog')
+  const password = document.getElementById('backup-password')
+  const confirmation = document.getElementById('backup-password-confirmation')
+  const confirmationGroup = document.getElementById('backup-confirmation-group')
+  const showPassword = document.getElementById('backup-show-password')
+  const error = document.getElementById('backup-dialog-error')
+  const submit = document.getElementById('backup-dialog-submit')
+  const cancel = document.getElementById('backup-dialog-cancel')
+  document.getElementById('backup-dialog-title').textContent = t(requireConfirmation ? 'backup.encryptTitle' : 'backup.decryptTitle')
+  document.getElementById('backup-dialog-message').textContent = t(requireConfirmation ? 'backup.passphrasePrompt' : 'backup.decryptPrompt')
+  confirmationGroup.hidden = !requireConfirmation
+  password.value = ''
+  confirmation.value = ''
+  password.type = 'password'
+  confirmation.type = 'password'
+  password.autocomplete = requireConfirmation ? 'new-password' : 'current-password'
+  password.setAttribute('aria-invalid', 'false')
+  confirmation.setAttribute('aria-invalid', 'false')
+  showPassword.checked = false
+  error.textContent = ''
+
+  return new Promise(resolve => {
+    const finish = value => {
+      const result = value
+      password.value = ''
+      confirmation.value = ''
+      dialog.close()
+      resolve(result)
+    }
+    const validate = () => {
+      if (!CometQuantBackup.isStrongPassphrase(password.value)) {
+        error.textContent = t('backup.weakPassphrase')
+        password.setAttribute('aria-invalid', 'true')
+        password.focus()
+        return
+      }
+      if (requireConfirmation && password.value !== confirmation.value) {
+        error.textContent = t('backup.passwordMismatch')
+        confirmation.setAttribute('aria-invalid', 'true')
+        confirmation.focus()
+        return
+      }
+      finish(password.value)
+    }
+    submit.onclick = validate
+    cancel.onclick = () => finish(null)
+    dialog.oncancel = event => {
+      event.preventDefault()
+      finish(null)
+    }
+    showPassword.onchange = () => {
+      const type = showPassword.checked ? 'text' : 'password'
+      password.type = type
+      confirmation.type = type
+    }
+    password.oninput = () => {
+      password.setAttribute('aria-invalid', 'false')
+      confirmation.setAttribute('aria-invalid', 'false')
+      error.textContent = ''
+    }
+    confirmation.oninput = password.oninput
+    password.onkeydown = event => { if (event.key === 'Enter' && !requireConfirmation) validate() }
+    confirmation.onkeydown = event => { if (event.key === 'Enter') validate() }
+    dialog.showModal()
+    setTimeout(() => password.focus(), 0)
+  })
 }
 
 async function handleLoadFiles(event) {
   const files = Array.from(event.target.files)
   event.target.value = ''
   if (!files.length) return
+  if (files.length > MAX_IMPORT_FILES) return alert(t('alert.tooManyFiles'))
+  if (files.reduce((total, file) => total + file.size, 0) > MAX_IMPORT_BATCH_SIZE) return alert(t('alert.fileBatchTooLarge'))
+  event.target.disabled = true
   try {
-    const imported = await Promise.all(files.map(readJsonFile))
+    const imported = []
+    for (const file of files) imported.push(await readJsonFile(file))
     const experiments = imported.length > 1 ? [consolidateExperiments(imported)] : imported
     for (const raw of experiments) saveImportedExperiment(raw)
     showExperimentsScreen()
   } catch (error) {
+    if (error.message === 'backup-cancelled') return
+    if (error.message === 'decryption-failed') return alert(t('backup.decryptFailed'))
+    if (error.message === 'partial-progress-conflict') return alert(t('alert.partialMerge'))
     alert(error.message.includes('conflict') ? t('alert.importConflict') : t('alert.importError'))
+  } finally {
+    event.target.disabled = false
   }
 }
 
@@ -790,15 +898,26 @@ function consolidateExperiments(experiments) {
 
 function readJsonFile(file) {
   return new Promise((resolve, reject) => {
-    if (file.size > CometQuantCore.MAX_FILE_SIZE) return reject(new Error(t('alert.fileTooLarge')))
+    const encryptedLimit = Math.ceil(CometQuantCore.MAX_FILE_SIZE * 4 / 3) + 8192
+    const maxFileSize = file.name.toLowerCase().endsWith('.cqbackup.json') ? encryptedLimit : CometQuantCore.MAX_FILE_SIZE
+    if (file.size > maxFileSize) return reject(new Error(t('alert.fileTooLarge')))
     const reader = new FileReader()
-    reader.onload = event => {
+    reader.onload = async event => {
       try {
-        const data = JSON.parse(event.target.result)
+        let data = JSON.parse(event.target.result)
+        if (typeof CometQuantBackup !== 'undefined' && CometQuantBackup.isEncryptedBackup(data)) {
+          const passphrase = await requestBackupPassphrase(false)
+          if (passphrase === null) throw new Error('backup-cancelled')
+          try {
+            data = await CometQuantBackup.decryptExperiment(data, passphrase)
+          } catch {
+            throw new Error('decryption-failed')
+          }
+        }
         if (!data || !data.id || !Array.isArray(data.treatments) || !Array.isArray(data.replicates)) throw new Error()
         resolve(data)
-      } catch {
-        reject(new Error('Invalid CometQuant file'))
+      } catch (error) {
+        reject(error.message === 'backup-cancelled' || error.message === 'decryption-failed' ? error : new Error('Invalid CometQuant file'))
       }
     }
     reader.onerror = reject

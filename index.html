@@ -57,7 +57,7 @@
            style="display: none">
 
     <div class="app-version">
-      <p data-i18n="app.version">CometQuant Lab v1.0</p>
+      <p data-i18n="app.version">CometQuant Lab v1.1.0</p>
       <p data-i18n="app.credits">Developed for mutagenesis research</p>
     </div>
 
@@ -499,6 +499,30 @@
 
 </div>
 
+<dialog id="backup-password-dialog" aria-labelledby="backup-dialog-title">
+  <div class="backup-dialog-content">
+    <h2 id="backup-dialog-title"></h2>
+    <p id="backup-dialog-message" class="muted-text"></p>
+    <div class="form-group">
+      <label for="backup-password" data-i18n="backup.passwordLabel">Password</label>
+      <input id="backup-password" type="password" minlength="12" autocomplete="new-password" aria-describedby="backup-dialog-message backup-dialog-error" aria-invalid="false">
+    </div>
+    <div class="form-group" id="backup-confirmation-group">
+      <label for="backup-password-confirmation" data-i18n="backup.confirmationLabel">Confirm password</label>
+      <input id="backup-password-confirmation" type="password" minlength="12" autocomplete="new-password" aria-describedby="backup-dialog-error" aria-invalid="false">
+    </div>
+    <label class="backup-show-password">
+      <input id="backup-show-password" type="checkbox">
+      <span data-i18n="backup.showPassword">Show password</span>
+    </label>
+    <p id="backup-dialog-error" class="warning-text" role="alert"></p>
+    <div class="backup-dialog-actions">
+      <button type="button" class="btn-secondary" id="backup-dialog-cancel" data-i18n="backup.cancel">Cancel</button>
+      <button type="button" class="btn-primary" id="backup-dialog-submit" data-i18n="backup.continue">Continue</button>
+    </div>
+  </div>
+</dialog>
+
 
   <!-- ============================================
     SCRIPTS — ordem importa
@@ -513,6 +537,7 @@
   </script>
 
   <script src="./vendor/jszip.min.js"></script>
+  <script src="./js/backup.js"></script>
   <script src="./js/core.js"></script>
   <script src="./js/export.js"></script>
   <script src="./js/i18n.js"></script>

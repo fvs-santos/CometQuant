@@ -271,12 +271,9 @@ A estrategia cache-first pode manter arquivos anteriores se `CACHE_NAME` nao mud
 
 Pyodide e carregado por CDN sem SRI e nao existe Content Security Policy. Isso afeta reproducibilidade, disponibilidade offline e o modelo de seguranca para dados de pesquisa potencialmente sensiveis.
 
-### Documentacao e versoes divergentes
+### Documentacao e assets
 
-- `package.json` declara versao `1.1.0`, enquanto a interface ainda apresenta `v1.0` em traducoes.
-- `README.md` descreve apenas instalacao e testes, sem arquitetura, deploy ou protocolo estatistico.
-- `Notas - apagar apos fim do projeto.txt` ainda lista a codificacao cega como pendencia, embora ela ja tenha sido implementada.
-- A nota sobre substituir os icones das classes permanece valida; os botoes ainda usam SVGs esquematicos provisorios.
+A versao da interface foi sincronizada com `package.json`, o README foi expandido e a nota obsoleta foi removida. Os botoes das classes ainda usam SVGs esquematicos provisorios e precisam de imagens cientificamente adequadas.
 
 ## Proximos passos recomendados
 
@@ -291,28 +288,28 @@ Concluido na continuidade de 14/08/2026:
 - valores-p preservam precisao e o poder de Pearson usa distribuicao t nao central;
 - laminas tecnicas sao agregadas por repeticao tanto na inferencia quanto no grafico de classes;
 - fixture estatistica versionada foi comparada automaticamente com SciPy e R 4.6.1;
-- testes reais cobrem Python, R, Pyodide no navegador, falha de quota e legado parcial.
+- testes reais cobrem Python, R, Pyodide no navegador, falha de quota e legado parcial;
+- merge rejeita progresso parcial e codigos divergentes para a mesma lamina logica;
+- nova repeticao e bloqueada enquanto houver laminas pendentes;
+- CI criada para JavaScript, cobertura, Python, R e E2E;
+- README expandido e versao da interface sincronizada em `1.1.0`;
+- backup cego criptografado implementado com PBKDF2-SHA-256 e AES-256-GCM, incluindo restauracao testada no navegador.
 
 Ordem sugerida para a proxima continuidade:
 
-1. Definir formalmente o modelo de ameaca do blinding e implementar um backup cego que nao exponha tratamentos.
-2. Rever o merge para preservar ou rejeitar explicitamente progresso parcial, sem descarte silencioso.
-3. Impedir ou confirmar explicitamente a criacao de nova repeticao antes da conclusao da anterior.
-4. Avaliar IndexedDB ou persistencia granular para reduzir custo de autosave e risco de quota.
-5. Definir se a analise precisa funcionar totalmente offline; se sim, hospedar Pyodide e pacotes localmente.
-6. Criar CI para `npm run check`, testes JavaScript, Python, referencia R, cobertura e E2E.
-7. Expandir o README com arquitetura, schema, fluxo cego, protocolo estatistico, deploy e atualizacao da PWA.
-8. Substituir os SVGs provisorios por imagens cientificamente adequadas e testar acessibilidade/touch.
-9. Sincronizar a versao exibida na UI com `package.json` e remover notas obsoletas.
+1. Avaliar IndexedDB ou persistencia granular para reduzir custo de autosave e risco de quota.
+2. Definir se a analise precisa funcionar totalmente offline; se sim, hospedar Pyodide e pacotes localmente.
+3. Substituir os SVGs provisorios por imagens cientificamente adequadas e testar acessibilidade/touch.
+4. Definir politica de deploy, matriz formal de navegadores e revisao externa do protocolo cientifico.
 
 ## Arquivos de referencia
 
 - `README.md`
-- `Notas - apagar apos fim do projeto.txt`
 - `package.json`
 - `index.html`
 - `js/core.js`
 - `js/app.js`
+- `js/backup.js`
 - `js/analysis.js`
 - `python/cometquant_analysis.py`
 - `js/export.js`
@@ -327,13 +324,15 @@ Ordem sugerida para a proxima continuidade:
 - `tests/integration/persistence.test.js`
 - `tests/e2e/experiment-flow.spec.js`
 - `tests/e2e/analysis-flow.spec.js`
+- `tests/e2e/backup-flow.spec.js`
 - `tests/python/test_cometquant_analysis.py`
 - `tests/reference/v1/`
+- `.github/workflows/ci.yml`
 
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- Referencia principal anterior: commit `0b0779a` de 13/08/2026; as alteracoes descritas acima ainda nao foram commitadas.
+- Referencia principal: commit `48ef84e` de 14/08/2026; as alteracoes posteriores de merge, CI e documentacao ainda nao foram commitadas.
 - A implementacao possui validacao estatistica automatizada independente, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
-- Nao ha CI, politica de deploy, matriz formal de navegadores ou protocolo cientifico revisado externamente.
-- Os principais riscos remanescentes sao backup durante o cegamento, merge de progresso parcial, dependencia da CDN para Pyodide e persistencia integral no `localStorage`.
+- Ha CI automatizada, mas ainda nao ha politica de deploy, matriz formal de navegadores ou protocolo cientifico revisado externamente.
+- O backup exportado e criptografado, mas o `localStorage` permanece em texto claro; os principais riscos remanescentes sao dependencia da CDN para Pyodide e persistencia integral no `localStorage`.

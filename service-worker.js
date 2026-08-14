@@ -1,6 +1,6 @@
 // Nome do "cache" — funciona como um rótulo
 // Quando atualizar o app, mude o número da versão aqui
-const CACHE_NAME = 'cometquant-v5'
+const CACHE_NAME = 'cometquant-v6'
 
 // Lista de todos os arquivos que o Service Worker vai guardar
 const FILES_TO_CACHE = [
@@ -9,6 +9,7 @@ const FILES_TO_CACHE = [
   './manifest.json',
   './css/style.css',
   './js/app.js',
+  './js/backup.js',
   './js/core.js',
   './js/export.js',
   './js/i18n.js',

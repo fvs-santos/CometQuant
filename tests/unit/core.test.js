@@ -129,4 +129,28 @@ describe('aggregation and consolidation', () => {
     second.replicates[0].gels[0].class4 = 100
     expect(() => core.mergeExperiments([first, second], () => 'merged')).toThrow(/gel-conflict/)
   })
+
+  it('rejects consolidation while partial counting is active', () => {
+    const partial = experiment()
+    partial.replicates[0].gels = []
+    partial.replicates[0].assignments[0].status = 'counting'
+    partial.progress = {
+      replicateNumber: 1,
+      treatmentIndex: 0,
+      gelIndex: 0,
+      blindCode: 'ABCD-01',
+      counts: [1, 0, 0, 0, 0],
+      clickHistory: [0],
+      updatedAt: '2026-01-02T00:00:00.000Z'
+    }
+    expect(() => core.mergeExperiments([partial], () => 'merged')).toThrow(/partial-progress-conflict/)
+  })
+
+  it('rejects different blind codes for the same logical slide', () => {
+    const first = experiment()
+    const second = experiment({ id: 'exp-2' })
+    second.replicates[0].assignments[0].blindCode = 'EFGH-01'
+    second.replicates[0].gels[0].blindCode = 'EFGH-01'
+    expect(() => core.mergeExperiments([first, second], () => 'merged')).toThrow(/assignment-conflict/)
+  })
 })

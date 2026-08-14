@@ -332,6 +332,7 @@
     const reference = experiments[0]
     const keys = ['agent', 'cells', 'negControl', 'posControl', 'solControl', 'concUnit', 'nucleoidsPerGel', 'slidesPerTreatment']
     if (!experiments.every(item => keys.every(key => item[key] === reference[key]) && stableEqual(item.treatments, reference.treatments))) throw new Error('incompatible-experiments')
+    if (experiments.some(item => item.progress || item.replicates.some(rep => rep.assignments?.some(assignment => assignment.status === 'counting')))) throw new Error('partial-progress-conflict')
 
     const result = clone(reference)
     result.id = createId()
@@ -361,6 +362,8 @@
             merged.assignments[index] = mergedItem
             assignments.set(item.blindCode, mergedItem)
           } else {
+            const logicalMatch = merged.assignments.find(value => value.treatmentIndex === item.treatmentIndex && value.gelNumber === item.gelNumber)
+            if (logicalMatch) throw new Error(`assignment-conflict:${item.treatmentIndex}:${item.gelNumber}`)
             const added = clone(item)
             merged.assignments.push(added)
             assignments.set(item.blindCode, added)
@@ -371,7 +374,9 @@
     result.replicates = Array.from(replicateMap.values()).sort((a, b) => a.replicateNumber - b.replicateNumber)
     result.updatedAt = new Date().toISOString()
     result.status = hasPendingSlides(result) ? 'in-progress' : 'completed'
-    return result
+    const validation = validateExperiment(result, { source: 'import' })
+    if (!validation.valid) throw new Error(`invalid-merged-experiment:${validation.errors.join(',')}`)
+    return validation.experiment
   }
 
   return {
