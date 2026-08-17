@@ -191,7 +191,9 @@ async function handleCreateExperiment() {
     progress: null
   }
 
-  experiment.replicates.push(createBlindReplicate(1, experiment))
+  const firstReplicate = createBlindReplicate(1, experiment)
+  if (!firstReplicate) return alert(t('alert.blindCodesExhausted'))
+  experiment.replicates.push(firstReplicate)
   creatingExperiment = true
   const saved = await saveExperiment(experiment)
   creatingExperiment = false
@@ -210,17 +212,15 @@ function resetSetupForm() {
 }
 
 function createBlindReplicate(replicateNumber, experiment = currentExperiment) {
-  const usedCodes = new Set()
+  const availableBases = CometQuantCore.availableBlindCodeBases(experiment)
+  if (availableBases.length < experiment.treatments.length) return null
   const assignments = []
-  experiment.treatments.forEach((treatment, treatmentIndex) => {
-    let baseCode
-    do baseCode = randomBlindCode()
-    while (usedCodes.has(baseCode))
-    usedCodes.add(baseCode)
+  experiment.treatments.forEach((_, treatmentIndex) => {
+    const baseCode = availableBases.splice(randomIndex(availableBases.length), 1)[0]
 
     for (let gelIndex = 0; gelIndex < experiment.slidesPerTreatment; gelIndex++) {
       assignments.push({
-        blindCode: `${baseCode}-${String(gelIndex + 1).padStart(2, '0')}`,
+        blindCode: `${baseCode}${gelIndex + 1}`,
         treatmentIndex,
         gelNumber: gelIndex + 1,
         status: 'pending'
@@ -237,16 +237,15 @@ function createBlindReplicate(replicateNumber, experiment = currentExperiment) {
   }
 }
 
-function randomBlindCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  const values = new Uint32Array(4)
-  if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(values)
-  else {
-    for (let index = 0; index < values.length; index++) {
-      values[index] = Math.floor(Math.random() * alphabet.length)
-    }
+function randomIndex(maxExclusive) {
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+    const values = new Uint32Array(1)
+    const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive
+    do window.crypto.getRandomValues(values)
+    while (values[0] >= limit)
+    return values[0] % maxExclusive
   }
-  return Array.from(values, value => alphabet[value % alphabet.length]).join('')
+  return Math.floor(Math.random() * maxExclusive)
 }
 
 function showBlindCodes(replicate) {
@@ -796,7 +795,9 @@ async function handleAddReplicate() {
   }
   const nextNumber = Math.max(0, ...currentExperiment.replicates.map(rep => Number(rep.replicateNumber) || 0)) + 1
   const candidate = cloneExperiment(currentExperiment)
-  candidate.replicates.push(createBlindReplicate(nextNumber, candidate))
+  const replicate = createBlindReplicate(nextNumber, candidate)
+  if (!replicate) return alert(t('alert.blindCodesExhausted'))
+  candidate.replicates.push(replicate)
   candidate.status = 'in-progress'
   replicateCommitPending = true
   const saved = await saveExperiment(candidate)

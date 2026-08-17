@@ -7,6 +7,19 @@ async function seedLegacyData(page, experiments) {
   await page.goto('/')
 }
 
+function completedCompactExperiment(id = 'compact-code-test') {
+  return {
+    schemaVersion: 4, id, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    status: 'completed', researcher: '', agent: 'Agent', cells: 'CHO-K1', negControl: 'PBS', posControl: '', solControl: '',
+    nucleoidsPerGel: 1, slidesPerTreatment: 1, concUnit: 'µM', treatments: ['PBS'], progress: null,
+    replicates: [{
+      replicateNumber: 1, date: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      assignments: [{ blindCode: 'AB1', treatmentIndex: 0, gelNumber: 1, status: 'counted', recordedAt: '2026-01-01T00:00:00.000Z' }],
+      gels: [{ blindCode: 'AB1', treatment: 'PBS', treatmentIndex: 0, gelNumber: 1, class0: 1, class1: 0, class2: 0, class3: 0, class4: 0, total: 1, status: 'counted', completion: 'complete', recordedAt: '2026-01-01T00:00:00.000Z' }]
+    }]
+  }
+}
+
 test('creates a blinded mobile experiment and blocks revealing summary', async ({ page }) => {
   await page.addInitScript(() => localStorage.clear())
   await page.goto('/')
@@ -16,13 +29,22 @@ test('creates a blinded mobile experiment and blocks revealing summary', async (
   await page.locator('#input-cells').fill('CHO-K1')
   await page.locator('#input-neg-control').fill('PBS')
   await page.locator('#input-nucleoids').fill('10')
-  await page.locator('#input-slides-per-treatment').fill('1')
+  await page.locator('#input-slides-per-treatment').fill('2')
   await page.locator('#input-conditions').fill('1')
   await page.locator('#input-conc-unit').selectOption('µM')
   await page.locator('#input-conc-0').fill('5')
   await page.getByRole('button', { name: 'Salvar Experimento e Gerar Códigos' }).click()
   await expect(page.locator('#screen-blind-codes')).toHaveClass(/active/)
   await expect(page.locator('.blind-code-card')).toHaveCount(2)
+  const generatedCodes = await page.locator('.blind-code-card').evaluateAll(cards => cards.map(card => (
+    Array.from(card.querySelectorAll('code'), code => code.textContent)
+  )))
+  generatedCodes.forEach(codes => {
+    expect(codes).toHaveLength(2)
+    expect(codes[0]).toMatch(/^[A-Z]{2}1$/)
+    expect(codes[1]).toBe(`${codes[0].slice(0, 2)}2`)
+  })
+  expect(new Set(generatedCodes.map(codes => codes[0].slice(0, 2))).size).toBe(2)
   await page.getByRole('button', { name: /Identifiquei as lâminas/ }).click()
   let replicateMessage = ''
   page.once('dialog', async dialog => {
@@ -85,6 +107,42 @@ test('reveals generated mappings before continuing a partial legacy experiment',
   await page.getByRole('button', { name: /I labeled the slides/ }).click()
   await page.getByRole('button', { name: 'Analyze Slides' }).click()
   await expect(page.locator('#screen-code-entry')).toHaveClass(/active/)
+})
+
+test('does not reuse compact bases across replicates and accepts spaced lowercase input', async ({ page }) => {
+  const data = completedCompactExperiment()
+  await seedLegacyData(page, [data])
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.getByRole('button', { name: 'Open' }).click()
+  await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
+  await page.getByRole('button', { name: 'Add Replicate' }).click()
+
+  const generatedCode = await page.locator('.blind-code-values code').textContent()
+  expect(generatedCode).toMatch(/^[A-Z]{2}1$/)
+  expect(generatedCode.slice(0, 2)).not.toBe('AB')
+
+  await page.getByRole('button', { name: /I labeled the slides/ }).click()
+  await page.getByRole('button', { name: 'Analyze Slides' }).click()
+  await page.locator('#input-blind-code').fill(generatedCode.toLowerCase().split('').join(' '))
+  await page.getByRole('button', { name: 'Start Counting' }).click()
+  await expect(page.locator('#counter-treatment-name')).toHaveText(generatedCode)
+})
+
+test('blocks a new replicate when compact bases are exhausted', async ({ page }) => {
+  await seedLegacyData(page, [completedCompactExperiment('exhausted-code-test')])
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.getByRole('button', { name: 'Open' }).click()
+  await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
+  await page.evaluate(() => { CometQuantCore.availableBlindCodeBases = () => [] })
+
+  let message = ''
+  page.once('dialog', async dialog => {
+    message = dialog.message()
+    await dialog.accept()
+  })
+  await page.getByRole('button', { name: 'Add Replicate' }).click()
+  expect(message).toContain('not enough blind codes')
+  await expect(page.locator('#screen-summary')).toHaveClass(/active/)
 })
 
 test('keeps the previous state when storage commits fail and allows retry', async ({ page }) => {

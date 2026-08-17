@@ -20,7 +20,7 @@ describe('migration and validation', () => {
     const legacy = experiment({ schemaVersion: 2 })
     legacy.replicates[0].gels[0] = completeGel({ total: 90, class2: 90, completion: undefined })
     const migrated = core.migrateExperiment(legacy)
-    expect(migrated.schemaVersion).toBe(3)
+    expect(migrated.schemaVersion).toBe(4)
     expect(migrated.replicates[0].gels[0].completion).toBe('incomplete')
     expect(migrated.replicates[0].gels[0].incompleteReason.code).toBe('legacy-unjustified')
   })
@@ -42,6 +42,18 @@ describe('migration and validation', () => {
     expect(second.valid).toBe(true)
   })
 
+  it('migrates schema v3 without changing legacy blind codes', () => {
+    const legacy = experiment({ schemaVersion: 3 })
+    legacy.replicates[0].assignments[0].blindCode = 'ABCD-01'
+    legacy.replicates[0].gels[0].blindCode = 'ABCD-01'
+
+    const result = core.validateExperiment(legacy, { source: 'import' })
+    expect(result.valid).toBe(true)
+    expect(result.experiment.schemaVersion).toBe(4)
+    expect(result.experiment.replicates[0].assignments[0].blindCode).toBe('ABCD-01')
+    expect(result.experiment.replicates[0].gels[0].blindCode).toBe('ABCD-01')
+  })
+
   it('keeps missing legacy treatments pending instead of inventing absences', () => {
     const legacy = experiment({ schemaVersion: 2, treatments: ['Control', 'Dose'] })
     delete legacy.replicates[0].assignments
@@ -59,7 +71,7 @@ describe('migration and validation', () => {
     expect(result.errors).toContain('replicate-1-gel-1-total')
   })
 
-  it('requires a complete, unique assignment map in schema v3', () => {
+  it('requires a complete, unique assignment map in schema v4', () => {
     const invalid = experiment()
     invalid.replicates[0].assignments[0].status = 'counted'
     invalid.replicates[0].gels = []
@@ -90,19 +102,91 @@ describe('migration and validation', () => {
     expect(result.errors).toEqual(expect.arrayContaining(['agent-required', 'cells-required', 'unit-required', 'invalid-concentrations']))
   })
 
-  it('accepts the 100th slide code without accepting zero-padded overflow', () => {
-    const data = experiment({ slidesPerTreatment: 100 })
-    data.replicates[0].assignments = Array.from({ length: 100 }, (_, index) => ({
+  it('accepts compact and legacy codes through slide 100 without leading zeroes in compact codes', () => {
+    const legacy = experiment({ slidesPerTreatment: 100 })
+    legacy.replicates[0].assignments = Array.from({ length: 100 }, (_, index) => ({
       blindCode: `ABCD-${String(index + 1).padStart(2, '0')}`,
       treatmentIndex: 0,
       gelNumber: index + 1,
       status: 'pending'
     }))
-    data.replicates[0].gels = []
-    expect(core.validateExperiment(data, { source: 'import' }).valid).toBe(true)
+    legacy.replicates[0].gels = []
+    expect(core.validateExperiment(legacy, { source: 'import' }).valid).toBe(true)
 
-    data.replicates[0].assignments[99].blindCode = 'ABCD-00'
-    expect(core.validateExperiment(data, { source: 'import' }).valid).toBe(false)
+    const compact = experiment({ slidesPerTreatment: 100 })
+    compact.replicates[0].assignments = Array.from({ length: 100 }, (_, index) => ({
+      blindCode: `AB${index + 1}`,
+      treatmentIndex: 0,
+      gelNumber: index + 1,
+      status: 'pending'
+    }))
+    compact.replicates[0].gels = []
+    expect(core.validateExperiment(compact, { source: 'import' }).valid).toBe(true)
+
+    compact.replicates[0].assignments[0].blindCode = 'AB01'
+    expect(core.validateExperiment(compact, { source: 'import' }).valid).toBe(false)
+  })
+
+  it('requires compact suffixes to match slide numbers and one base per treatment', () => {
+    const data = experiment({ slidesPerTreatment: 2 })
+    data.replicates[0].assignments = [
+      { blindCode: 'AB1', treatmentIndex: 0, gelNumber: 1, status: 'pending' },
+      { blindCode: 'AC2', treatmentIndex: 0, gelNumber: 2, status: 'pending' }
+    ]
+    data.replicates[0].gels = []
+    let result = core.validateExperiment(data, { source: 'import' })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('replicate-1-assignment-2-treatment-code-base')
+
+    data.replicates[0].assignments[1].blindCode = 'AB3'
+    result = core.validateExperiment(data, { source: 'import' })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('replicate-1-assignment-2-code-gel')
+  })
+
+  it('rejects reuse of a compact base in another replicate', () => {
+    const data = experiment()
+    data.replicates.push({
+      replicateNumber: 2,
+      date: '2026-01-03',
+      createdAt: '2026-01-03T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+      assignments: [{ blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1, status: 'pending' }],
+      gels: []
+    })
+    const result = core.validateExperiment(data, { source: 'import' })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('replicate-2-assignment-1-duplicate-code-base')
+  })
+})
+
+describe('blind code allocation', () => {
+  it('recognizes compact ordered bases and legacy codes', () => {
+    expect(core.parseBlindCode('AB1')).toEqual({ format: 'compact', base: 'AB', gelNumber: 1 })
+    expect(core.parseBlindCode('BA100')).toEqual({ format: 'compact', base: 'BA', gelNumber: 100 })
+    expect(core.parseBlindCode('ABCD-01')).toEqual({ format: 'legacy', base: 'ABCD', gelNumber: 1 })
+    ;['A1', 'AAA1', 'AB01', 'AB-1', 'ab1'].forEach(code => expect(core.parseBlindCode(code)).toBeNull())
+  })
+
+  it('allocates all 676 ordered bases without reusing compact codes', () => {
+    const allBases = core.availableBlindCodeBases({ replicates: [] })
+    expect(allBases).toHaveLength(676)
+    expect(allBases).toEqual(expect.arrayContaining(['AA', 'AB', 'BA', 'ZZ']))
+
+    const used = {
+      replicates: [{ assignments: [
+        { blindCode: 'AB1' },
+        { blindCode: 'BA100' },
+        { blindCode: 'ABCD-01' }
+      ] }]
+    }
+    const remaining = core.availableBlindCodeBases(used)
+    expect(remaining).toHaveLength(674)
+    expect(remaining).not.toContain('AB')
+    expect(remaining).not.toContain('BA')
+
+    const exhausted = { replicates: [{ assignments: allBases.map(base => ({ blindCode: `${base}1` })) }] }
+    expect(core.availableBlindCodeBases(exhausted)).toEqual([])
   })
 })
 
@@ -138,7 +222,7 @@ describe('aggregation and consolidation', () => {
       replicateNumber: 1,
       treatmentIndex: 0,
       gelIndex: 0,
-      blindCode: 'ABCD-01',
+      blindCode: 'AA1',
       counts: [1, 0, 0, 0, 0],
       clickHistory: [0],
       updatedAt: '2026-01-02T00:00:00.000Z'

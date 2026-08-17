@@ -5,10 +5,11 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict'
 
-  const SCHEMA_VERSION = 3
+  const SCHEMA_VERSION = 4
   const MAX_FILE_SIZE = 5 * 1024 * 1024
   const LIMITS = { nucleoids: 10000, slides: 100, concentrations: 100, text: 120, detail: 500 }
-  const BLIND_CODE_PATTERN = /^[A-Z2-9]{4}-(?:0[1-9]|[1-9]\d|100)$/
+  const LEGACY_BLIND_CODE_PATTERN = /^([A-Z2-9]{4})-(0[1-9]|[1-9]\d|100)$/
+  const COMPACT_BLIND_CODE_PATTERN = /^([A-Z]{2})([1-9]|[1-9]\d|100)$/
   const ASSIGNMENT_STATUSES = new Set(['pending', 'counting', 'counted', 'absent'])
   const ABSENCE_REASONS = new Set(['broken', 'lost', 'quality', 'insufficient', 'other', 'legacy-unjustified'])
   const INCOMPLETE_REASONS = new Set(['insufficient-cells', 'poor-quality', 'damaged', 'technical-error', 'time-limit', 'other', 'legacy-unjustified'])
@@ -28,6 +29,34 @@
 
   function validIsoDate(value) {
     return typeof value === 'string' && !Number.isNaN(Date.parse(value))
+  }
+
+  function parseBlindCode(value) {
+    if (typeof value !== 'string') return null
+    const compact = COMPACT_BLIND_CODE_PATTERN.exec(value)
+    if (compact) return { format: 'compact', base: compact[1], gelNumber: Number(compact[2]) }
+    const legacy = LEGACY_BLIND_CODE_PATTERN.exec(value)
+    if (legacy) return { format: 'legacy', base: legacy[1], gelNumber: Number(legacy[2]) }
+    return null
+  }
+
+  function availableBlindCodeBases(experiment) {
+    const usedBases = new Set()
+    ;(experiment?.replicates || []).forEach(replicate => {
+      ;(replicate.assignments || []).forEach(assignment => {
+        const parsed = parseBlindCode(assignment.blindCode)
+        if (parsed?.format === 'compact') usedBases.add(parsed.base)
+      })
+    })
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    const bases = []
+    for (const first of alphabet) {
+      for (const second of alphabet) {
+        const base = `${first}${second}`
+        if (!usedBases.has(base)) bases.push(base)
+      }
+    }
+    return bases
   }
 
   function calculateVisualScore(gel, target) {
@@ -73,6 +102,7 @@
         missingRequiredFields
       }
     }
+    // Schema v4 adds compact blind codes while preserving every legacy code verbatim.
     experiment.schemaVersion = SCHEMA_VERSION
     experiment.slidesPerTreatment = Number.isInteger(Number(experiment.slidesPerTreatment))
       ? Number(experiment.slidesPerTreatment) : 1
@@ -168,6 +198,8 @@
     push(Array.isArray(experiment.replicates) && experiment.replicates.length <= 1000, 'invalid-replicates')
 
     const replicateNumbers = new Set()
+    const compactBaseOwners = new Map()
+    const compactOwnerBases = new Map()
     experiment.replicates.forEach((replicate, repIndex) => {
       const prefix = `replicate-${repIndex + 1}`
       push(isObject(replicate), `${prefix}-invalid`)
@@ -186,11 +218,20 @@
           const item = `${prefix}-assignment-${assignmentIndex + 1}`
           push(isObject(assignment), `${item}-invalid`)
           if (!isObject(assignment)) return
-          push(typeof assignment.blindCode === 'string' && BLIND_CODE_PATTERN.test(assignment.blindCode), `${item}-code`)
+          const parsedCode = parseBlindCode(assignment.blindCode)
+          push(Boolean(parsedCode), `${item}-code`)
           push(!codes.has(assignment.blindCode), `${item}-duplicate-code`)
           codes.add(assignment.blindCode)
           push(Number.isInteger(assignment.treatmentIndex) && assignment.treatmentIndex >= 0 && assignment.treatmentIndex < treatments.length, `${item}-treatment`)
           push(Number.isInteger(assignment.gelNumber) && assignment.gelNumber >= 1 && assignment.gelNumber <= experiment.slidesPerTreatment, `${item}-gel`)
+          if (parsedCode?.format === 'compact') {
+            const owner = `${repIndex}:${assignment.treatmentIndex}`
+            push(parsedCode.gelNumber === assignment.gelNumber, `${item}-code-gel`)
+            push(!compactBaseOwners.has(parsedCode.base) || compactBaseOwners.get(parsedCode.base) === owner, `${item}-duplicate-code-base`)
+            push(!compactOwnerBases.has(owner) || compactOwnerBases.get(owner) === parsedCode.base, `${item}-treatment-code-base`)
+            if (!compactBaseOwners.has(parsedCode.base)) compactBaseOwners.set(parsedCode.base, owner)
+            if (!compactOwnerBases.has(owner)) compactOwnerBases.set(owner, parsedCode.base)
+          }
           const assignmentKey = `${assignment.treatmentIndex}:${assignment.gelNumber}`
           push(!assignmentKeys.has(assignmentKey), `${item}-duplicate-laminate`)
           assignmentKeys.add(assignmentKey)
@@ -212,9 +253,11 @@
         push(gel.completion === (gel.total === experiment.nucleoidsPerGel ? 'complete' : 'incomplete'), `${item}-completion`)
         if (gel.completion === 'incomplete') push(validateReason(gel.incompleteReason, INCOMPLETE_REASONS, true), `${item}-incomplete-reason`)
         if (assignments) {
-          push(typeof gel.blindCode === 'string' && BLIND_CODE_PATTERN.test(gel.blindCode), `${item}-code`)
+          const parsedCode = parseBlindCode(gel.blindCode)
+          push(Boolean(parsedCode), `${item}-code`)
           push(Number.isInteger(gel.treatmentIndex) && gel.treatmentIndex >= 0 && gel.treatmentIndex < treatments.length, `${item}-treatment-index`)
           push(Number.isInteger(gel.gelNumber) && gel.gelNumber >= 1 && gel.gelNumber <= experiment.slidesPerTreatment, `${item}-gel-number`)
+          if (parsedCode?.format === 'compact') push(parsedCode.gelNumber === gel.gelNumber, `${item}-code-gel`)
           push(gel.treatment === treatments[gel.treatmentIndex], `${item}-treatment`)
           const gelKey = `${gel.treatmentIndex}:${gel.gelNumber}`
           push(!gelKeys.has(gelKey), `${item}-duplicate-laminate`)
@@ -381,7 +424,7 @@
 
   return {
     SCHEMA_VERSION, MAX_FILE_SIZE, LIMITS, ABSENCE_REASONS, INCOMPLETE_REASONS,
-    cleanText, calculateVisualScore, isIncludedGel, migrateExperiment, validateExperiment,
+    cleanText, parseBlindCode, availableBlindCodeBases, calculateVisualScore, isIncludedGel, migrateExperiment, validateExperiment,
     validateSetup, hasPendingSlides, aggregateReplicateScores, mergeExperiments
   }
 })

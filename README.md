@@ -43,9 +43,14 @@ is significant.
 
 ## Data And Blinding
 
-The current experiment schema is version 3. Each replicate contains a complete
+The current experiment schema is version 4. Each replicate contains a complete
 mapping of blind assignments and counted slides. Assignment states are
 `pending`, `counting`, `counted` or `absent`.
+
+New blind codes use two ordered letters and an unpadded slide number, such as
+`AB1`, `AB2` or `CY10`. The 676 bases from `AA` through `ZZ` are allocated
+without reuse across the whole experiment. Legacy codes such as `ABCD-01`
+remain valid and are preserved unchanged during migration and import.
 
 Counts are committed atomically to IndexedDB after every increment and undo.
 Terminal operations only advance the interface after a successful validated

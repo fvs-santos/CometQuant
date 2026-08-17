@@ -49,7 +49,7 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 
 ## Modelo de dados
 
-O schema atual e a versao 3, definida em `js/core.js`.
+O schema atual e a versao 4, definida em `js/core.js`.
 
 Um experimento contem, em linhas gerais:
 
@@ -74,7 +74,9 @@ Dados antigos sao migrados antes do uso:
 
 ### Criacao e codificacao cega
 
-O usuario informa metadados, controles, concentracoes, meta de nucleoides e numero de laminas. A aplicacao cria a primeira repeticao, gera codigos-base aleatorios de quatro caracteres e adiciona sufixos de lamina como `-01` e `-02`.
+O usuario informa metadados, controles, concentracoes, meta de nucleoides e numero de laminas. A aplicacao cria a primeira repeticao e gera codigos com duas letras ordenadas e o numero da lamina sem hifen ou zero a esquerda, como `AB1`, `AB2` e `CY10`.
+
+As 676 bases de `AA` a `ZZ` sao sorteadas sem reposicao no experimento inteiro. Uma nova repeticao e bloqueada se nao houver bases suficientes para todos os tratamentos. Codigos legados como `ABCD-01` continuam validos e sao preservados sem alteracao em migracoes, importacoes e backups.
 
 A geracao usa preferencialmente `crypto.getRandomValues`. O mapa entre tratamento e codigo e mostrado durante a preparacao; depois disso, a tela de contagem trabalha apenas com o codigo cego.
 

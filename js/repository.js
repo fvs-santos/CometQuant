@@ -134,6 +134,26 @@
     stored.forEach(record => records.set(record.id, record))
   }
 
+  async function upgradeStoredRecords() {
+    const transaction = database.transaction('experiments', 'readwrite')
+    const store = transaction.objectStore('experiments')
+    const stored = await requestResult(store.getAll())
+    let upgraded = 0
+    stored.forEach(record => {
+      if (record.deleted || !record.data || record.data.schemaVersion === root.CometQuantCore.SCHEMA_VERSION) return
+      const result = validate(record.data)
+      if (result.error || result.data.id !== record.id) return
+      store.put({
+        ...record,
+        revision: (Number.isInteger(record.revision) ? record.revision : 0) + 1,
+        data: result.data
+      })
+      upgraded++
+    })
+    await transactionComplete(transaction)
+    return upgraded
+  }
+
   async function init(options = {}) {
     storageKey = options.storageKey || storageKey
     if (mode !== 'uninitialized') return { mode, migrated: false, quarantined: 0 }
@@ -145,13 +165,15 @@
         listeners.forEach(listener => listener({ type: 'versionchange' }))
       }
       const migration = await migrateLegacyData()
+      const upgraded = await upgradeStoredRecords()
       await loadRecords()
+      if (upgraded > 0) mirrorToLocalStorage()
       mode = 'indexeddb'
       if (typeof root.BroadcastChannel === 'function') {
         channel = new root.BroadcastChannel('cometquant-storage')
         channel.onmessage = event => handleBroadcast(event.data)
       }
-      return { mode, ...migration }
+      return { mode, ...migration, upgraded }
     } catch (error) {
       database?.close()
       throw error

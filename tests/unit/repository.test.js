@@ -37,7 +37,7 @@ describe('IndexedDB repository', () => {
     const result = await repository.init()
 
     expect(result).toMatchObject({ mode: 'indexeddb', migrated: true, quarantined: 3 })
-    expect(repository.list()).toEqual([expect.objectContaining({ id: 'valid-record', schemaVersion: 3 })])
+    expect(repository.list()).toEqual([expect.objectContaining({ id: 'valid-record', schemaVersion: 4 })])
     expect(repository.getRevision('valid-record')).toBe(1)
     expect(await readStore('quarantine')).toHaveLength(3)
     const meta = await readStore('meta')
@@ -45,6 +45,33 @@ describe('IndexedDB repository', () => {
     const recovery = await repository.getRecoveryData()
     expect(recovery.legacySnapshot).toBe(raw)
     expect(recovery.quarantine).toHaveLength(3)
+  })
+
+  it('upgrades authoritative IndexedDB records without changing legacy blind codes', async () => {
+    await repository.init()
+    const legacy = experiment({ schemaVersion: 3, id: 'indexeddb-v3' })
+    legacy.replicates[0].assignments[0].blindCode = 'ABCD-01'
+    legacy.replicates[0].gels[0].blindCode = 'ABCD-01'
+    const database = await requestResult(indexedDB.open('cometquant', 1))
+    const transaction = database.transaction('experiments', 'readwrite')
+    transaction.objectStore('experiments').put({ id: legacy.id, revision: 7, deleted: false, data: legacy })
+    await new Promise((resolve, reject) => {
+      transaction.oncomplete = resolve
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
+    database.close()
+
+    delete require.cache[require.resolve('../../js/repository.js')]
+    repository = require('../../js/repository.js')
+    const result = await repository.init()
+
+    expect(result.upgraded).toBe(1)
+    expect(repository.getRevision(legacy.id)).toBe(8)
+    expect(repository.getRecord(legacy.id).data).toMatchObject({
+      schemaVersion: 4,
+      replicates: [{ assignments: [{ blindCode: 'ABCD-01' }], gels: [{ blindCode: 'ABCD-01' }] }]
+    })
   })
 
   it('preserves a corrupt root in quarantine instead of overwriting it', async () => {

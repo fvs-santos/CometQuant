@@ -75,7 +75,7 @@ const translations = {
 
     'codeEntry.title': 'Identificar Lâmina',
     'codeEntry.code': 'Código da lâmina',
-    'codeEntry.code.placeholder': 'Ex: L7K2-01',
+    'codeEntry.code.placeholder': 'Ex: AB1',
     'codeEntry.absent': 'Lâmina ausente',
     'codeEntry.reason': 'Motivo (opcional)',
     'codeEntry.reasonRequired': 'Motivo',
@@ -182,6 +182,7 @@ const translations = {
     'alert.needUnitConcentrations': 'Selecione a unidade e informe concentrações válidas e não duplicadas.',
     'alert.blindingActive': 'Conclua todas as lâminas da repetição antes de revelar tratamentos, analisar ou exportar dados.',
     'alert.pendingReplicate': 'Conclua todas as lâminas pendentes antes de criar uma nova repetição.',
+    'alert.blindCodesExhausted': 'Não há códigos cegos disponíveis para todos os tratamentos desta nova repetição.',
     'alert.invalidData': 'Os dados do experimento são inválidos ou inconsistentes.',
     'alert.fileTooLarge': 'O arquivo excede o limite de 5 MB.',
     'alert.tooManyFiles': 'Selecione no máximo 20 arquivos por importação.',
@@ -287,7 +288,7 @@ const translations = {
 
     'codeEntry.title': 'Identify Slide',
     'codeEntry.code': 'Slide code',
-    'codeEntry.code.placeholder': 'e.g. L7K2-01',
+    'codeEntry.code.placeholder': 'e.g. AB1',
     'codeEntry.absent': 'Slide absent',
     'codeEntry.reason': 'Reason (optional)',
     'codeEntry.reasonRequired': 'Reason',
@@ -394,6 +395,7 @@ const translations = {
     'alert.needUnitConcentrations': 'Select the unit and enter valid, non-duplicate concentrations.',
     'alert.blindingActive': 'Complete every slide in the replicate before revealing treatments, analyzing, or exporting data.',
     'alert.pendingReplicate': 'Complete all pending slides before creating a new replicate.',
+    'alert.blindCodesExhausted': 'There are not enough blind codes available for every treatment in this new replicate.',
     'alert.invalidData': 'The experiment data is invalid or inconsistent.',
     'alert.fileTooLarge': 'The file exceeds the 5 MB limit.',
     'alert.tooManyFiles': 'Select at most 20 files per import.',
