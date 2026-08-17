@@ -39,6 +39,16 @@ describe('browser-facing contracts', () => {
     expect(index).not.toContain('<svg')
   })
 
+  it('keeps storage diagnostics aligned with the completed shell cache', () => {
+    const science = fs.readFileSync(path.resolve(__dirname, '../../js/science-package.js'), 'utf8')
+    const serviceWorker = fs.readFileSync(path.resolve(__dirname, '../../service-worker.js'), 'utf8')
+    const shellVersion = serviceWorker.match(/CACHE_NAME = `\$\{SHELL_CACHE_PREFIX\}(v\d+)`/)?.[1]
+    expect(shellVersion).toBeTruthy()
+    expect(science).toContain(`const SHELL_CACHE_NAME = 'cometquant-shell-${shellVersion}'`)
+    expect(science).toContain("const SHELL_READY_MARKER = './cometquant-shell-ready'")
+    expect(serviceWorker).toContain("const SHELL_READY_MARKER = './cometquant-shell-ready'")
+  })
+
   it('associates analysis results with the current experiment version', () => {
     const analysis = fs.readFileSync(path.resolve(__dirname, '../../js/analysis.js'), 'utf8')
     const app = fs.readFileSync(path.resolve(__dirname, '../../js/app.js'), 'utf8')

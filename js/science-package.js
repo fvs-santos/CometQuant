@@ -8,6 +8,8 @@
   const MANIFEST_URL = './science-assets.json'
   const MARKER_FILE = 'cometquant-install.json'
   const SCIENCE_CACHE_PREFIX = 'cometquant-science-'
+  const SHELL_CACHE_NAME = 'cometquant-shell-v10'
+  const SHELL_READY_MARKER = './cometquant-shell-ready'
   let manifestPromise = null
 
   function fetchManifest() {
@@ -90,6 +92,110 @@
     const estimate = root.navigator.storage.estimate ? await root.navigator.storage.estimate() : null
     const persisted = root.navigator.storage.persist ? await root.navigator.storage.persist() : false
     return { persisted, estimate }
+  }
+
+  function diagnosticError(error) {
+    const name = error?.name
+    const detail = error?.message
+    const value = name && name !== 'Error' ? name : detail || name || 'unknown-error'
+    return String(value).replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 200)
+  }
+
+  async function inspectStorage() {
+    const storage = root.navigator?.storage
+    const serviceWorker = root.navigator?.serviceWorker
+    const report = {
+      generatedAt: new Date().toISOString(),
+      userAgent: root.navigator?.userAgent || '',
+      platform: root.navigator?.platform || '',
+      standalone: Boolean(root.navigator?.standalone || root.matchMedia?.('(display-mode: standalone)')?.matches),
+      secureContext: root.isSecureContext === true,
+      indexedDB: Boolean(root.indexedDB),
+      cacheStorage: Boolean(root.caches),
+      serviceWorker: {
+        supported: Boolean(serviceWorker),
+        controlled: Boolean(serviceWorker?.controller)
+      },
+      estimate: {
+        supported: typeof storage?.estimate === 'function',
+        usage: null,
+        quota: null,
+        available: null,
+        error: null
+      },
+      persistence: {
+        supported: typeof storage?.persisted === 'function',
+        requestSupported: typeof storage?.persist === 'function',
+        persisted: null,
+        error: null
+      },
+      caches: {
+        shell: [],
+        shellReady: null,
+        science: [],
+        error: null
+      },
+      sciencePackage: {
+        version: null,
+        expectedBytes: null,
+        downloadBytes: null,
+        installed: false,
+        error: null
+      }
+    }
+
+    if (report.estimate.supported) {
+      try {
+        const estimate = await storage.estimate()
+        report.estimate.usage = Number.isFinite(estimate?.usage) ? estimate.usage : null
+        report.estimate.quota = Number.isFinite(estimate?.quota) ? estimate.quota : null
+        if (report.estimate.usage !== null && report.estimate.quota !== null) {
+          report.estimate.available = Math.max(0, report.estimate.quota - report.estimate.usage)
+        }
+      } catch (error) {
+        report.estimate.error = diagnosticError(error)
+      }
+    }
+
+    if (report.persistence.supported) {
+      try {
+        report.persistence.persisted = Boolean(await storage.persisted())
+      } catch (error) {
+        report.persistence.error = diagnosticError(error)
+      }
+    }
+
+    let manifest = null
+    try {
+      manifest = await fetchManifest()
+      report.sciencePackage.version = manifest.version
+      report.sciencePackage.expectedBytes = Number.isFinite(manifest.totalBytes) ? manifest.totalBytes : null
+      report.sciencePackage.downloadBytes = Number.isFinite(manifest.downloadBytes) ? manifest.downloadBytes : null
+    } catch (error) {
+      report.sciencePackage.error = diagnosticError(error)
+    }
+
+    if (report.cacheStorage) {
+      try {
+        const keys = await root.caches.keys()
+        report.caches.shell = keys.filter(key => key.startsWith('cometquant-shell-'))
+        report.caches.science = keys.filter(key => key.startsWith(SCIENCE_CACHE_PREFIX))
+        if (keys.includes(SHELL_CACHE_NAME)) {
+          const shellCache = await root.caches.open(SHELL_CACHE_NAME)
+          const marker = await shellCache.match(new URL(SHELL_READY_MARKER, root.location?.href || 'http://localhost/').href)
+          report.caches.shellReady = Boolean(marker && await marker.text() === SHELL_CACHE_NAME)
+        } else {
+          report.caches.shellReady = false
+        }
+        if (manifest && keys.includes(manifest.cacheName)) {
+          report.sciencePackage.installed = await isInstalled(manifest)
+        }
+      } catch (error) {
+        report.caches.error = diagnosticError(error)
+      }
+    }
+
+    return report
   }
 
   function throwIfAborted(signal) {
@@ -175,5 +281,5 @@
     return caches.delete(manifest.cacheName)
   }
 
-  return { fetchManifest, indexUrl, isInstalled, install, remove, sha256Hex }
+  return { fetchManifest, indexUrl, isInstalled, install, remove, inspectStorage, sha256Hex }
 })

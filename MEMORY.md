@@ -44,7 +44,7 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 - NumPy 1.26.4, SciPy 1.12.0 e Matplotlib 3.5.2 carregados pelo Pyodide.
 - JSZip 3.10.1 vendorizado em `vendor/jszip.min.js`.
 - Vitest 3.2.4 com jsdom para testes unitarios e de integracao.
-- Playwright 1.54.2 para o fluxo E2E em emulacao de Pixel 7.
+- Playwright para fluxos E2E em Chromium/Pixel 7 e WebKit/iPhone.
 - `http-server` para servir a aplicacao nos testes E2E.
 
 ## Modelo de dados
@@ -232,27 +232,29 @@ Os dois compartilham a quota da origem e podem ser removidos sob pressao de arma
 
 O shell e a contagem nao carregam Pyodide. Para analisar, o usuario precisa preparar uma vez o pacote pinado: cerca de 35,7 MB transferidos e 104,4 MB armazenados. Os artefatos vem inicialmente do jsDelivr, mas cada corpo e validado por tamanho e SHA-256 antes de ser ativado. Alterar Pyodide ou pacotes exige nova revisao do manifesto `science-assets.json`, novas URLs virtuais e repeticao da validacao cientifica.
 
-### Compatibilidade inicial restrita ao Chromium
+### Compatibilidade automatizada em Chromium e WebKit
 
-A automacao usa Chromium com emulacao Pixel 7. Safari/iOS ainda nao foi validado para quota, Cache Storage, Web Locks, service worker ou memoria do runtime cientifico.
+A automacao usa Chromium com emulacao Pixel 7 e Playwright WebKit com emulacao iPhone. A tela de diagnostico registra APIs, quota estimada, persistencia, shell offline e pacote cientifico sem expor dados experimentais. Isso nao equivale a Safari/iOS real, que ainda precisa da matriz manual em `docs/safari-ios-storage-checklist.md` para quota, eviccao, Files, ciclo da PWA e memoria do runtime cientifico.
+
+O Chromium executa reload realmente offline com `context.setOffline(true)`. O Playwright WebKit valida integridade do cache, reload e reutilizacao do runtime sem novos downloads da CDN, pois seu motor no Windows falha internamente ao recarregar com a emulacao offline ativa. Encerramento e reabertura realmente offline no Safari/iOS permanecem obrigatorios na checklist fisica.
 
 ### Uso cientifico critico exige revisao externa
 
 As referencias automatizadas com SciPy, R e Pyodide reduzem risco de regressao, mas nao substituem validacao regulatoria, revisao independente do protocolo estatistico ou politica formal de deploy.
 
-### Assets das classes aguardam otimizacao
+### Assets das classes otimizados
 
-O usuario criou `icons/class_0.png` a `icons/class_4.png`, com mapeamento direto para as cinco classes. Os originais sao PNG RGB de 1254 x 1254, sem transparencia, com moldura e fundo incorporados e total aproximado de 2,66 MiB. `class_3.png` possui escala visual maior que as demais.
+`icons/class_0.png` a `icons/class_4.png` foram convertidos para PNG RGBA de 512 x 512, com transparencia, margens uniformizadas e total aproximado de 344 KiB. Eles substituem os SVGs inline e fazem parte do precache do shell.
 
-A decisao para a proxima continuidade e **otimizar antes de usar**: reexportar em 512 x 512, com transparencia, margens e enquadramento uniformes; depois substituir apenas os SVGs inline, manter IDs e `data-class`, adicionar os assets ao precache e incrementar o cache do shell. `teste_icones.png` e `teste_icones_azul.png` sao apenas montagens de comparacao e nao devem integrar o produto.
+`teste_icones.png` e `teste_icones_azul.png` sao apenas montagens de comparacao e nao devem integrar o produto.
 
-### Feedback tatil planejado
+### Feedback tatil implementado
 
-E viavel adicionar um pulso curto com `navigator.vibrate(10)` em Android/Chromium. A vibracao deve ocorrer somente quando um clique de contagem for aceito, nunca para cliques ignorados, durante o fechamento da lamina ou depois de atingir a meta. A indisponibilidade ou falha da API nao pode bloquear nem alterar a persistencia da contagem.
+Um pulso curto com `navigator.vibrate(10)` ocorre em Android/Chromium somente quando um clique de contagem e aceito, nunca para cliques ignorados, durante o fechamento da lamina ou depois de atingir a meta. A indisponibilidade ou falha da API nao bloqueia nem altera a persistencia da contagem.
 
-O plano e oferecer uma preferencia local **Feedback tatil**, habilitada por padrao apenas quando `navigator.vibrate` existir e com opcao para desativar. A chamada deve permanecer separada do commit IndexedDB para nao atrasar o feedback nem enfraquecer o autosave. Safari/iOS nao possui suporte confiavel e deve usar fallback silencioso.
+A preferencia local **Feedback tatil** e habilitada por padrao apenas quando `navigator.vibrate` existe e pode ser desativada. A chamada permanece separada do commit IndexedDB. Safari/iOS usa fallback silencioso.
 
-Os testes automatizados devem injetar um mock de `navigator.vibrate`, confirmar um pulso de 10 ms por contagem aceita e ausencia de chamadas em operacoes rejeitadas. A sensacao, intensidade e comportamento com configuracoes do sistema precisam de verificacao manual em um dispositivo Android real; Playwright nao consegue validar o motor fisico.
+Os testes automatizados injetam um mock de `navigator.vibrate`, confirmam um pulso de 10 ms por contagem aceita e ausencia de chamadas em operacoes rejeitadas. A sensacao, intensidade e comportamento com configuracoes do sistema ainda precisam de verificacao manual em um dispositivo Android real; Playwright nao valida o motor fisico.
 
 ## Proximos passos recomendados
 
@@ -287,12 +289,24 @@ Concluido na continuidade posterior de 14/08/2026:
 - Playwright cobre migracao, falha de commit, conflito entre abas e analise offline real;
 - a verificacao final passou com 37 testes JavaScript, 94,49% de cobertura global, 12 testes Python, 28 metricas comparadas com R e 7 cenarios Playwright.
 
+Concluido na continuidade de 17/08/2026:
+
+- os cinco assets de classe foram otimizados para PNG RGBA 512 x 512, integrados a interface e ao precache;
+- feedback tatil opcional foi implementado com pulso de 10 ms apenas para contagens aceitas e fallback silencioso;
+- codigos cegos novos passaram ao formato compacto de duas letras e numero sem hifen ou zero a esquerda, com 676 bases sem reposicao no experimento;
+- schema 4 preserva codigos antigos, valida sufixo e `gelNumber`, rejeita reutilizacao de bases e migra registros autoritativos do IndexedDB de forma transacional;
+- a tela **Diagnostico de Armazenamento** informa suporte, quota/uso estimados, persistencia, IndexedDB, caches, service worker, shell e pacote cientifico;
+- o relatorio tecnico nao solicita persistencia, nao inclui conteudo nem quantidade de experimentos e registra apenas timestamp, user agent, plataforma, capacidades, estimativas e erros sanitizados;
+- o shell `cometquant-shell-v10` grava um marcador somente depois que todo o `cache.addAll()` termina, evitando diagnostico falso de cache completo;
+- Playwright passou a ter projetos `chromium-pixel-7` e `webkit-iphone`; a CI executa ambos em matriz e preserva traces de falhas;
+- a checklist real de Safari/iOS e armazenamento foi versionada em `docs/safari-ios-storage-checklist.md`;
+- a verificacao final passou com 49 testes JavaScript, 95,39% de cobertura global, 17 cenarios Chromium e 17 cenarios WebKit.
+
 Ordem sugerida para a proxima continuidade:
 
-1. Otimizar `icons/class_0.png` a `icons/class_4.png`, substituir os SVGs e testar acessibilidade, touch, 320 px, Pixel 7 e reload offline.
-2. Implementar a preferencia de feedback tatil e o pulso de 10 ms para cada contagem aceita, com testes automatizados e validacao manual em Android.
+1. Executar a checklist em Safari macOS, iPhone e iPad reais, incluindo PWA instalada, baixa disponibilidade de espaco e Pyodide offline.
+2. Validar manualmente a sensacao do feedback tatil em Android real.
 3. Definir politica de deploy e revisao externa do protocolo cientifico.
-4. Avaliar Safari/iOS em uma fase especifica de compatibilidade e quota.
 
 ## Arquivos de referencia
 
@@ -311,7 +325,7 @@ Ordem sugerida para a proxima continuidade:
 - `js/export.js`
 - `js/i18n.js`
 - `css/style.css`
-- `icons/class_0.png` a `icons/class_4.png` (fontes para a proxima otimizacao; ainda nao referenciadas pela interface)
+- `icons/class_0.png` a `icons/class_4.png` (assets otimizados e usados pela interface)
 - `service-worker.js`
 - `manifest.json`
 - `vitest.config.js`
@@ -325,6 +339,8 @@ Ordem sugerida para a proxima continuidade:
 - `tests/e2e/analysis-flow.spec.js`
 - `tests/e2e/backup-flow.spec.js`
 - `tests/e2e/storage-concurrency.spec.js`
+- `tests/e2e/storage-diagnostics.spec.js`
+- `docs/safari-ios-storage-checklist.md`
 - `tests/python/test_cometquant_analysis.py`
 - `tests/reference/v1/`
 - `.github/workflows/ci.yml`
@@ -332,7 +348,7 @@ Ordem sugerida para a proxima continuidade:
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- A continuidade atual implementa IndexedDB, pacote cientifico offline opcional, Web Worker, concorrencia entre abas e os testes correspondentes; consultar `git log` para o commit publicado ao fim da sessao.
+- A continuidade atual inclui IndexedDB autoritativo, pacote cientifico offline opcional, Web Worker, concorrencia entre abas, codigos cegos compactos, diagnostico de armazenamento e matriz E2E Chromium/WebKit; consultar `git log` para o commit publicado ao fim da sessao.
 - A implementacao possui validacao estatistica automatizada independente, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
-- Ha CI automatizada, mas ainda nao ha politica de deploy, matriz formal de navegadores ou protocolo cientifico revisado externamente.
+- Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

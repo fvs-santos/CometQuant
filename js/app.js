@@ -20,19 +20,24 @@ let creatingExperiment = false
 let blindCodeCommitPending = false
 let replicateCommitPending = false
 let hapticFeedbackEnabled = false
+let storageInitialization = { status: 'checking', error: null }
+let lastStorageDiagnostics = null
 const revealedLegacyMappings = new Set()
 
 document.addEventListener('DOMContentLoaded', async () => {
   applyLanguage()
   updateLanguageButtons()
   initHapticFeedback()
+  initStorageDiagnostics()
   try {
     const storage = await CometQuantRepository.init({ storageKey: STORAGE_KEY })
+    storageInitialization = { status: 'available', error: null }
     CometQuantRepository.subscribe(handleRepositoryEvent)
     recoveryAvailable = storage.quarantined > 0
     document.getElementById('btn-export-recovery').hidden = !recoveryAvailable
     if (recoveryAvailable) alert(t('storage.quarantine').replace('{count}', String(storage.quarantined)))
   } catch (error) {
+    storageInitialization = { status: 'unavailable', error: storageDiagnosticError(error) }
     console.error('Storage initialization error:', error)
     alert(t('storage.unavailable'))
     return
@@ -69,6 +74,116 @@ window.setLanguage = function (lang) {
   if (document.getElementById('screen-code-entry').classList.contains('active')) renderCodeEntry()
   if (document.getElementById('screen-summary').classList.contains('active')) renderSummaryTable()
   if (document.getElementById('screen-analysis').classList.contains('active')) renderAnalysisState()
+  if (document.getElementById('screen-storage-diagnostics').classList.contains('active') && lastStorageDiagnostics) renderStorageDiagnostics(lastStorageDiagnostics)
+}
+
+function initStorageDiagnostics() {
+  document.getElementById('btn-storage-diagnostics').addEventListener('click', () => {
+    showScreen('screen-storage-diagnostics')
+    document.getElementById('storage-diagnostics-title').focus()
+    runStorageDiagnostics()
+  })
+  document.getElementById('btn-back-storage-diagnostics').addEventListener('click', () => {
+    showScreen('screen-home')
+    document.getElementById('btn-storage-diagnostics').focus()
+  })
+  document.getElementById('btn-run-storage-diagnostics').addEventListener('click', runStorageDiagnostics)
+  document.getElementById('btn-download-storage-diagnostics').addEventListener('click', () => {
+    if (!lastStorageDiagnostics) return
+    downloadJson(lastStorageDiagnostics, `CometQuant_storage_diagnostics_${new Date().toISOString().split('T')[0]}.json`)
+  })
+}
+
+function storageDiagnosticError(error) {
+  const name = error?.name
+  const detail = error?.message
+  const value = name && name !== 'Error' ? name : detail || name || 'storage-error'
+  return String(value).replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 200)
+}
+
+async function runStorageDiagnostics() {
+  const runButton = document.getElementById('btn-run-storage-diagnostics')
+  const downloadButton = document.getElementById('btn-download-storage-diagnostics')
+  const status = document.getElementById('storage-diagnostics-status')
+  runButton.disabled = true
+  downloadButton.disabled = true
+  status.textContent = t('diagnostics.checking')
+  try {
+    const report = await CometQuantScience.inspectStorage()
+    report.repository = {
+      ...storageInitialization
+    }
+    lastStorageDiagnostics = report
+    renderStorageDiagnostics(report)
+    downloadButton.disabled = false
+  } catch (error) {
+    console.error('Storage diagnostics error:', error)
+    status.textContent = t('diagnostics.failed')
+  } finally {
+    runButton.disabled = false
+  }
+}
+
+function renderStorageDiagnostics(report) {
+  const results = document.getElementById('storage-diagnostics-results')
+  const rows = [
+    ['repository', t(`diagnostics.status.${report.repository.status}`)],
+    ['indexedDB', diagnosticAvailability(report.indexedDB)],
+    ['cacheStorage', diagnosticAvailability(report.cacheStorage)],
+    ['serviceWorker', report.serviceWorker.supported
+      ? t(report.serviceWorker.controlled ? 'diagnostics.controlled' : 'diagnostics.notControlled')
+      : t('diagnostics.unavailable')],
+    ['offlineShell', !report.cacheStorage
+      ? t('diagnostics.unavailable')
+      : report.caches.error
+        ? t('diagnostics.unknown')
+        : t(report.caches.shellReady ? 'diagnostics.available' : 'diagnostics.incomplete')],
+    ['sciencePackage', !report.cacheStorage
+      ? t('diagnostics.unavailable')
+      : report.sciencePackage.installed ? t('diagnostics.installed') : t('diagnostics.notInstalled')],
+    ['scienceExpected', formatDiagnosticBytes(report.sciencePackage.expectedBytes)],
+    ['usage', formatDiagnosticBytes(report.estimate.usage)],
+    ['quota', formatDiagnosticBytes(report.estimate.quota)],
+    ['availableSpace', formatDiagnosticBytes(report.estimate.available)],
+    ['persistent', report.persistence.persisted === null
+      ? t('diagnostics.unknown')
+      : t(report.persistence.persisted ? 'diagnostics.yes' : 'diagnostics.no')],
+    ['standalone', t(report.standalone ? 'diagnostics.yes' : 'diagnostics.no')],
+    ['secureContext', t(report.secureContext ? 'diagnostics.yes' : 'diagnostics.no')]
+  ]
+  const elements = []
+  rows.forEach(([key, value]) => {
+    const term = document.createElement('dt')
+    term.textContent = t(`diagnostics.field.${key}`)
+    const description = document.createElement('dd')
+    description.dataset.diagnostic = key
+    description.textContent = String(value)
+    elements.push(term, description)
+  })
+  results.replaceChildren(...elements)
+
+  const partial = report.repository.status !== 'available' || !report.indexedDB || !report.cacheStorage ||
+    !report.serviceWorker.supported || !report.serviceWorker.controlled || !report.estimate.supported ||
+    report.estimate.usage === null || report.estimate.quota === null || !report.persistence.supported ||
+    report.caches.shellReady !== true || report.estimate.error ||
+    report.persistence.error || report.caches.error || report.sciencePackage.error
+  document.getElementById('storage-diagnostics-status').textContent = t(partial ? 'diagnostics.partial' : 'diagnostics.complete')
+}
+
+function diagnosticAvailability(available) {
+  return t(available ? 'diagnostics.available' : 'diagnostics.unavailable')
+}
+
+function formatDiagnosticBytes(bytes) {
+  if (!Number.isFinite(bytes)) return t('diagnostics.unknown')
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value.toLocaleString(currentLanguage === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]}`
 }
 
 function initNavigation() {

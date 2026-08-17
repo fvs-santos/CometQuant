@@ -62,7 +62,7 @@ function referenceExperiment() {
   }
 }
 
-test('runs the extracted Python engine in Pyodide with reference results', async ({ page }) => {
+test('runs the extracted Python engine in Pyodide with reference results', async ({ page, browserName }) => {
   test.setTimeout(360000)
   const remoteRequests = []
   page.on('request', request => {
@@ -88,7 +88,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
     pyodide: '0.26.2', python: '3.12.1', numpy: '1.26.4', scipy: '1.12.0', matplotlib: '3.5.2'
   })
 
-  await page.context().setOffline(true)
+  if (browserName !== 'webkit') await page.context().setOffline(true)
   await page.reload()
   await page.getByRole('button', { name: 'Resume Experiment' }).click()
   await page.getByRole('button', { name: 'Open' }).click()

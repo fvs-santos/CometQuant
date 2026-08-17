@@ -55,7 +55,7 @@ async function openCounter(page) {
   await page.getByRole('button', { name: 'Start Counting' }).click()
 }
 
-test('loads optimized class icons at 320 px and after an offline reload', async ({ page, context }) => {
+test('loads optimized class icons at 320 px and keeps them in the offline cache', async ({ page, context, browserName }) => {
   await page.setViewportSize({ width: 320, height: 700 })
   await preparePage(page)
   await openCounter(page)
@@ -71,6 +71,13 @@ test('loads optimized class icons at 320 px and after an offline reload', async 
 
   await page.evaluate(() => navigator.serviceWorker.ready)
   await page.reload()
+  if (browserName === 'webkit') {
+    const cachedIcons = await page.evaluate(async () => Promise.all(
+      Array.from({ length: 5 }, (_, index) => caches.match(`./icons/class_${index}.png`).then(Boolean))
+    ))
+    expect(cachedIcons).toEqual([true, true, true, true, true])
+    return
+  }
   await context.setOffline(true)
   await page.reload()
   await expect.poll(() => icons.evaluateAll(images => images.map(image => image.complete && image.naturalWidth))).toEqual([512, 512, 512, 512, 512])

@@ -51,6 +51,10 @@
               data-i18n="home.resumeExperiment">
         Resume Experiment
       </button>
+      <button class="btn-secondary" id="btn-storage-diagnostics"
+              data-i18n="diagnostics.open">
+        Storage Diagnostics
+      </button>
     </div>
 
     <!-- Input de arquivo oculto — ativado pelo botão acima -->
@@ -66,6 +70,34 @@
       <p data-i18n="app.credits">Developed for mutagenesis research</p>
     </div>
 
+  </div>
+
+
+  <!-- TELA: DIAGNÓSTICO DE ARMAZENAMENTO -->
+  <div id="screen-storage-diagnostics" class="screen">
+    <div class="screen-header">
+      <button class="btn-back" id="btn-back-storage-diagnostics"
+              data-i18n="btn.back">← Back</button>
+      <h2 id="storage-diagnostics-title" tabindex="-1"
+          data-i18n="diagnostics.title">Storage Diagnostics</h2>
+    </div>
+    <div class="diagnostics-panel">
+      <p class="muted-text" data-i18n="diagnostics.description">
+        Technical estimates for browser storage and offline capabilities.
+      </p>
+      <div class="card-actions">
+        <button class="btn-primary" id="btn-run-storage-diagnostics"
+                data-i18n="diagnostics.run">Run Diagnostics</button>
+        <button class="btn-secondary" id="btn-download-storage-diagnostics"
+                data-i18n="diagnostics.download" disabled>Download Report</button>
+      </div>
+      <div id="storage-diagnostics-status" class="diagnostics-status"
+           role="status" aria-live="polite"></div>
+      <dl id="storage-diagnostics-results" class="diagnostics-grid"></dl>
+      <p class="diagnostics-warning" data-i18n="diagnostics.warning">
+        Storage values are estimates. Keep encrypted backups of important experiments.
+      </p>
+    </div>
   </div>
 
 

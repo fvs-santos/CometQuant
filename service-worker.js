@@ -2,7 +2,8 @@
 // Quando atualizar o app, mude o número da versão aqui
 const SHELL_CACHE_PREFIX = 'cometquant-shell-'
 const SCIENCE_CACHE_PREFIX = 'cometquant-science-'
-const CACHE_NAME = `${SHELL_CACHE_PREFIX}v9`
+const CACHE_NAME = `${SHELL_CACHE_PREFIX}v10`
+const SHELL_READY_MARKER = './cometquant-shell-ready'
 
 // Lista de todos os arquivos que o Service Worker vai guardar
 const FILES_TO_CACHE = [
@@ -41,6 +42,9 @@ self.addEventListener('install', event => {
       .then(cache => {
         console.log('CometQuant: arquivos salvos para uso offline')
         return cache.addAll(FILES_TO_CACHE)
+          .then(() => cache.put(SHELL_READY_MARKER, new Response(CACHE_NAME, {
+            headers: { 'Content-Type': 'text/plain' }
+          })))
       })
   )
 })

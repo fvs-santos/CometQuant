@@ -9,13 +9,13 @@ has no backend or remote database.
 - Node.js 20 or newer for development and automated tests.
 - Python 3.12 with `requirements-test.txt` for statistical engine tests.
 - R 4 or newer only for the optional independent statistical audit.
-- Chromium installed by Playwright for browser tests.
+- Chromium and WebKit installed by Playwright for browser tests.
 
 ## Development
 
 ```powershell
 npm ci
-npx playwright install chromium
+npx playwright install chromium webkit
 python -m pip install -r requirements-test.txt
 npm run check
 npm test
@@ -23,6 +23,10 @@ npm run test:analysis
 npm run test:reference:r
 npm run test:e2e
 ```
+
+Use `npm run test:e2e:chromium` or `npm run test:e2e:webkit` to run one browser
+project. The WebKit project emulates an iPhone but does not replace validation
+on Safari and real iOS hardware.
 
 `npm ci` copies JSZip to `vendor/` so ZIP exports work in static deployments.
 Use `npx http-server . -p 4173 -c-1` to run the application locally.
@@ -34,6 +38,7 @@ Use `npx http-server . -p 4173 -c-1` to run the application locally.
 - `js/backup.js`: password-based encrypted backup envelopes for active blinding.
 - `js/core.js`: schema migration, validation, scoring, aggregation and merge.
 - `js/analysis.js`: Pyodide bridge, result rendering and analysis exports.
+- `js/science-package.js`: verified scientific package installation and storage diagnostics.
 - `python/cometquant_analysis.py`: statistical engine used by both Pyodide and Python tests.
 - `js/export.js`: safe JSON, CSV, HTML and ZIP builders.
 - `service-worker.js`: application-shell cache for the PWA.
@@ -127,10 +132,21 @@ or future-version records are retained in quarantine. When quarantine data is
 present, the experiments screen offers a recovery export. Encrypted backups
 remain the durable transfer and disaster-recovery mechanism.
 
+The Storage Diagnostics screen reports API availability, estimated usage and
+quota, persistent-storage state, offline shell state and scientific package
+status. These values are technical estimates and the report contains no
+experiment contents or experiment counts. It does include a timestamp, browser
+user agent and platform string for troubleshooting. Real-device validation follows
+`docs/safari-ios-storage-checklist.md`.
+
+Chromium automation performs a fully offline reload. Playwright WebKit verifies
+cache completeness and runtime reuse after reload; true offline process restart
+and storage eviction remain part of the real-device checklist.
+
 ## Known Limitations
 
 - IndexedDB data at rest is not encrypted and remains accessible to a user with browser or device access.
 - Encrypted backup protects the exported file, not a device user with access to browser storage or developer tools.
 - Merge rejects active partial progress instead of reconciling concurrent counts.
-- Browser automation currently targets Chromium with Pixel 7 emulation.
+- Browser automation covers Chromium/Pixel 7 and Playwright WebKit/iPhone emulation; Safari/iOS support still requires the real-device checklist.
 - The comet class illustrations are provisional.
