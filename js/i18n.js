@@ -17,6 +17,7 @@ const translations = {
     // Tela 1 — Início
     'home.newExperiment': 'Novo Experimento',
     'home.resumeExperiment': 'Retomar Experimento',
+    'home.hapticFeedback': 'Feedback tátil',
 
     // Tela 2 — Configuração
     'setup.title': 'Novo Experimento',
@@ -228,6 +229,7 @@ const translations = {
     // Screen 1 — Home
     'home.newExperiment': 'New Experiment',
     'home.resumeExperiment': 'Resume Experiment',
+    'home.hapticFeedback': 'Haptic feedback',
 
     // Screen 2 — Setup
     'setup.title': 'New Experiment',

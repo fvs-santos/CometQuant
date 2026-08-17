@@ -158,6 +158,32 @@ body {
   color: var(--color-text-secondary);
 }
 
+.home-preferences {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.preference-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.preference-toggle input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-accent);
+}
+
+.preference-toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .home-buttons {
   display: flex;
   flex-direction: column;
@@ -359,9 +385,12 @@ button:focus-visible {
   padding: var(--space-xs);
 }
 
-.comet-svg {
+.comet-image {
+  display: block;
   width: 100%;
   height: auto;
+  aspect-ratio: 1;
+  object-fit: contain;
 }
 
 .class-label {

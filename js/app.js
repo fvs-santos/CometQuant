@@ -1,6 +1,7 @@
 // CometQuant Lab - application state, counting and local persistence
 
 const STORAGE_KEY = 'cometquant-experiments'
+const HAPTIC_FEEDBACK_KEY = 'cometquant-haptic-feedback'
 const SCHEMA_VERSION = CometQuantCore.SCHEMA_VERSION
 const MAX_IMPORT_FILES = 20
 const MAX_IMPORT_BATCH_SIZE = 25 * 1024 * 1024
@@ -18,11 +19,13 @@ let recoveryAvailable = false
 let creatingExperiment = false
 let blindCodeCommitPending = false
 let replicateCommitPending = false
+let hapticFeedbackEnabled = false
 const revealedLegacyMappings = new Set()
 
 document.addEventListener('DOMContentLoaded', async () => {
   applyLanguage()
   updateLanguageButtons()
+  initHapticFeedback()
   try {
     const storage = await CometQuantRepository.init({ storageKey: STORAGE_KEY })
     CometQuantRepository.subscribe(handleRepositoryEvent)
@@ -360,6 +363,25 @@ async function deleteExperiment(id) {
   }
 }
 
+function initHapticFeedback() {
+  const input = document.getElementById('input-haptic-feedback')
+  const supported = typeof navigator.vibrate === 'function'
+  let storedPreference = null
+  try { storedPreference = localStorage.getItem(HAPTIC_FEEDBACK_KEY) } catch (_) {}
+  hapticFeedbackEnabled = supported && (storedPreference === null || storedPreference === 'true')
+  input.checked = hapticFeedbackEnabled
+  input.disabled = !supported
+  input.addEventListener('change', () => {
+    hapticFeedbackEnabled = supported && input.checked
+    try { localStorage.setItem(HAPTIC_FEEDBACK_KEY, String(hapticFeedbackEnabled)) } catch (_) {}
+  })
+}
+
+function provideHapticFeedback() {
+  if (!hapticFeedbackEnabled || typeof navigator.vibrate !== 'function') return
+  try { navigator.vibrate(10) } catch (_) {}
+}
+
 function renderReplicatesScreen() {
   if (!currentExperiment) return
   const meta = document.getElementById('replicate-experiment-meta')
@@ -530,6 +552,7 @@ function registerCount(cometClass) {
     currentCounts[cometClass]++
     clickHistory.push(cometClass)
     updateCounterDisplay()
+    provideHapticFeedback()
     if (!await persistProgress()) {
       clickHistory.pop()
       currentCounts[cometClass]--

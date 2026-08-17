@@ -2,7 +2,7 @@
 // Quando atualizar o app, mude o número da versão aqui
 const SHELL_CACHE_PREFIX = 'cometquant-shell-'
 const SCIENCE_CACHE_PREFIX = 'cometquant-science-'
-const CACHE_NAME = `${SHELL_CACHE_PREFIX}v7`
+const CACHE_NAME = `${SHELL_CACHE_PREFIX}v8`
 
 // Lista de todos os arquivos que o Service Worker vai guardar
 const FILES_TO_CACHE = [
@@ -22,6 +22,11 @@ const FILES_TO_CACHE = [
   './science-assets.json',
   './python/cometquant_analysis.py',
   './vendor/jszip.min.js',
+  './icons/class_0.png',
+  './icons/class_1.png',
+  './icons/class_2.png',
+  './icons/class_3.png',
+  './icons/class_4.png',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ]

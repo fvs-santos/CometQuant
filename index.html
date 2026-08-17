@@ -27,13 +27,19 @@
       <p class="app-subtitle" data-i18n="app.subtitle">Comet Assay Visual Score</p>
     </div>
 
-    <div class="language-selector">
-      <button class="btn-lang" id="btn-lang-en" onclick="setLanguage('en')">
-        🇺🇸 EN
-      </button>
-      <button class="btn-lang" id="btn-lang-pt" onclick="setLanguage('pt')">
-        🇧🇷 PT
-      </button>
+    <div class="home-preferences">
+      <div class="language-selector">
+        <button class="btn-lang" id="btn-lang-en" onclick="setLanguage('en')">
+          🇺🇸 EN
+        </button>
+        <button class="btn-lang" id="btn-lang-pt" onclick="setLanguage('pt')">
+          🇧🇷 PT
+        </button>
+      </div>
+      <label class="preference-toggle" for="input-haptic-feedback">
+        <input type="checkbox" id="input-haptic-feedback">
+        <span data-i18n="home.hapticFeedback">Haptic feedback</span>
+      </label>
     </div>
 
     <div class="home-buttons">
@@ -281,10 +287,7 @@
 
       <div class="comet-class-card" id="card-class-0" data-class="0">
         <div class="comet-image-container">
-          <svg viewBox="0 0 100 60" class="comet-svg">
-            <ellipse cx="50" cy="30" rx="20" ry="20"
-                     fill="#4a9eff" opacity="0.9"/>
-          </svg>
+          <img src="./icons/class_0.png" class="comet-image" alt="" width="512" height="512">
         </div>
         <div class="class-label">Class 0</div>
         <div class="class-count" id="count-0">0</div>
@@ -293,12 +296,7 @@
 
       <div class="comet-class-card" id="card-class-1" data-class="1">
         <div class="comet-image-container">
-          <svg viewBox="0 0 100 60" class="comet-svg">
-            <ellipse cx="45" cy="30" rx="18" ry="18"
-                     fill="#4a9eff" opacity="0.9"/>
-            <ellipse cx="62" cy="30" rx="10" ry="8"
-                     fill="#4a9eff" opacity="0.4"/>
-          </svg>
+          <img src="./icons/class_1.png" class="comet-image" alt="" width="512" height="512">
         </div>
         <div class="class-label">Class 1</div>
         <div class="class-count" id="count-1">0</div>
@@ -307,12 +305,7 @@
 
       <div class="comet-class-card" id="card-class-2" data-class="2">
         <div class="comet-image-container">
-          <svg viewBox="0 0 100 60" class="comet-svg">
-            <ellipse cx="40" cy="30" rx="16" ry="16"
-                     fill="#4a9eff" opacity="0.9"/>
-            <ellipse cx="62" cy="30" rx="16" ry="10"
-                     fill="#4a9eff" opacity="0.4"/>
-          </svg>
+          <img src="./icons/class_2.png" class="comet-image" alt="" width="512" height="512">
         </div>
         <div class="class-label">Class 2</div>
         <div class="class-count" id="count-2">0</div>
@@ -321,12 +314,7 @@
 
       <div class="comet-class-card" id="card-class-3" data-class="3">
         <div class="comet-image-container">
-          <svg viewBox="0 0 100 60" class="comet-svg">
-            <ellipse cx="35" cy="30" rx="14" ry="14"
-                     fill="#4a9eff" opacity="0.9"/>
-            <ellipse cx="63" cy="30" rx="22" ry="12"
-                     fill="#4a9eff" opacity="0.4"/>
-          </svg>
+          <img src="./icons/class_3.png" class="comet-image" alt="" width="512" height="512">
         </div>
         <div class="class-label">Class 3</div>
         <div class="class-count" id="count-3">0</div>
@@ -335,12 +323,7 @@
 
       <div class="comet-class-card" id="card-class-4" data-class="4">
         <div class="comet-image-container">
-          <svg viewBox="0 0 100 60" class="comet-svg">
-            <ellipse cx="28" cy="30" rx="10" ry="10"
-                     fill="#4a9eff" opacity="0.9"/>
-            <ellipse cx="62" cy="30" rx="28" ry="14"
-                     fill="#4a9eff" opacity="0.4"/>
-          </svg>
+          <img src="./icons/class_4.png" class="comet-image" alt="" width="512" height="512">
         </div>
         <div class="class-label">Class 4</div>
         <div class="class-count" id="count-4">0</div>
