@@ -5,7 +5,8 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict'
 
-  const SCHEMA_VERSION = 4
+  const SCHEMA_VERSION = 5
+  const STUDY_DESIGN_VERSION = 1
   const MAX_FILE_SIZE = 5 * 1024 * 1024
   const LIMITS = { nucleoids: 10000, slides: 100, concentrations: 100, text: 120, detail: 500 }
   const LEGACY_BLIND_CODE_PATTERN = /^([A-Z2-9]{4})-(0[1-9]|[1-9]\d|100)$/
@@ -13,6 +14,8 @@
   const ASSIGNMENT_STATUSES = new Set(['pending', 'counting', 'counted', 'absent'])
   const ABSENCE_REASONS = new Set(['broken', 'lost', 'quality', 'insufficient', 'other', 'legacy-unjustified'])
   const INCOMPLETE_REASONS = new Set(['insufficient-cells', 'poor-quality', 'damaged', 'technical-error', 'time-limit', 'other', 'legacy-unjustified'])
+  const TREATMENT_ROLES = new Set(['positive-control', 'negative-control', 'solvent-control', 'test-concentration', 'other'])
+  const ASSAY_TYPES = new Set(['genotoxicity', 'antigenotoxicity'])
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value))
@@ -87,6 +90,51 @@
     return `${base}-${String(gelNumber).padStart(2, '0')}`
   }
 
+  function unconfiguredStudyDesign() {
+    return {
+      version: STUDY_DESIGN_VERSION,
+      status: 'unconfigured',
+      assayType: null,
+      primaryReferenceTreatmentIndex: null,
+      primaryTreatmentIndices: [],
+      validationComparison: null,
+      alpha: 0.05,
+      alternative: 'two-sided',
+      pAdjustment: 'holm',
+      trendReferenceAsZero: true,
+      configurationSource: null
+    }
+  }
+
+  function legacyConcentration(label, unit) {
+    const normalizedUnit = cleanText(unit, 20)
+    if (!normalizedUnit || typeof label !== 'string') return null
+    const escapedUnit = normalizedUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = new RegExp(`^([+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+-]?\\d+)?) ${escapedUnit}$`, 'i').exec(cleanText(label))
+    if (!match) return null
+    const value = Number(match[1])
+    return Number.isFinite(value) && value >= 0 ? value : null
+  }
+
+  function migrateTreatmentMetadata(experiment) {
+    const controls = [
+      ['positive-control', cleanText(experiment.posControl).toLocaleLowerCase()],
+      ['negative-control', cleanText(experiment.negControl).toLocaleLowerCase()],
+      ['solvent-control', cleanText(experiment.solControl).toLocaleLowerCase()]
+    ]
+    return (Array.isArray(experiment.treatments) ? experiment.treatments : []).map((treatment, treatmentIndex) => {
+      const normalized = cleanText(treatment).toLocaleLowerCase()
+      const controlMatches = controls.filter(([, label]) => label && label === normalized)
+      if (controlMatches.length === 1) return { treatmentIndex, role: controlMatches[0][0], concentration: null }
+      const concentration = legacyConcentration(treatment, experiment.concUnit)
+      return {
+        treatmentIndex,
+        role: concentration === null ? 'other' : 'test-concentration',
+        concentration
+      }
+    })
+  }
+
   function migrateExperiment(raw) {
     if (!isObject(raw)) throw new Error('invalid-root')
     const version = raw.schemaVersion === undefined ? 1 : Number(raw.schemaVersion)
@@ -102,7 +150,7 @@
         missingRequiredFields
       }
     }
-    // Schema v4 adds compact blind codes while preserving every legacy code verbatim.
+    // Schema v5 adds an explicit analytical design while preserving blind codes verbatim.
     experiment.schemaVersion = SCHEMA_VERSION
     experiment.slidesPerTreatment = Number.isInteger(Number(experiment.slidesPerTreatment))
       ? Number(experiment.slidesPerTreatment) : 1
@@ -111,6 +159,12 @@
     experiment.createdAt = validIsoDate(experiment.createdAt)
       ? experiment.createdAt : `${experiment.replicates[0]?.date || '1970-01-01'}T00:00:00.000Z`
     experiment.updatedAt = validIsoDate(experiment.updatedAt) ? experiment.updatedAt : experiment.createdAt
+    if (version < 5 || experiment.treatmentMetadata === undefined) {
+      experiment.treatmentMetadata = migrateTreatmentMetadata(experiment)
+    }
+    if (version < 5 || experiment.studyDesign === undefined) {
+      experiment.studyDesign = unconfiguredStudyDesign()
+    }
 
     experiment.replicates.forEach(replicate => {
       replicate.gels = Array.isArray(replicate.gels) ? replicate.gels : []
@@ -168,6 +222,76 @@
     return reason.code !== 'other' || cleanText(reason.detail, LIMITS.detail).length > 0
   }
 
+  function validateTreatmentMetadata(metadata, treatments) {
+    const errors = []
+    if (!Array.isArray(metadata) || metadata.length !== treatments.length) return ['invalid-treatment-metadata']
+    metadata.forEach((item, index) => {
+      const prefix = `treatment-metadata-${index + 1}`
+      if (!isObject(item)) {
+        errors.push(`${prefix}-invalid`)
+        return
+      }
+      if (item.treatmentIndex !== index) errors.push(`${prefix}-index`)
+      if (!TREATMENT_ROLES.has(item.role)) errors.push(`${prefix}-role`)
+      if (item.role === 'test-concentration') {
+        if (!Number.isFinite(item.concentration) || item.concentration < 0) errors.push(`${prefix}-concentration`)
+      } else if (item.concentration !== null) {
+        errors.push(`${prefix}-concentration`)
+      }
+    })
+    return errors
+  }
+
+  function validateStudyDesign(design, metadata, treatments) {
+    const errors = []
+    const validIndex = value => Number.isInteger(value) && value >= 0 && value < treatments.length
+    if (!isObject(design)) return ['invalid-study-design']
+    if (design.version !== STUDY_DESIGN_VERSION) errors.push('invalid-study-design-version')
+    if (!['unconfigured', 'configured'].includes(design.status)) errors.push('invalid-study-design-status')
+    if (design.alpha !== 0.05) errors.push('invalid-study-design-alpha')
+    if (design.alternative !== 'two-sided') errors.push('invalid-study-design-alternative')
+    if (design.pAdjustment !== 'holm') errors.push('invalid-study-design-adjustment')
+    if (design.trendReferenceAsZero !== true) errors.push('invalid-study-design-trend-reference')
+
+    if (design.status === 'unconfigured') {
+      if (design.assayType !== null) errors.push('unconfigured-study-design-assay')
+      if (design.primaryReferenceTreatmentIndex !== null) errors.push('unconfigured-study-design-reference')
+      if (!Array.isArray(design.primaryTreatmentIndices) || design.primaryTreatmentIndices.length !== 0) errors.push('unconfigured-study-design-treatments')
+      if (design.validationComparison !== null) errors.push('unconfigured-study-design-validation')
+      if (design.configurationSource !== null) errors.push('unconfigured-study-design-source')
+      return errors
+    }
+
+    if (!ASSAY_TYPES.has(design.assayType)) errors.push('invalid-assay-type')
+    if (!validIndex(design.primaryReferenceTreatmentIndex)) errors.push('invalid-primary-reference')
+    if (!Array.isArray(design.primaryTreatmentIndices) || !design.primaryTreatmentIndices.length ||
+      design.primaryTreatmentIndices.some(index => !validIndex(index)) ||
+      new Set(design.primaryTreatmentIndices).size !== design.primaryTreatmentIndices.length ||
+      design.primaryTreatmentIndices.includes(design.primaryReferenceTreatmentIndex)) {
+      errors.push('invalid-primary-treatments')
+    }
+    if (!cleanText(design.configurationSource, 40)) errors.push('invalid-configuration-source')
+
+    const comparison = design.validationComparison
+    if (!isObject(comparison) || !validIndex(comparison.referenceTreatmentIndex) ||
+      !validIndex(comparison.treatmentIndex) || comparison.referenceTreatmentIndex === comparison.treatmentIndex) {
+      errors.push('invalid-validation-comparison')
+    }
+
+    const roleAt = index => metadata?.[index]?.role
+    const basalRoles = new Set(['negative-control', 'solvent-control'])
+    if (design.assayType === 'genotoxicity') {
+      if (!basalRoles.has(roleAt(design.primaryReferenceTreatmentIndex))) errors.push('invalid-genotoxicity-reference')
+      if (isObject(comparison) && (comparison.referenceTreatmentIndex !== design.primaryReferenceTreatmentIndex || roleAt(comparison.treatmentIndex) !== 'positive-control')) errors.push('invalid-genotoxicity-validation')
+    }
+    if (design.assayType === 'antigenotoxicity') {
+      if (roleAt(design.primaryReferenceTreatmentIndex) !== 'positive-control') errors.push('invalid-antigenotoxicity-reference')
+      if (isObject(comparison) && (!basalRoles.has(roleAt(comparison.referenceTreatmentIndex)) || comparison.treatmentIndex !== design.primaryReferenceTreatmentIndex)) errors.push('invalid-antigenotoxicity-validation')
+    }
+    if (Array.isArray(design.primaryTreatmentIndices) && design.primaryTreatmentIndices.some(index => roleAt(index) !== 'test-concentration')) errors.push('invalid-primary-treatment-role')
+    return errors
+  }
+
   function validateExperiment(raw, options = {}) {
     const errors = []
     const sourceVersion = raw && raw.schemaVersion === undefined ? 1 : Number(raw?.schemaVersion)
@@ -195,6 +319,8 @@
     const normalizedTreatments = treatments.map(value => cleanText(value).toLocaleLowerCase())
     push(treatments.every(value => typeof value === 'string' && cleanText(value).length > 0), 'invalid-treatment-name')
     push(new Set(normalizedTreatments).size === normalizedTreatments.length, 'duplicate-treatment')
+    validateTreatmentMetadata(experiment.treatmentMetadata, treatments).forEach(error => errors.push(error))
+    validateStudyDesign(experiment.studyDesign, experiment.treatmentMetadata, treatments).forEach(error => errors.push(error))
     push(Array.isArray(experiment.replicates) && experiment.replicates.length <= 1000, 'invalid-replicates')
 
     const replicateNumbers = new Set()
@@ -296,7 +422,7 @@
     return { valid: errors.length === 0, errors, experiment }
   }
 
-  function validateSetup(input) {
+  function validateSetup(input = {}, options = {}) {
     const errors = []
     const requiredText = ['agent', 'cells']
     requiredText.forEach(key => { if (!cleanText(input[key])) errors.push(`${key}-required`) })
@@ -309,7 +435,39 @@
     if (!Array.isArray(input.concentrations) || input.concentrations.length !== input.conditions || input.concentrations.some(value => !Number.isFinite(value) || value < 0)) errors.push('invalid-concentrations')
     const labels = [...[input.posControl, input.negControl, input.solControl].filter(value => cleanText(value)), ...(input.concentrations || []).map(value => `${value} ${input.concUnit}`.trim())]
     if (new Set(labels.map(value => cleanText(value).toLocaleLowerCase())).size !== labels.length) errors.push('duplicate-treatment')
-    return { valid: errors.length === 0, errors }
+    const designKeys = ['assayType', 'primaryReferenceTreatmentIndex', 'primaryTreatmentIndices', 'validationComparison', 'alpha', 'alternative', 'pAdjustment', 'trendReferenceAsZero', 'configurationSource']
+    const hasDesign = isObject(input.studyDesign) || options.requireStudyDesign === true || designKeys.some(key => Object.prototype.hasOwnProperty.call(input, key))
+    let treatmentMetadata = null
+    let studyDesign = null
+    if (hasDesign) {
+      if (!cleanText(input.posControl)) errors.push('positive-control-required')
+      if (![input.negControl, input.solControl].some(value => cleanText(value))) errors.push('basal-control-required')
+      treatmentMetadata = migrateTreatmentMetadata({
+        posControl: input.posControl,
+        negControl: input.negControl,
+        solControl: input.solControl,
+        concUnit: input.concUnit,
+        treatments: labels
+      })
+      studyDesign = isObject(input.studyDesign)
+        ? clone(input.studyDesign)
+        : {
+            version: STUDY_DESIGN_VERSION,
+            status: 'configured',
+            assayType: input.assayType,
+            primaryReferenceTreatmentIndex: input.primaryReferenceTreatmentIndex,
+            primaryTreatmentIndices: input.primaryTreatmentIndices,
+            validationComparison: input.validationComparison,
+            alpha: input.alpha,
+            alternative: input.alternative,
+            pAdjustment: input.pAdjustment,
+            trendReferenceAsZero: input.trendReferenceAsZero,
+            configurationSource: input.configurationSource
+          }
+      validateTreatmentMetadata(treatmentMetadata, labels).forEach(error => errors.push(error))
+      validateStudyDesign(studyDesign, treatmentMetadata, labels).forEach(error => errors.push(error))
+    }
+    return { valid: errors.length === 0, errors, ...(hasDesign ? { treatmentMetadata, studyDesign } : {}) }
   }
 
   function hasPendingSlides(experiment) {
@@ -348,6 +506,32 @@
     return JSON.stringify(a) === JSON.stringify(b)
   }
 
+  function analyticalContract(experiment) {
+    return {
+      treatmentMetadata: experiment.treatmentMetadata.map(item => ({
+        treatmentIndex: item.treatmentIndex,
+        role: item.role,
+        concentration: item.concentration
+      })),
+      studyDesign: {
+        version: experiment.studyDesign.version,
+        status: experiment.studyDesign.status,
+        assayType: experiment.studyDesign.assayType,
+        primaryReferenceTreatmentIndex: experiment.studyDesign.primaryReferenceTreatmentIndex,
+        primaryTreatmentIndices: experiment.studyDesign.primaryTreatmentIndices,
+        validationComparison: experiment.studyDesign.validationComparison && {
+          referenceTreatmentIndex: experiment.studyDesign.validationComparison.referenceTreatmentIndex,
+          treatmentIndex: experiment.studyDesign.validationComparison.treatmentIndex
+        },
+        alpha: experiment.studyDesign.alpha,
+        alternative: experiment.studyDesign.alternative,
+        pAdjustment: experiment.studyDesign.pAdjustment,
+        trendReferenceAsZero: experiment.studyDesign.trendReferenceAsZero,
+        configurationSource: experiment.studyDesign.configurationSource
+      }
+    }
+  }
+
   function sameGelData(a, b) {
     const keys = ['blindCode', 'treatment', 'treatmentIndex', 'gelNumber', 'class0', 'class1', 'class2', 'class3', 'class4', 'total', 'status', 'completion', 'incompleteReason']
     return keys.every(key => stableEqual(a[key], b[key]))
@@ -374,7 +558,9 @@
     })
     const reference = experiments[0]
     const keys = ['agent', 'cells', 'negControl', 'posControl', 'solControl', 'concUnit', 'nucleoidsPerGel', 'slidesPerTreatment']
-    if (!experiments.every(item => keys.every(key => item[key] === reference[key]) && stableEqual(item.treatments, reference.treatments))) throw new Error('incompatible-experiments')
+    if (!experiments.every(item => keys.every(key => item[key] === reference[key]) &&
+      stableEqual(item.treatments, reference.treatments) &&
+      stableEqual(analyticalContract(item), analyticalContract(reference)))) throw new Error('incompatible-experiments')
     if (experiments.some(item => item.progress || item.replicates.some(rep => rep.assignments?.some(assignment => assignment.status === 'counting')))) throw new Error('partial-progress-conflict')
 
     const result = clone(reference)
@@ -423,7 +609,7 @@
   }
 
   return {
-    SCHEMA_VERSION, MAX_FILE_SIZE, LIMITS, ABSENCE_REASONS, INCOMPLETE_REASONS,
+    SCHEMA_VERSION, STUDY_DESIGN_VERSION, MAX_FILE_SIZE, LIMITS, ABSENCE_REASONS, INCOMPLETE_REASONS,
     cleanText, parseBlindCode, availableBlindCodeBases, calculateVisualScore, isIncludedGel, migrateExperiment, validateExperiment,
     validateSetup, hasPendingSlides, aggregateReplicateScores, mergeExperiments
   }

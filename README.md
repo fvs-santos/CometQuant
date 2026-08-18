@@ -48,9 +48,17 @@ is significant.
 
 ## Data And Blinding
 
-The current experiment schema is version 4. Each replicate contains a complete
+The current experiment schema is version 5. Each replicate contains a complete
 mapping of blind assignments and counted slides. Assignment states are
 `pending`, `counting`, `counted` or `absent`.
+
+New experiments record a versioned study design before blind codes are generated.
+The design identifies genotoxicity or antigenotoxicity, the primary reference,
+the test concentrations, the separate control-response comparison and structured
+numeric concentration metadata. Genotoxicity compares concentrations with the
+selected negative or vehicle control. Antigenotoxicity compares combined
+treatments with the positive mutagen-only control. The design is not shown while
+counting is blinded.
 
 New blind codes use two ordered letters and an unpadded slide number, such as
 `AB1`, `AB2` or `CY10`. The 676 bases from `AA` through `ZZ` are allocated
@@ -71,7 +79,9 @@ While blinding is active, the experiment list offers an encrypted backup instead
 of plaintext JSON export. The envelope uses PBKDF2-SHA-256 with 600,000
 iterations and AES-256-GCM with random salt and IV. The password is never stored
 and cannot be recovered. Import detects `.cqbackup.json` files and decrypts them
-before normal schema validation.
+before normal schema validation. Experiments from schemas 1 through 4 migrate
+without an inferred scientific intent and require one explicit study-design
+confirmation after blinding is complete before the new analysis can run.
 
 The encrypted envelope protects a copied backup file against offline inspection
 when a strong passphrase is used. It does not protect against someone with
@@ -82,34 +92,46 @@ before handling data with stricter confidentiality requirements.
 
 ## Statistical Protocol
 
-Technical slides are averaged within each replicate before inferential tests,
-so the replicate remains the experimental unit. Incomplete and absent slides
-are retained for traceability but excluded from analysis.
+An independent experiment is the experimental unit and statistical block.
+Complete technical slides are averaged within each experiment and treatment;
+one valid slide keeps the cell in the analysis while the technical loss is
+reported. If no valid slide exists for the primary reference or any primary
+concentration, that complete block is explicitly excluded from primary
+inference.
 
-The engine provides:
+The version 2 analysis contract provides:
 
-- visual score calculation;
-- Shapiro-Wilk by treatment when at least three replicates are available;
-- one-way ANOVA when every treatment has at least two replicates;
-- Tukey HSD after a significant ANOVA;
-- linear regression and Pearson correlation for numeric concentrations;
-- Pearson-test power using the noncentral t distribution;
-- score and class-distribution charts aggregated by replicate.
+- randomized complete block ANOVA using `score ~ treatment + experiment`;
+- planned two-sided comparisons of each concentration against the configured reference;
+- a common residual error estimate and Holm-adjusted p-values without an omnibus gate;
+- nominal 95% confidence intervals, effect direction and unrounded decisions;
+- a separate blocked control-response comparison that does not classify assay validity;
+- a secondary linear dose trend using `score ~ experiment + concentration`, with the reference as dose zero;
+- individual block profiles, difference confidence intervals and descriptive class charts.
 
-Undefined analyses return an explicit `performed: false` result and reason.
-JSON serialization rejects non-finite values, and small p-values retain their
-numeric precision while the UI formats them as inequalities.
+Shapiro-Wilk no longer selects the method. One-way ANOVA, Tukey HSD, pooled
+Pearson correlation and the former power calculation are not part of the v2
+runtime contract. Friedman and Wilcoxon remain deferred because exact paired
+inference has very limited resolution with the common design of three independent
+experiments.
+
+Undefined analyses return an explicit `performed: false` result and structured
+reason. JSON serialization rejects non-finite values, and small p-values retain
+their numeric precision while the UI formats them only for presentation. The
+application reports statistical evidence and magnitude; it does not automatically
+classify a compound as genotoxic, non-genotoxic or antigenotoxic.
 
 ## Independent Validation
 
-`tests/reference/v1/` contains a versioned dataset and expected results. The
-Python engine is tested against those values, and
-`npm run test:reference:r` runs the same dataset through base R to compare
-Shapiro-Wilk, ANOVA, Tukey, regression and Pearson results. R is never loaded
-by the browser application.
+`tests/reference/v2/` contains three independent experiments, five treatments
+and two technical slides per cell, including a cell retained with one valid
+slide. Explicit SciPy formulas and base R independently validate the block
+ANOVA, planned contrasts, Holm adjustment, confidence intervals, control
+response and dose trend. `tests/reference/v1/` remains immutable historical
+evidence for the retired protocol. R is never loaded by the browser application.
 
 Playwright also runs the extracted Python engine inside real Pyodide and checks
-the rendered reference results and generated charts.
+the rendered v2 reference results and three generated charts.
 
 ## Deployment And Offline Behavior
 
@@ -150,3 +172,4 @@ and storage eviction remain part of the real-device checklist.
 - Merge rejects active partial progress instead of reconciling concurrent counts.
 - Browser automation covers Chromium/Pixel 7 and Playwright WebKit/iPhone emulation; Safari/iOS support still requires the real-device checklist.
 - The comet class illustrations are provisional.
+- Three independent experiments are supported as the common assay design, but estimates and confidence intervals may remain imprecise; statistical non-significance is not evidence of equivalence or absence of effect.

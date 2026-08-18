@@ -1,62 +1,92 @@
 const { test, expect } = require('@playwright/test')
-const expected = require('../reference/v1/expected.json')
+const fs = require('node:fs')
+const path = require('node:path')
+const JSZip = require('jszip')
+const expected = require('../reference/v2/expected.json')
 
 function referenceExperiment() {
-  const treatments = Object.keys(expected.scores)
-  const codes = ['ABCD', 'EFGH', 'JKLM', 'NPQR']
-  const replicates = Array.from({ length: 5 }, (_, replicateIndex) => {
-    const recordedAt = `2026-01-0${replicateIndex + 1}T12:00:00.000Z`
-    const assignments = treatments.map((treatment, treatmentIndex) => ({
-      blindCode: `${codes[treatmentIndex]}-01`,
-      treatmentIndex,
-      gelNumber: 1,
-      status: 'counted',
-      recordedAt
-    }))
-    const gels = treatments.map((treatment, treatmentIndex) => {
-      const score = expected.scores[treatment][replicateIndex]
-      return {
-        blindCode: `${codes[treatmentIndex]}-01`,
-        treatment,
-        treatmentIndex,
-        gelNumber: 1,
-        class0: 100 - score,
-        class1: 0,
-        class2: 0,
-        class3: 0,
-        class4: score,
-        total: 100,
-        status: 'counted',
-        completion: 'complete',
-        recordedAt
+  const lines = fs.readFileSync(path.resolve(__dirname, '../reference/v2/slides.csv'), 'utf8').trim().split(/\r?\n/)
+  const headers = lines.shift().split(',')
+  const rows = lines.map(line => Object.fromEntries(line.split(',').map((value, index) => [headers[index], value])))
+  const treatments = Array.from(new Set(rows.map(row => row.treatment)))
+  const replicates = []
+  rows.forEach(row => {
+    const replicateNumber = Number(row.replicate_number)
+    const treatmentIndex = Number(row.treatment_index)
+    const gelNumber = Number(row.slide)
+    const score = Number(row.score)
+    const baseNumber = (replicateNumber - 1) * treatments.length + treatmentIndex
+    const blindCode = `A${String.fromCharCode(65 + baseNumber)}${gelNumber}`
+    const recordedAt = `2026-01-0${replicateNumber}T12:00:00.000Z`
+    let replicate = replicates.find(item => item.replicateNumber === replicateNumber)
+    if (!replicate) {
+      replicate = {
+        replicateNumber,
+        date: `2026-01-0${replicateNumber}`,
+        createdAt: recordedAt,
+        updatedAt: recordedAt,
+        assignments: [],
+        gels: []
       }
-    })
-    return {
-      replicateNumber: replicateIndex + 1,
-      date: `2026-01-0${replicateIndex + 1}`,
-      createdAt: recordedAt,
-      updatedAt: recordedAt,
-      assignments,
-      gels
+      replicates.push(replicate)
     }
+    replicate.assignments.push({ blindCode, treatmentIndex, gelNumber, status: 'counted', recordedAt })
+    const completion = row.completion
+    const total = completion === 'complete' ? 100 : 99
+    replicate.gels.push({
+      blindCode,
+      treatment: row.treatment,
+      treatmentIndex,
+      gelNumber,
+      class0: total - score,
+      class1: 0,
+      class2: 0,
+      class3: 0,
+      class4: score,
+      total,
+      status: 'counted',
+      completion,
+      ...(completion === 'incomplete' ? { incompleteReason: { code: 'technical-error', detail: '' } } : {}),
+      recordedAt
+    })
   })
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 5,
     id: 'analysis-reference',
     createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-05T12:00:00.000Z',
+    updatedAt: '2026-01-03T12:00:00.000Z',
     status: 'completed',
     researcher: 'Reference',
     agent: 'Reference agent',
     cells: 'CHO-K1',
-    negControl: 'Control',
-    posControl: '',
+    negControl: 'Negative control',
+    posControl: 'Positive control',
     solControl: '',
     nucleoidsPerGel: 100,
-    slidesPerTreatment: 1,
+    slidesPerTreatment: 2,
     concUnit: 'uM',
     treatments,
+    treatmentMetadata: [
+      { treatmentIndex: 0, role: 'negative-control', concentration: null },
+      { treatmentIndex: 1, role: 'positive-control', concentration: null },
+      { treatmentIndex: 2, role: 'test-concentration', concentration: 1 },
+      { treatmentIndex: 3, role: 'test-concentration', concentration: 5 },
+      { treatmentIndex: 4, role: 'test-concentration', concentration: 10 }
+    ],
+    studyDesign: {
+      version: 1,
+      status: 'configured',
+      assayType: 'genotoxicity',
+      primaryReferenceTreatmentIndex: 0,
+      primaryTreatmentIndices: [2, 3, 4],
+      validationComparison: { referenceTreatmentIndex: 0, treatmentIndex: 1 },
+      alpha: 0.05,
+      alternative: 'two-sided',
+      pAdjustment: 'holm',
+      trendReferenceAsZero: true,
+      configurationSource: 'pre-collection'
+    },
     progress: null,
     replicates
   }
@@ -103,15 +133,36 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   await page.getByRole('button', { name: 'Run Analysis' }).click()
   await expect(page.locator('#analysis-results')).toBeVisible({ timeout: 60000 })
 
-  const anovaCells = await page.locator('#anova-table tbody td').allTextContents()
-  expect(anovaCells).toEqual([
-    String(expected.anova.SS),
-    String(expected.anova.DF),
-    String(expected.anova.MS),
-    String(expected.anova.F),
+  const treatmentCells = await page.locator('#analysis-rcbd-anova tbody tr').first().locator('td').allTextContents()
+  expect(treatmentCells).toEqual([
+    'Treatment',
+    expected.blockAnova.terms[0].SS.toFixed(4),
+    String(expected.blockAnova.terms[0].DF),
+    expected.blockAnova.terms[0].MS.toFixed(4),
+    expected.blockAnova.terms[0].F.toFixed(4),
     '< 0.00001'
   ])
-  await expect(page.locator('#tukey-table tbody tr')).toHaveCount(expected.tukey.length)
-  await expect(page.locator('#charts-container img')).toHaveCount(2)
+  await expect(page.locator('#analysis-primary-comparisons tbody tr')).toHaveCount(expected.primaryComparisons.length)
+  await expect(page.locator('#analysis-v2-charts img')).toHaveCount(3)
+  await page.evaluate(() => setLanguage('pt'))
+  await expect(page.locator('#analysis-results')).toBeHidden()
+  await page.getByRole('button', { name: 'Rodar Análise' }).click()
+  await expect(page.locator('#analysis-results')).toBeVisible({ timeout: 60000 })
+  await expect(page.locator('#section-analysis-primary-comparisons .result-title')).toHaveText('Comparações Planejadas')
+  await expect(page.locator('#analysis-primary-comparisons')).not.toContainText('analysis.v2.')
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Baixar Tudo (.zip)' }).click()
+  const download = await downloadPromise
+  const archive = await JSZip.loadAsync(fs.readFileSync(await download.path()))
+  const archivedNames = Object.keys(archive.files)
+  for (const suffix of [
+    'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
+    'data/primary_comparisons.csv', 'data/control_response.csv', 'data/dose_trend.csv',
+    'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
+  ]) {
+    expect(archivedNames.some(name => name.endsWith(suffix))).toBe(true)
+  }
+  const analysisEntry = archive.file(archivedNames.find(name => name.endsWith('data/analysis.json')))
+  expect(JSON.parse(await analysisEntry.async('string')).analysisSchemaVersion).toBe(2)
   expect(remoteRequests).toHaveLength(installedRequestCount)
 })

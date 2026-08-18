@@ -4,6 +4,7 @@
 // =============================================
 
 const ANALYSIS_ENGINE_URL = './python/cometquant_analysis.py'
+const ANALYSIS_SCHEMA_VERSION = 2
 let analysisState = 'idle'
 let analysisManifest = null
 let analysisWorker = null
@@ -300,12 +301,15 @@ function handleAnalysisWorkerMessage(message) {
     return
   }
   try {
-    analysisResults = JSON.parse(message.resultJson)
+    const result = JSON.parse(message.resultJson)
+    validateAnalysisResult(result)
+    analysisResults = result
     analysisResultsContext = context
     renderAnalysisResults(analysisResults)
     document.getElementById('analysis-results').style.display = 'block'
     setAnalysisState('ready', 'analysis.done', 100)
   } catch (error) {
+    invalidateAnalysisResults()
     setAnalysisState('ready', 'analysis.ready', 100)
     document.getElementById('analysis-error').textContent = `${t('analysis.error')}: ${error.message}`
   }
@@ -361,95 +365,208 @@ function hasCurrentAnalysisResults() {
 // =============================================
 
 function renderAnalysisResults(results) {
-  renderScoresTable(results.scores)
-  renderShapiroTable(results.shapiro)
-  renderAnovaTable(results.anova)
-  renderTukeyTable(results.tukey)
-  renderRegressionTable(results.regression)
-  renderCharts(results.chartScore, results.chartClass)
+  validateAnalysisResult(results)
+  const containers = ensureAnalysisV2Containers()
+  renderPlanPopulation(containers.planPopulation, results.protocol, results.population)
+  renderBlockScores(containers.blockScores, results.scores)
+  renderRcbdAnova(containers.rcbdAnova, results.blockAnova)
+  renderPrimaryComparisons(containers.primaryComparisons, results.primaryComparisons)
+  renderControlResponse(containers.controlResponse, results.controlResponse)
+  renderDoseTrend(containers.doseTrend, results.doseTrend)
+  renderCharts(containers.charts, results.charts)
+  return containers
 }
 
-
-function renderScoresTable(scores) {
-  const treatments = Object.keys(scores)
-  const container  = document.getElementById('scores-table')
-  const maxReps = Math.max(...treatments.map(tr => scores[tr].length))
-  const headers = [t('summary.treatment'), ...Array.from({ length: maxReps }, (_, index) => `Rep ${index + 1}`), t('summary.mean'), t('summary.sd')]
-  const rows = treatments.map(tr => {
-    const vals = scores[tr]
-    const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
-    const sd   = vals.length ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) : null
-    return [tr, ...Array.from({ length: maxReps }, (_, index) => vals[index] === undefined ? '-' : vals[index].toFixed(2)), mean === null ? '-' : mean.toFixed(2), sd === null ? '-' : sd.toFixed(2)]
-  })
-  renderResultTable(container, headers, rows)
+function validateAnalysisResult(result) {
+  if (!result || result.analysisSchemaVersion !== ANALYSIS_SCHEMA_VERSION) {
+    throw new Error(t('analysis.v2.error.invalidSchema'))
+  }
 }
 
-
-function renderShapiroTable(shapiro) {
-  const container = document.getElementById('shapiro-table')
-  const rows = Object.entries(shapiro).map(([treatment, result]) => {
-    if (result.performed === false) {
-      return [treatment, 'ND', 'ND', result.reason.detail]
+function ensureAnalysisV2Containers() {
+  const root = document.getElementById('analysis-results')
+  const definitions = [
+    ['planPopulation', 'section-analysis-plan-population', 'analysis-plan-population', 'analysis.v2.planPopulation.title'],
+    ['blockScores', 'section-analysis-block-scores', 'analysis-block-scores', 'analysis.v2.blockScores.title'],
+    ['rcbdAnova', 'section-analysis-rcbd-anova', 'analysis-rcbd-anova', 'analysis.v2.rcbd.title'],
+    ['primaryComparisons', 'section-analysis-primary-comparisons', 'analysis-primary-comparisons', 'analysis.v2.comparisons.title'],
+    ['controlResponse', 'section-analysis-control-response', 'analysis-control-response', 'analysis.v2.control.title'],
+    ['doseTrend', 'section-analysis-dose-trend', 'analysis-dose-trend', 'analysis.v2.trend.title'],
+    ['charts', 'section-analysis-v2-charts', 'analysis-v2-charts', 'analysis.v2.charts.title']
+  ]
+  const legacySections = ['section-scores', 'section-shapiro', 'section-anova', 'section-tukey', 'section-regression', 'section-charts']
+  legacySections.forEach(id => document.getElementById(id)?.remove())
+  const exportButtons = root.querySelector('.summary-buttons')
+  const containers = {}
+  definitions.forEach(([name, sectionId, containerId, titleKey]) => {
+    let section = document.getElementById(sectionId)
+    if (!section) {
+      section = document.createElement('div')
+      section.className = 'result-section'
+      section.id = sectionId
+      const title = document.createElement('h3')
+      title.className = 'result-title'
+      section.appendChild(title)
+      const container = document.createElement('div')
+      container.id = containerId
+      section.appendChild(container)
+      root.insertBefore(section, exportButtons)
     }
-    return [treatment, result.W, formatProbability(result.p), result.normal]
+    section.querySelector('.result-title').textContent = t(titleKey)
+    containers[name] = document.getElementById(containerId)
   })
-  renderResultTable(container, [t('summary.treatment'), 'W', 'p-value', 'Normal'], rows)
-  appendCaption(container, currentLanguage === 'pt' ? 'p > 0,05 indica distribuição normal' : 'p > 0.05 indicates normal distribution')
+  return containers
 }
 
-
-function renderAnovaTable(anova) {
-  const container = document.getElementById('anova-table')
-
-  if (!anova || anova.performed === false) {
-    renderNotPerformed(container, anova)
-    return
-  }
-  renderResultTable(container, ['SS', 'DF', 'MS', 'F', 'p-value'], [[anova.SS, anova.DF, anova.MS, anova.F, formatProbability(anova.p)]])
-  appendCaption(container, 'SS: sums of squares; MS: mean squares')
-}
-
-
-function renderTukeyTable(tukey) {
-  const container = document.getElementById('tukey-table')
-  const comparisons = Array.isArray(tukey) ? tukey : tukey?.comparisons
-
-  if (!tukey || tukey.performed === false || !comparisons || comparisons.length === 0) {
-    renderNotPerformed(container, tukey)
-    return
-  }
-  const rows = comparisons.map(row => {
-    const sigText = row.significant
-      ? (currentLanguage === 'pt' ? 'Significativo' : 'Significant')
-      : (currentLanguage === 'pt' ? 'Não significativo' : 'Not significant')
-    return [row.A, row.B, formatProbability(row.p), sigText]
-  })
-  renderResultTable(container, ['A', 'B', 'p-value', 'Result'], rows)
-}
-
-
-function renderRegressionTable(regression) {
-  const container = document.getElementById('regression-table')
-
-  if (!regression || regression.performed === false) {
-    renderNotPerformed(container, regression)
-    return
-  }
-  const r = regression.regression
-  const p = regression.pearson
-  appendCaption(container, currentLanguage === 'pt' ? 'Regressão Linear' : 'Linear Regression')
-  renderResultTable(container, ['p-value', 'R²', 'CI 2.5%', 'CI 97.5%'], [[formatProbability(r.p), r.r2, r.ci_low, r.ci_high]], false)
-  appendCaption(container, currentLanguage === 'pt' ? 'Correlação de Pearson' : 'Pearson Correlation')
-  renderResultTable(container, ['r', 'p-value', 'Power'], [[p.r, formatProbability(p.p), p.power]], false)
-  appendCaption(container, currentLanguage === 'pt' ? 'r: coeficiente de correlação; Power: poder do teste (α = 0,05)' : 'r: correlation coefficient; Power: test power (α = 0.05)')
-}
-
-
-function renderCharts(chartScoreB64, chartClassB64) {
-  const container = document.getElementById('charts-container')
+function renderPlanPopulation(container, protocol, population) {
   container.replaceChildren()
-  appendChart(container, chartScoreB64, currentLanguage === 'pt' ? 'Scores Visuais' : 'Visual Scores', 'Score chart')
-  appendChart(container, chartClassB64, currentLanguage === 'pt' ? 'Distribuição por Classes' : 'Class Distribution', 'Classes chart')
+  appendCaption(container, t('analysis.v2.protocol.caption'))
+  if (!protocol || protocol.performed === false) {
+    renderNotPerformed(container, protocol, false)
+    return
+  }
+  const validation = protocol.validationComparison
+  renderResultTable(container, [t('analysis.v2.header.item'), t('analysis.v2.header.value')], [
+    [t('analysis.v2.protocol.version'), protocol.studyDesignVersion],
+    [t('analysis.v2.protocol.assayType'), translatedAnalysisValue('assayType', protocol.assayType)],
+    [t('analysis.v2.protocol.reference'), `${protocol.primaryReferenceTreatment} (${protocol.primaryReferenceTreatmentIndex})`],
+    [t('analysis.v2.protocol.primaryTreatments'), (protocol.primaryTreatmentIndices || []).join(', ')],
+    [t('analysis.v2.protocol.validationComparison'), validation ? `${validation.referenceTreatmentIndex} / ${validation.treatmentIndex}` : t('analysis.v2.value.none')],
+    [t('analysis.v2.protocol.alpha'), protocol.alpha],
+    [t('analysis.v2.protocol.alternative'), translatedAnalysisValue('alternative', protocol.alternative)],
+    [t('analysis.v2.protocol.adjustment'), translatedAnalysisValue('adjustment', protocol.multiplicityAdjustment)],
+    [t('analysis.v2.protocol.confidenceLevel'), protocol.confidenceLevel]
+  ], false)
+  appendCaption(container, t('analysis.v2.population.caption'))
+  if (!population || population.performed === false) {
+    renderNotPerformed(container, population, false)
+    return
+  }
+  renderResultTable(container, [t('analysis.v2.header.population'), t('analysis.v2.header.includedBlockIds'), t('analysis.v2.header.includedCount')], [
+    [t('analysis.v2.population.primary'), (population.primary?.includedBlockNumbers || []).join(', ') || t('analysis.v2.value.none'), population.primary?.includedBlockCount ?? 0],
+    [t('analysis.v2.population.validation'), (population.validation?.includedBlockNumbers || []).join(', ') || t('analysis.v2.value.none'), population.validation?.includedBlockCount ?? 0]
+  ], false)
+  const excluded = [
+    ...(population.primary?.excludedBlocks || []).map(block => [
+      t('analysis.v2.population.primary'), block.replicateNumber, (block.reasons || []).map(localizedAnalysisReason).join('; ')
+    ]),
+    ...(population.validation?.excludedBlocks || []).map(block => [
+      t('analysis.v2.population.validation'), block.replicateNumber, (block.reasons || []).map(localizedAnalysisReason).join('; ')
+    ])
+  ]
+  if (excluded.length) {
+    appendCaption(container, t('analysis.v2.population.exclusions'))
+    renderResultTable(container, [t('analysis.v2.header.population'), t('analysis.v2.header.blockId'), t('analysis.v2.header.reason')], excluded, false)
+  }
+}
+
+function renderBlockScores(container, scores) {
+  if (!scores || scores.performed === false) {
+    renderNotPerformed(container, scores)
+    return
+  }
+  const rows = (scores.cells || []).map(cell => [
+    cell.replicateNumber, cell.treatmentIndex, cell.treatment, cell.validSlides,
+    cell.expectedSlides, formatAnalysisNumber(cell.score)
+  ])
+  renderResultTable(container, [
+    t('analysis.v2.header.blockId'), t('analysis.v2.header.treatmentId'), t('analysis.v2.header.treatment'),
+    t('analysis.v2.header.validSlides'), t('analysis.v2.header.expectedSlides'), t('analysis.v2.header.score')
+  ], rows)
+}
+
+function renderRcbdAnova(container, anova, replace = true) {
+  if (!anova || anova.performed === false) {
+    renderNotPerformed(container, anova, replace)
+    return
+  }
+  if (replace) container.replaceChildren()
+  appendCaption(container, interpolateAnalysisText(t('analysis.v2.rcbd.model'), { model: anova.model, blockCount: anova.blockCount }))
+  const rows = (anova.terms || []).map(term => [
+    translatedAnalysisValue('term', term.term), formatAnalysisNumber(term.SS), term.DF,
+    formatAnalysisNumber(term.MS), term.F === undefined ? t('analysis.v2.value.notApplicable') : formatAnalysisNumber(term.F),
+    term.p === undefined ? t('analysis.v2.value.notApplicable') : formatProbability(term.p)
+  ])
+  renderResultTable(container, [
+    t('analysis.v2.header.term'), t('analysis.v2.header.ss'), t('analysis.v2.header.df'),
+    t('analysis.v2.header.ms'), t('analysis.v2.header.f'), t('analysis.v2.header.pValue')
+  ], rows, false)
+}
+
+function comparisonValues(row, adjusted = true) {
+  return [
+    `${row.referenceTreatment} (${row.referenceTreatmentIndex})`, `${row.treatment} (${row.treatmentIndex})`,
+    formatAnalysisNumber(row.difference), `${formatAnalysisNumber(row.ciLow)} / ${formatAnalysisNumber(row.ciHigh)}`,
+    formatProbability(row.pRaw), adjusted ? formatProbability(row.pAdjusted) : t('analysis.v2.value.notApplicable'),
+    row.significant ? t('analysis.v2.decision.significant') : t('analysis.v2.decision.notSignificant'),
+    translatedAnalysisValue('direction', row.direction)
+  ]
+}
+
+function comparisonHeaders() {
+  return [
+    t('analysis.v2.header.reference'), t('analysis.v2.header.treatment'), t('analysis.v2.header.difference'),
+    t('analysis.v2.header.confidenceInterval'), t('analysis.v2.header.rawP'), t('analysis.v2.header.holmP'),
+    t('analysis.v2.header.decision'), t('analysis.v2.header.direction')
+  ]
+}
+
+function renderPrimaryComparisons(container, result) {
+  if (!result || result.performed === false) {
+    renderNotPerformed(container, result)
+    return
+  }
+  renderResultTable(container, comparisonHeaders(), (result.comparisons || []).map(row => comparisonValues(row)))
+  appendCaption(container, interpolateAnalysisText(t('analysis.v2.comparisons.caption'), {
+    familySize: result.familySize,
+    adjustment: translatedAnalysisValue('adjustment', result.adjustment),
+    confidenceLevel: result.confidenceLevel
+  }))
+}
+
+function renderControlResponse(container, result) {
+  if (!result || result.performed === false) {
+    renderNotPerformed(container, result)
+    return
+  }
+  renderResultTable(container, comparisonHeaders(), [comparisonValues(result.comparison, false)])
+  appendCaption(container, interpolateAnalysisText(t('analysis.v2.control.blocks'), { blockIds: (result.blockNumbers || []).join(', ') }))
+  appendCaption(container, t('analysis.v2.control.anovaCaption'))
+  renderRcbdAnova(container, result.blockAnova, false)
+}
+
+function renderDoseTrend(container, result) {
+  if (!result || result.performed === false) {
+    renderNotPerformed(container, result)
+    return
+  }
+  renderResultTable(container, [t('analysis.v2.header.item'), t('analysis.v2.header.value')], [
+    [t('analysis.v2.trend.model'), result.model],
+    [t('analysis.v2.trend.blockCount'), result.blockCount],
+    [t('analysis.v2.trend.observationCount'), result.observationCount],
+    [t('analysis.v2.trend.slope'), formatAnalysisNumber(result.slope)],
+    [t('analysis.v2.trend.standardError'), formatAnalysisNumber(result.standardError)],
+    [t('analysis.v2.header.t'), formatAnalysisNumber(result.t)],
+    [t('analysis.v2.header.df'), result.DF],
+    [t('analysis.v2.header.confidenceInterval'), `${formatAnalysisNumber(result.ciLow)} / ${formatAnalysisNumber(result.ciHigh)}`],
+    [t('analysis.v2.header.pValue'), formatProbability(result.p)],
+    [t('analysis.v2.header.rSquared'), formatAnalysisNumber(result.r2)],
+    [t('analysis.v2.header.decision'), result.significant ? t('analysis.v2.decision.significant') : t('analysis.v2.decision.notSignificant')]
+  ])
+  const doses = (result.treatmentDoses || []).map(item => [item.treatmentIndex, formatAnalysisNumber(item.concentration)])
+  appendCaption(container, t('analysis.v2.trend.dosesCaption'))
+  renderResultTable(container, [t('analysis.v2.header.treatmentId'), t('analysis.v2.header.concentration')], doses, false)
+}
+
+function renderCharts(container, charts) {
+  container.replaceChildren()
+  if (!charts || charts.performed === false) {
+    renderNotPerformed(container, charts)
+    return
+  }
+  appendChart(container, charts.scores, t('analysis.v2.charts.scores.caption'), t('analysis.v2.charts.scores.alt'))
+  appendChart(container, charts.differences, t('analysis.v2.charts.differences.caption'), t('analysis.v2.charts.differences.alt'))
+  appendChart(container, charts.classes, t('analysis.v2.charts.classes.caption'), t('analysis.v2.charts.classes.alt'))
 }
 
 function renderResultTable(container, headers, rows, replace = true) {
@@ -489,15 +606,42 @@ function appendCaption(container, text) {
 
 function formatProbability(value) {
   const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return '-'
+  if (!Number.isFinite(numeric)) return t('analysis.v2.value.notAvailable')
   if (numeric <= 0.00001) return '< 0.00001'
   return numeric.toFixed(5)
 }
 
-function renderNotPerformed(container, result) {
-  container.replaceChildren()
-  appendCaption(container, t('analysis.notPerformed'))
-  if (result?.reason) appendCaption(container, result.reason.detail || result.reason.code)
+function formatAnalysisNumber(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric.toFixed(4) : t('analysis.v2.value.notAvailable')
+}
+
+function translatedAnalysisValue(group, value) {
+  const safeValue = String(value ?? '').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const key = `analysis.v2.${group}.${safeValue}`
+  const translated = t(key)
+  return translated === key ? String(value ?? t('analysis.v2.value.notAvailable')) : translated
+}
+
+function interpolateAnalysisText(template, context) {
+  return String(template).replace(/\{([a-zA-Z0-9_]+)\}/g, (placeholder, key) => {
+    const value = context?.[key]
+    return value === undefined || value === null ? placeholder : String(value)
+  })
+}
+
+function localizedAnalysisReason(reason) {
+  const code = String(reason?.code || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const key = `analysis.reason.${code}`
+  const translated = t(key)
+  const template = translated === key ? t('analysis.reason.unknown') : translated
+  return interpolateAnalysisText(template, { code, ...(reason?.context || {}), ...reason })
+}
+
+function renderNotPerformed(container, result, replace = true) {
+  if (replace) container.replaceChildren()
+  appendCaption(container, t('analysis.v2.notPerformed'))
+  appendCaption(container, localizedAnalysisReason(result?.reason))
 }
 
 function appendChart(container, base64, caption, alt) {
@@ -533,25 +677,32 @@ function exportCsv() {
 async function exportZip() {
   if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
-  if (typeof JSZip === 'undefined') return alert(currentLanguage === 'pt' ? 'Não foi possível carregar o gerador ZIP.' : 'Could not load the ZIP generator.')
+  if (typeof JSZip === 'undefined') return alert(t('analysis.v2.export.zipUnavailable'))
   try {
     const zip = new JSZip()
     const folder = zip.folder(exportBaseName())
     folder.file('report.html', CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage))
-    folder.file('README.txt', currentLanguage === 'pt' ? 'Pacote CometQuant: dados brutos, resultados agregados, análise e gráficos.' : 'CometQuant package: raw data, aggregate results, analysis and charts.')
+    folder.file('README.txt', t('analysis.v2.export.readme'))
     const data = folder.folder('data')
     data.file('experiment.json', JSON.stringify(currentExperiment, null, 2))
     data.file('analysis.json', JSON.stringify(analysisResults, null, 2))
     data.file('raw_slides.csv', CometQuantExport.buildRawCsv(currentExperiment))
     data.file('replicate_scores.csv', CometQuantExport.buildAggregateCsv(currentExperiment))
+    data.file('population.csv', CometQuantExport.buildPopulationCsv(analysisResults))
+    data.file('block_anova.csv', CometQuantExport.buildBlockAnovaCsv(analysisResults))
+    data.file('primary_comparisons.csv', CometQuantExport.buildComparisonsCsv(analysisResults))
+    data.file('control_response.csv', CometQuantExport.buildControlResponseCsv(analysisResults))
+    data.file('dose_trend.csv', CometQuantExport.buildDoseTrendCsv(analysisResults))
+    data.file('study_design.csv', CometQuantExport.buildStudyDesignCsv(currentExperiment, analysisResults))
     const charts = folder.folder('charts')
-    if (CometQuantExport.validPngBase64(analysisResults.chartScore)) charts.file('visual_scores.png', analysisResults.chartScore, { base64: true })
-    if (CometQuantExport.validPngBase64(analysisResults.chartClass)) charts.file('class_distribution.png', analysisResults.chartClass, { base64: true })
+    if (CometQuantExport.validPngBase64(analysisResults.charts?.scores)) charts.file('block_scores.png', analysisResults.charts.scores, { base64: true })
+    if (CometQuantExport.validPngBase64(analysisResults.charts?.differences)) charts.file('primary_differences.png', analysisResults.charts.differences, { base64: true })
+    if (CometQuantExport.validPngBase64(analysisResults.charts?.classes)) charts.file('class_distribution.png', analysisResults.charts.classes, { base64: true })
     const zipBlob = await zip.generateAsync({ type: 'blob' })
     downloadFile(zipBlob, `${exportBaseName()}.zip`, 'application/zip', true)
   } catch (error) {
     console.error('ZIP export error:', error)
-    alert(currentLanguage === 'pt' ? 'Falha ao gerar o arquivo ZIP.' : 'Failed to generate ZIP file.')
+    alert(t('analysis.v2.export.zipFailed'))
   }
 }
 

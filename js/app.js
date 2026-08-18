@@ -19,6 +19,7 @@ let recoveryAvailable = false
 let creatingExperiment = false
 let blindCodeCommitPending = false
 let replicateCommitPending = false
+let legacyConfigurationPending = false
 let hapticFeedbackEnabled = false
 let storageInitialization = { status: 'checking', error: null }
 let lastStorageDiagnostics = null
@@ -69,6 +70,7 @@ window.setLanguage = function (lang) {
   originalSetLanguage(lang)
   if (previousLanguage !== currentLanguage) invalidateAnalysisResults()
   updateLanguageButtons()
+  updateSetupStudyDesign()
   if (document.getElementById('screen-experiments').classList.contains('active')) renderExperimentsList()
   if (document.getElementById('screen-replicates').classList.contains('active')) renderReplicatesScreen()
   if (document.getElementById('screen-code-entry').classList.contains('active')) renderCodeEntry()
@@ -215,7 +217,8 @@ function initNavigation() {
     showScreen('screen-replicates')
   })
   document.getElementById('btn-back-analysis').addEventListener('click', () => showScreen('screen-summary'))
-  document.getElementById('btn-go-to-analysis').addEventListener('click', () => {
+  document.getElementById('btn-go-to-analysis').addEventListener('click', async () => {
+    if (!await ensureStudyDesignBeforeAnalysis()) return
     showScreen('screen-analysis')
     enterAnalysisScreen()
   })
@@ -224,7 +227,45 @@ function initNavigation() {
 function initSetup() {
   document.getElementById('input-conditions').addEventListener('input', generateConcentrationInputs)
   document.getElementById('input-conc-unit').addEventListener('change', generateConcentrationInputs)
+  ;['input-assay-type', 'input-neg-control', 'input-pos-control', 'input-sol-control'].forEach(id => {
+    document.getElementById(id)?.addEventListener(id === 'input-assay-type' ? 'change' : 'input', updateSetupStudyDesign)
+  })
+  document.getElementById('input-basal-reference')?.addEventListener('change', updateSetupStudyDesignSummary)
   document.getElementById('btn-start-counting').addEventListener('click', handleCreateExperiment)
+  updateSetupStudyDesign()
+}
+
+function updateSetupStudyDesign() {
+  const basalInput = document.getElementById('input-basal-reference')
+  if (!basalInput) return
+  const previous = basalInput.value
+  const options = [{ value: '', label: currentLanguage === 'pt' ? 'Selecione...' : 'Select...' }]
+  const negControl = optionalValueOf('input-neg-control')
+  const solControl = optionalValueOf('input-sol-control')
+  if (negControl) options.push({ value: 'negative-control', label: negControl })
+  if (solControl) options.push({ value: 'solvent-control', label: solControl })
+  basalInput.replaceChildren(...options.map(({ value, label }) => {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    if (!value) option.disabled = true
+    return option
+  }))
+  basalInput.value = options.some(option => option.value === previous) ? previous : ''
+  updateSetupStudyDesignSummary()
+}
+
+function updateSetupStudyDesignSummary() {
+  const assayType = optionalValueOf('input-assay-type')
+  const basalRole = optionalValueOf('input-basal-reference')
+  const basalLabel = basalRole === 'negative-control'
+    ? optionalValueOf('input-neg-control')
+    : basalRole === 'solvent-control' ? optionalValueOf('input-sol-control') : ''
+  const positiveLabel = optionalValueOf('input-pos-control')
+  const primary = document.getElementById('setup-primary-reference')
+  const validation = document.getElementById('setup-validation-comparison')
+  if (primary) primary.textContent = assayType === 'antigenotoxicity' ? positiveLabel || '-' : basalLabel || '-'
+  if (validation) validation.textContent = basalLabel && positiveLabel ? `${basalLabel} vs ${positiveLabel}` : '-'
 }
 
 function generateConcentrationInputs() {
@@ -267,22 +308,24 @@ async function handleCreateExperiment() {
   const concUnit = valueOf('input-conc-unit')
   const concentrationValues = Array.from({ length: Number.isInteger(conditions) && conditions > 0 ? conditions : 0 }, (_, index) => valueOf(`input-conc-${index}`))
   const concentrations = concentrationValues.map(value => value === '' ? NaN : Number(value))
-  const validation = CometQuantCore.validateSetup({ researcher, agent, cells, negControl, posControl, solControl, nucleoidsPerGel: nucleoids, slidesPerTreatment, conditions, concUnit, concentrations })
+  const assayType = optionalValueOf('input-assay-type')
+  const basalRole = optionalValueOf('input-basal-reference')
+  const { treatments, treatmentMetadata } = buildTreatmentPlan(posControl, negControl, solControl, concentrations, concUnit)
+  const basalTreatmentIndex = treatmentMetadata.find(item => item.role === basalRole)?.treatmentIndex ?? null
+  const studyDesign = buildStudyDesign(assayType, basalTreatmentIndex, treatmentMetadata, 'pre-collection')
+  const validation = CometQuantCore.validateSetup({
+    researcher, agent, cells, negControl, posControl, solControl, nucleoidsPerGel: nucleoids,
+    slidesPerTreatment, conditions, concUnit, concentrations, studyDesign
+  }, { requireStudyDesign: true })
   if (!validation.valid) {
     if (validation.errors.includes('agent-required') || validation.errors.includes('cells-required')) return alert(t('alert.needAgentCells'))
-    if (validation.errors.includes('control-required')) return alert(t('alert.needControl'))
+    if (validation.errors.includes('control-required') || validation.errors.includes('positive-control-required') || validation.errors.includes('basal-control-required')) return alert(t('alert.needControl'))
     if (validation.errors.includes('invalid-nucleoidsPerGel')) return alert(t('alert.needNucleoids'))
     if (validation.errors.includes('invalid-slidesPerTreatment')) return alert(t('alert.needSlides'))
     if (validation.errors.includes('invalid-conditions')) return alert(t('alert.needConditions'))
+    if (validation.errors.includes('invalid-assay-type')) return alert(studyDesignMessage('assayRequired'))
+    if (validation.errors.some(error => error.includes('reference') || error.includes('validation'))) return alert(studyDesignMessage('basalRequired'))
     return alert(t('alert.needUnitConcentrations'))
-  }
-
-  const treatments = []
-  if (posControl) treatments.push(posControl)
-  if (negControl) treatments.push(negControl)
-  if (solControl) treatments.push(solControl)
-  for (let index = 0; index < conditions; index++) {
-    treatments.push(`${concentrations[index]} ${concUnit}`)
   }
 
   const now = new Date().toISOString()
@@ -302,6 +345,8 @@ async function handleCreateExperiment() {
     slidesPerTreatment,
     concUnit,
     treatments,
+    treatmentMetadata: validation.treatmentMetadata,
+    studyDesign: validation.studyDesign,
     replicates: [],
     progress: null
   }
@@ -324,6 +369,47 @@ function resetSetupForm() {
   document.getElementById('input-slides-per-treatment').value = '1'
   document.getElementById('input-conc-unit').value = ''
   document.getElementById('concentrations-container').replaceChildren()
+  const assayType = document.getElementById('input-assay-type')
+  const basalReference = document.getElementById('input-basal-reference')
+  if (assayType) assayType.value = ''
+  if (basalReference) basalReference.value = ''
+  updateSetupStudyDesign()
+}
+
+function buildTreatmentPlan(posControl, negControl, solControl, concentrations, concUnit) {
+  const treatments = []
+  const treatmentMetadata = []
+  const addTreatment = (label, role, concentration = null) => {
+    if (!label) return
+    const treatmentIndex = treatments.length
+    treatments.push(label)
+    treatmentMetadata.push({ treatmentIndex, role, concentration })
+  }
+  addTreatment(posControl, 'positive-control')
+  addTreatment(negControl, 'negative-control')
+  addTreatment(solControl, 'solvent-control')
+  concentrations.forEach(concentration => addTreatment(`${concentration} ${concUnit}`, 'test-concentration', concentration))
+  return { treatments, treatmentMetadata }
+}
+
+function buildStudyDesign(assayType, basalTreatmentIndex, treatmentMetadata, configurationSource) {
+  const positiveTreatmentIndex = treatmentMetadata.find(item => item.role === 'positive-control')?.treatmentIndex ?? null
+  return {
+    version: CometQuantCore.STUDY_DESIGN_VERSION,
+    status: 'configured',
+    assayType,
+    primaryReferenceTreatmentIndex: assayType === 'antigenotoxicity' ? positiveTreatmentIndex : basalTreatmentIndex,
+    primaryTreatmentIndices: treatmentMetadata.filter(item => item.role === 'test-concentration').map(item => item.treatmentIndex),
+    validationComparison: {
+      referenceTreatmentIndex: basalTreatmentIndex,
+      treatmentIndex: positiveTreatmentIndex
+    },
+    alpha: 0.05,
+    alternative: 'two-sided',
+    pAdjustment: 'holm',
+    trendReferenceAsZero: true,
+    configurationSource
+  }
 }
 
 function createBlindReplicate(replicateNumber, experiment = currentExperiment) {
@@ -927,6 +1013,173 @@ function showSummary() {
   showScreen('screen-summary')
 }
 
+async function ensureStudyDesignBeforeAnalysis() {
+  if (!currentExperiment) return false
+  if (hasPendingSlides(currentExperiment)) {
+    alert(t('alert.blindingActive'))
+    return false
+  }
+  if (currentExperiment.studyDesign?.status === 'configured') return true
+  if (currentExperiment.studyDesign?.status !== 'unconfigured' || legacyConfigurationPending) return false
+
+  legacyConfigurationPending = true
+  try {
+    const experimentId = currentExperiment.id
+    const selection = await requestLegacyStudyDesign(currentExperiment)
+    if (!selection) return false
+    if (!currentExperiment || currentExperiment.id !== experimentId) return false
+    const candidate = cloneExperiment(currentExperiment)
+    candidate.studyDesign = buildStudyDesign(
+      selection.assayType,
+      selection.basalTreatmentIndex,
+      candidate.treatmentMetadata,
+      'legacy-post-collection'
+    )
+    const validation = CometQuantCore.validateExperiment(candidate, { source: 'local' })
+    if (!validation.valid) {
+      console.error('Could not configure legacy study design:', validation.errors)
+      alert(studyDesignMessage('legacyUnavailable'))
+      return false
+    }
+    return saveExperiment(candidate)
+  } finally {
+    legacyConfigurationPending = false
+  }
+}
+
+function requestLegacyStudyDesign(experiment) {
+  const metadata = Array.isArray(experiment.treatmentMetadata) ? experiment.treatmentMetadata : []
+  const positiveTreatment = metadata.find(item => item.role === 'positive-control')
+  const primaryTreatments = metadata.filter(item => item.role === 'test-concentration')
+  const basalTreatments = metadata.filter(item => item.role === 'negative-control' || item.role === 'solvent-control')
+  if (!positiveTreatment || !primaryTreatments.length || !basalTreatments.length) {
+    alert(studyDesignMessage('legacyUnavailable'))
+    return Promise.resolve(null)
+  }
+
+  const dialog = document.createElement('dialog')
+  dialog.id = 'legacy-study-design-dialog'
+  dialog.setAttribute('aria-labelledby', 'legacy-study-design-title')
+  const title = document.createElement('h2')
+  title.id = 'legacy-study-design-title'
+  title.textContent = studyDesignMessage('legacyTitle')
+  const message = document.createElement('p')
+  message.textContent = studyDesignMessage('legacyMessage')
+
+  const assayLabel = document.createElement('label')
+  assayLabel.htmlFor = 'legacy-input-assay-type'
+  assayLabel.textContent = studyDesignMessage('assayLabel')
+  const assayInput = document.createElement('select')
+  assayInput.id = 'legacy-input-assay-type'
+  ;[
+    ['', studyDesignMessage('select')],
+    ['genotoxicity', studyDesignMessage('genotoxicity')],
+    ['antigenotoxicity', studyDesignMessage('antigenotoxicity')]
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    if (!value) option.disabled = true
+    assayInput.appendChild(option)
+  })
+  assayInput.value = ''
+
+  const basalLabel = document.createElement('label')
+  basalLabel.htmlFor = 'legacy-input-basal-reference'
+  basalLabel.textContent = studyDesignMessage('basalLabel')
+  const basalInput = document.createElement('select')
+  basalInput.id = 'legacy-input-basal-reference'
+  const placeholder = document.createElement('option')
+  placeholder.value = ''
+  placeholder.textContent = studyDesignMessage('select')
+  placeholder.disabled = true
+  basalInput.appendChild(placeholder)
+  basalTreatments.forEach(item => {
+    const option = document.createElement('option')
+    option.value = String(item.treatmentIndex)
+    option.textContent = experiment.treatments[item.treatmentIndex]
+    basalInput.appendChild(option)
+  })
+  basalInput.value = ''
+
+  const summary = document.createElement('p')
+  summary.id = 'legacy-study-design-summary'
+  const updateSummary = () => {
+    const basalTreatmentIndex = Number(basalInput.value)
+    const basal = basalInput.value && Number.isInteger(basalTreatmentIndex) ? experiment.treatments[basalTreatmentIndex] : ''
+    const positive = experiment.treatments[positiveTreatment.treatmentIndex]
+    const primary = assayInput.value === 'antigenotoxicity' ? positive : basal
+    summary.textContent = primary && basal
+      ? `${studyDesignMessage('primaryLabel')}: ${primary}. ${studyDesignMessage('validationLabel')}: ${basal} vs ${positive}.`
+      : studyDesignMessage('completeSelection')
+  }
+  assayInput.addEventListener('change', updateSummary)
+  basalInput.addEventListener('change', updateSummary)
+  updateSummary()
+
+  const actions = document.createElement('div')
+  actions.className = 'card-actions'
+  const submit = document.createElement('button')
+  submit.type = 'button'
+  submit.id = 'btn-save-legacy-study-design'
+  submit.className = 'btn-primary'
+  submit.textContent = studyDesignMessage('save')
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.id = 'btn-cancel-legacy-study-design'
+  cancel.className = 'btn-secondary'
+  cancel.textContent = studyDesignMessage('cancel')
+  actions.append(submit, cancel)
+  dialog.append(title, message, assayLabel, assayInput, basalLabel, basalInput, summary, actions)
+  document.body.appendChild(dialog)
+
+  return new Promise(resolve => {
+    let finished = false
+    const finish = value => {
+      if (finished) return
+      finished = true
+      if (typeof dialog.close === 'function') dialog.close()
+      dialog.remove()
+      resolve(value)
+    }
+    submit.addEventListener('click', () => {
+      const basalTreatmentIndex = Number(basalInput.value)
+      if (!['genotoxicity', 'antigenotoxicity'].includes(assayInput.value)) return alert(studyDesignMessage('assayRequired'))
+      if (!basalInput.value || !Number.isInteger(basalTreatmentIndex)) return alert(studyDesignMessage('basalRequired'))
+      finish({ assayType: assayInput.value, basalTreatmentIndex })
+    })
+    cancel.addEventListener('click', () => finish(null))
+    dialog.addEventListener('cancel', event => {
+      event.preventDefault()
+      finish(null)
+    })
+    if (typeof dialog.showModal === 'function') dialog.showModal()
+    else dialog.setAttribute('open', '')
+    setTimeout(() => assayInput.focus(), 0)
+  })
+}
+
+function studyDesignMessage(key) {
+  const messages = {
+    assayRequired: ['Selecione o tipo de ensaio.', 'Select the assay type.'],
+    basalRequired: ['Selecione o controle negativo ou de solvente usado como controle basal.', 'Select the negative or solvent control used as the basal control.'],
+    legacyUnavailable: ['Este experimento não possui controles e concentrações identificados suficientes para configurar o plano analítico.', 'This experiment does not have enough identified controls and concentrations to configure the analytical plan.'],
+    legacyTitle: ['Configurar plano analítico', 'Configure analytical plan'],
+    legacyMessage: ['Esta definição será registrada como posterior à coleta e não poderá ser inferida automaticamente.', 'This definition will be recorded as post-collection and cannot be inferred automatically.'],
+    assayLabel: ['Tipo de ensaio', 'Assay type'],
+    basalLabel: ['Controle basal', 'Basal control'],
+    primaryLabel: ['Referência principal', 'Primary reference'],
+    validationLabel: ['Validação', 'Validation'],
+    completeSelection: ['Selecione o tipo de ensaio e o controle basal.', 'Select the assay type and basal control.'],
+    select: ['Selecione...', 'Select...'],
+    genotoxicity: ['Genotoxicidade', 'Genotoxicity'],
+    antigenotoxicity: ['Antigenotoxicidade', 'Antigenotoxicity'],
+    save: ['Salvar plano e abrir análise', 'Save plan and open analysis'],
+    cancel: ['Cancelar', 'Cancel']
+  }
+  return messages[key]?.[currentLanguage === 'pt' ? 0 : 1] || key
+}
+
 function renderSummaryTable() {
   const container = document.getElementById('summary-table-container')
   container.replaceChildren()
@@ -1202,6 +1455,10 @@ function cloneExperiment(experiment) {
 
 function valueOf(id) {
   return document.getElementById(id).value.trim()
+}
+
+function optionalValueOf(id) {
+  return document.getElementById(id)?.value.trim() || ''
 }
 
 function createId() {

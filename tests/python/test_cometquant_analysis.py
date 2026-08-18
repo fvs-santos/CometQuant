@@ -13,6 +13,7 @@ import cometquant_analysis as engine
 
 
 REFERENCE = ROOT / "tests" / "reference" / "v1"
+REFERENCE_V2 = ROOT / "tests" / "reference" / "v2"
 
 
 def reference_experiment():
@@ -44,6 +45,84 @@ def reference_experiment():
         "negControl": "Control",
         "posControl": "",
         "solControl": "",
+    }
+
+
+def reference_v2_experiment():
+    replicates = {}
+    treatments = []
+    metadata = {}
+    with (REFERENCE_V2 / "slides.csv").open(encoding="utf-8", newline="") as source:
+        for row in csv.DictReader(source):
+            treatment_index = int(row["treatment_index"])
+            while len(treatments) <= treatment_index:
+                treatments.append(None)
+            treatments[treatment_index] = row["treatment"]
+            concentration = float(row["concentration"]) if row["concentration"] else None
+            roles = {
+                0: "negative-control",
+                1: "positive-control",
+                2: "test-concentration",
+                3: "test-concentration",
+                4: "test-concentration",
+            }
+            metadata[treatment_index] = {
+                "treatmentIndex": treatment_index,
+                "role": roles[treatment_index],
+                "concentration": concentration,
+            }
+            replicate = replicates.setdefault(
+                int(row["replicate_number"]), {"assignments": [], "gels": []}
+            )
+            slide = int(row["slide"])
+            replicate["assignments"].append(
+                {
+                    "treatmentIndex": treatment_index,
+                    "gelNumber": slide,
+                    "status": "counted",
+                }
+            )
+            score = float(row["score"])
+            replicate["gels"].append(
+                {
+                    "treatment": row["treatment"],
+                    "treatmentIndex": treatment_index,
+                    "gelNumber": slide,
+                    "class0": 100 - score,
+                    "class1": 0,
+                    "class2": 0,
+                    "class3": 0,
+                    "class4": score,
+                    "total": 100,
+                    "status": row["status"],
+                    "completion": row["completion"],
+                }
+            )
+    for replicate_number, replicate in replicates.items():
+        replicate["replicateNumber"] = replicate_number
+    return {
+        "schemaVersion": 5,
+        "nucleoidsPerGel": 100,
+        "slidesPerTreatment": 2,
+        "treatments": treatments,
+        "treatmentMetadata": [metadata[index] for index in range(len(treatments))],
+        "studyDesign": {
+            "version": 1,
+            "status": "configured",
+            "assayType": "genotoxicity",
+            "primaryReferenceTreatmentIndex": 0,
+            "primaryTreatmentIndices": [2, 3, 4],
+            "validationComparison": {
+                "referenceTreatmentIndex": 0,
+                "treatmentIndex": 1,
+            },
+            "alpha": 0.05,
+            "alternative": "two-sided",
+            "pAdjustment": "holm",
+            "trendReferenceAsZero": True,
+            "configurationSource": "pre-collection",
+        },
+        "replicates": [replicates[number] for number in sorted(replicates)],
     }
 
 
@@ -105,14 +184,6 @@ class ReferenceResultsTests(unittest.TestCase):
                 self.assert_probability_close(regression["pearson"][field], expected)
             else:
                 self.assert_close(regression["pearson"][field], expected)
-
-    def test_complete_engine_returns_strict_json(self):
-        serialized = engine.run_all_analyses(json.dumps(self.experiment), "en")
-        parsed = json.loads(serialized, parse_constant=lambda value: self.fail(value))
-        self.assertTrue(parsed["anova"]["performed"])
-        self.assertTrue(parsed["chartScore"].startswith("iVBORw0KGgo"))
-        self.assertTrue(parsed["chartClass"].startswith("iVBORw0KGgo"))
-
 
 class EdgeCaseTests(unittest.TestCase):
     def test_probability_preserves_positive_values_below_machine_epsilon(self):
@@ -190,6 +261,213 @@ class EdgeCaseTests(unittest.TestCase):
         summary = engine.calculate_class_summary(experiment)["A"]
         self.assertEqual(summary["means"][0], 75.0)
         self.assertEqual(summary["standard_deviations"][0], 25.0)
+
+
+class BlockAnalysisV2Tests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.experiment = reference_v2_experiment()
+        cls.expected = json.loads(
+            (REFERENCE_V2 / "expected.json").read_text(encoding="utf-8")
+        )
+        cls.result = engine.analyze_experiment(cls.experiment)
+
+    def assert_close(self, actual, expected, tolerance=1e-7):
+        self.assertTrue(
+            math.isclose(actual, expected, rel_tol=1e-9, abs_tol=tolerance),
+            f"{actual} != {expected}",
+        )
+
+    def assert_anova_matches(self, actual, expected):
+        self.assertTrue(actual["performed"])
+        self.assertEqual(actual["residualDF"], expected["residualDF"])
+        self.assert_close(actual["MSE"], expected["MSE"])
+        for actual_term, expected_term in zip(actual["terms"], expected["terms"]):
+            self.assertEqual(actual_term["term"], expected_term["term"])
+            for field in ("SS", "MS", "F", "p"):
+                if field in expected_term:
+                    self.assert_close(actual_term[field], expected_term[field])
+            self.assertEqual(actual_term["DF"], expected_term["DF"])
+
+    def test_fixture_has_exact_design_and_keeps_cell_with_one_valid_slide(self):
+        self.assertEqual(len(self.experiment["replicates"]), 3)
+        self.assertEqual(sum(len(item["gels"]) for item in self.experiment["replicates"]), 30)
+        block = self.result["population"]["blocks"][2]
+        cell = block["cells"][4]
+        self.assertEqual(block["replicateNumber"], 3)
+        self.assertTrue(block["primaryIncluded"])
+        self.assertEqual(cell["expectedSlides"], 2)
+        self.assertEqual(cell["validSlides"], 1)
+        self.assertEqual(cell["invalidSlides"], 1)
+        self.assertFalse(cell["technicalReplicationComplete"])
+        self.assertEqual(cell["score"], 35.0)
+
+    def test_rcbd_contrasts_control_and_trend_match_independent_scipy_oracle(self):
+        self.assert_anova_matches(self.result["blockAnova"], self.expected["blockAnova"])
+        comparisons = self.result["primaryComparisons"]
+        self.assertTrue(comparisons["performed"])
+        self.assertFalse(comparisons["omnibusGateUsed"])
+        self.assertEqual(comparisons["familySize"], 3)
+        for actual, expected in zip(
+            comparisons["comparisons"], self.expected["primaryComparisons"]
+        ):
+            self.assertEqual(actual["treatmentIndex"], expected["treatmentIndex"])
+            for field in (
+                "referenceMean",
+                "treatmentMean",
+                "difference",
+                "standardError",
+                "t",
+                "ciLow",
+                "ciHigh",
+                "pRaw",
+                "pAdjusted",
+            ):
+                self.assert_close(actual[field], expected[field])
+            self.assertEqual(actual["DF"], expected["DF"])
+
+        control = self.result["controlResponse"]
+        self.assertTrue(control["performed"])
+        self.assertNotIn("valid", control)
+        self.assertNotIn("classification", control)
+        self.assert_anova_matches(
+            control["blockAnova"], self.expected["controlResponse"]["blockAnova"]
+        )
+        for field in (
+            "referenceMean",
+            "treatmentMean",
+            "difference",
+            "standardError",
+            "t",
+            "ciLow",
+            "ciHigh",
+            "pRaw",
+        ):
+            self.assert_close(
+                control["comparison"][field],
+                self.expected["controlResponse"]["comparison"][field],
+            )
+
+        trend = self.result["doseTrend"]
+        self.assertTrue(trend["performed"])
+        for field in (
+            "slope",
+            "standardError",
+            "t",
+            "MSE",
+            "ciLow",
+            "ciHigh",
+            "p",
+            "r2",
+        ):
+            self.assert_close(trend[field], self.expected["doseTrend"][field])
+        self.assertEqual(trend["DF"], self.expected["doseTrend"]["DF"])
+        self.assertEqual(
+            [item["concentration"] for item in trend["treatmentDoses"]],
+            [0.0, 1.0, 5.0, 10.0],
+        )
+
+    def test_contract_is_strict_v2_json_without_retired_analyses(self):
+        serialized = engine.run_all_analyses(json.dumps(self.experiment), "en")
+        parsed = json.loads(serialized, parse_constant=lambda value: self.fail(value))
+        self.assertEqual(
+            set(parsed),
+            {
+                "analysisSchemaVersion",
+                "protocol",
+                "population",
+                "descriptive",
+                "scores",
+                "blockAnova",
+                "primaryComparisons",
+                "controlResponse",
+                "doseTrend",
+                "charts",
+            },
+        )
+        self.assertEqual(parsed["analysisSchemaVersion"], 2)
+        self.assertFalse({"shapiro", "tukey", "pearson", "regression"} & set(parsed))
+        self.assertEqual(set(parsed["charts"]), {"scores", "differences", "classes"})
+        for chart in parsed["charts"].values():
+            self.assertTrue(chart.startswith("iVBORw0KGgo"))
+
+    def test_replicate_number_identity_is_not_replaced_by_position(self):
+        experiment = reference_v2_experiment()
+        identities = [7, 11, 19]
+        for replicate, identity in zip(experiment["replicates"], identities):
+            replicate["replicateNumber"] = identity
+        result = engine.analyze_experiment(experiment)
+        self.assertEqual(result["population"]["primary"]["includedBlockNumbers"], identities)
+        self.assertEqual(
+            sorted({row["replicateNumber"] for row in result["scores"]["cells"]}),
+            identities,
+        )
+
+    def test_incomplete_primary_cell_excludes_entire_block_explicitly(self):
+        experiment = reference_v2_experiment()
+        for gel in experiment["replicates"][1]["gels"]:
+            if gel["treatmentIndex"] == 3:
+                gel["completion"] = "incomplete"
+        result = engine.analyze_experiment(experiment)
+        primary = result["population"]["primary"]
+        self.assertEqual(primary["includedBlockNumbers"], [1, 3])
+        self.assertEqual(primary["excludedBlocks"][0]["replicateNumber"], 2)
+        reason = primary["excludedBlocks"][0]["reasons"][0]
+        self.assertEqual(reason["code"], "no_valid_slides")
+        self.assertEqual(reason["treatmentIndex"], 3)
+        self.assertEqual(result["blockAnova"]["blockCount"], 2)
+
+    def test_trend_uses_metadata_instead_of_parsing_labels(self):
+        experiment = reference_v2_experiment()
+        experiment["treatments"][2:] = ["low", "middle", "high"]
+        for replicate in experiment["replicates"]:
+            for gel in replicate["gels"]:
+                gel["treatment"] = experiment["treatments"][gel["treatmentIndex"]]
+        result = engine.analyze_experiment(experiment)
+        self.assertTrue(result["doseTrend"]["performed"])
+        self.assert_close(result["doseTrend"]["slope"], self.expected["doseTrend"]["slope"])
+
+    def test_missing_reference_and_zero_residual_variance_have_structured_reasons(self):
+        missing_reference = reference_v2_experiment()
+        for replicate in missing_reference["replicates"]:
+            for gel in replicate["gels"]:
+                if gel["treatmentIndex"] == 0:
+                    gel["completion"] = "incomplete"
+        missing_result = engine.analyze_experiment(missing_reference)
+        self.assertEqual(
+            missing_result["blockAnova"]["reason"]["code"],
+            "no_complete_primary_blocks",
+        )
+        self.assertEqual(len(missing_result["population"]["primary"]["excludedBlocks"]), 3)
+
+        additive = reference_v2_experiment()
+        doses = [0, None, 1, 5, 10]
+        for block_index, replicate in enumerate(additive["replicates"]):
+            for gel in replicate["gels"]:
+                if gel["treatmentIndex"] in (0, 2, 3, 4):
+                    score = 5 + block_index + 2 * doses[gel["treatmentIndex"]]
+                    gel.update(class0=100 - score, class4=score, completion="complete")
+        additive_result = engine.analyze_experiment(additive)
+        self.assertEqual(
+            additive_result["blockAnova"]["reason"]["code"],
+            "zero_residual_variance",
+        )
+        self.assertEqual(
+            additive_result["primaryComparisons"]["reason"]["code"],
+            "block_anova_not_estimable",
+        )
+        self.assertEqual(
+            additive_result["doseTrend"]["reason"]["code"],
+            "zero_residual_variance",
+        )
+
+    def test_unconfigured_study_design_returns_the_full_unavailable_contract(self):
+        experiment = reference_v2_experiment()
+        del experiment["studyDesign"]
+        result = engine.analyze_experiment(experiment)
+        self.assertEqual(result["analysisSchemaVersion"], 2)
+        self.assertEqual(result["protocol"]["reason"]["code"], "study_design_unconfigured")
+        self.assertTrue(all(not result[key]["performed"] for key in result if key != "analysisSchemaVersion"))
 
 
 if __name__ == "__main__":

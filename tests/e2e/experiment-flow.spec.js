@@ -20,6 +20,25 @@ function completedCompactExperiment(id = 'compact-code-test') {
   }
 }
 
+function completedLegacyAnalysisExperiment() {
+  const treatments = ['Positive', 'Negative', '1 µM']
+  const codes = ['AB1', 'AC1', 'AD1']
+  return {
+    schemaVersion: 4, id: 'legacy-analysis-plan', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    status: 'completed', researcher: '', agent: 'Legacy agent', cells: 'CHO-K1', negControl: 'Negative', posControl: 'Positive', solControl: '',
+    nucleoidsPerGel: 100, slidesPerTreatment: 1, concUnit: 'µM', treatments, progress: null,
+    replicates: [{
+      replicateNumber: 1, date: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      assignments: treatments.map((_, treatmentIndex) => ({ blindCode: codes[treatmentIndex], treatmentIndex, gelNumber: 1, status: 'counted' })),
+      gels: treatments.map((treatment, treatmentIndex) => ({
+        blindCode: codes[treatmentIndex], treatment, treatmentIndex, gelNumber: 1,
+        class0: 90 - treatmentIndex, class1: 0, class2: 0, class3: 0, class4: 10 + treatmentIndex,
+        total: 100, status: 'counted', completion: 'complete'
+      }))
+    }]
+  }
+}
+
 test('creates a blinded mobile experiment and blocks revealing summary', async ({ page }) => {
   await page.addInitScript(() => localStorage.clear())
   await page.goto('/')
@@ -27,7 +46,10 @@ test('creates a blinded mobile experiment and blocks revealing summary', async (
   await page.getByRole('button', { name: 'Novo Experimento' }).click()
   await page.locator('#input-agent').fill('Agente teste')
   await page.locator('#input-cells').fill('CHO-K1')
+  await page.locator('#input-assay-type').selectOption('genotoxicity')
   await page.locator('#input-neg-control').fill('PBS')
+  await page.locator('#input-pos-control').fill('H2O2')
+  await page.locator('#input-basal-reference').selectOption('negative-control')
   await page.locator('#input-nucleoids').fill('10')
   await page.locator('#input-slides-per-treatment').fill('2')
   await page.locator('#input-conditions').fill('1')
@@ -35,7 +57,7 @@ test('creates a blinded mobile experiment and blocks revealing summary', async (
   await page.locator('#input-conc-0').fill('5')
   await page.getByRole('button', { name: 'Salvar Experimento e Gerar Códigos' }).click()
   await expect(page.locator('#screen-blind-codes')).toHaveClass(/active/)
-  await expect(page.locator('.blind-code-card')).toHaveCount(2)
+  await expect(page.locator('.blind-code-card')).toHaveCount(3)
   const generatedCodes = await page.locator('.blind-code-card').evaluateAll(cards => cards.map(card => (
     Array.from(card.querySelectorAll('code'), code => code.textContent)
   )))
@@ -44,7 +66,7 @@ test('creates a blinded mobile experiment and blocks revealing summary', async (
     expect(codes[0]).toMatch(/^[A-Z]{2}1$/)
     expect(codes[1]).toBe(`${codes[0].slice(0, 2)}2`)
   })
-  expect(new Set(generatedCodes.map(codes => codes[0].slice(0, 2))).size).toBe(2)
+  expect(new Set(generatedCodes.map(codes => codes[0].slice(0, 2))).size).toBe(3)
   await page.getByRole('button', { name: /Identifiquei as lâminas/ }).click()
   let replicateMessage = ''
   page.once('dialog', async dialog => {
@@ -107,6 +129,31 @@ test('reveals generated mappings before continuing a partial legacy experiment',
   await page.getByRole('button', { name: /I labeled the slides/ }).click()
   await page.getByRole('button', { name: 'Analyze Slides' }).click()
   await expect(page.locator('#screen-code-entry')).toHaveClass(/active/)
+})
+
+test('requires and persists a one-time analytical plan for a completed legacy experiment', async ({ page }) => {
+  await seedLegacyData(page, [completedLegacyAnalysisExperiment()])
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.getByRole('button', { name: 'Open' }).click()
+  await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
+  await page.getByRole('button', { name: 'Statistical Analysis' }).click()
+
+  await expect(page.locator('#legacy-study-design-dialog')).toBeVisible()
+  await page.locator('#legacy-input-assay-type').selectOption('antigenotoxicity')
+  await page.locator('#legacy-input-basal-reference').selectOption('1')
+  await page.locator('#btn-save-legacy-study-design').click()
+  await expect(page.locator('#screen-analysis')).toHaveClass(/active/)
+
+  const storedDesign = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments'))
+    .find(item => item?.id === 'legacy-analysis-plan').studyDesign)
+  expect(storedDesign).toMatchObject({
+    status: 'configured',
+    assayType: 'antigenotoxicity',
+    primaryReferenceTreatmentIndex: 0,
+    primaryTreatmentIndices: [2],
+    validationComparison: { referenceTreatmentIndex: 1, treatmentIndex: 0 },
+    configurationSource: 'legacy-post-collection'
+  })
 })
 
 test('does not reuse compact bases across replicates and accepts spaced lowercase input', async ({ page }) => {

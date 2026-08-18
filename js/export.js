@@ -100,6 +100,157 @@
     return serializeCsv(AGGREGATE_COLUMNS, rows)
   }
 
+  function unavailableRow(result) {
+    return {
+      performed: 'false',
+      reason_code: result?.reason?.code || '',
+      reason_context: JSON.stringify(result?.reason?.context || {})
+    }
+  }
+
+  function joinedReasons(reasons) {
+    return (reasons || []).map(reason => {
+      const context = reason.treatment || reason.treatmentIndex !== undefined
+        ? ` [${reason.treatmentIndex ?? ''}: ${reason.treatment || ''}]`
+        : ''
+      return `${reason.code || 'unknown'}${context}`
+    }).join('; ')
+  }
+
+  const POPULATION_COLUMNS = ['replicate_number', 'primary_included', 'primary_exclusion_reasons', 'validation_included', 'validation_exclusion_reasons', 'treatment_index', 'treatment', 'expected_slides', 'valid_slides', 'invalid_slides', 'absent_slides', 'score', 'technical_replication_complete'].map(key => ({ key }))
+  const BLOCK_ANOVA_COLUMNS = ['performed', 'reason_code', 'reason_context', 'model', 'block_count', 'treatment_indices', 'residual_df', 'MSE', 'term', 'SS', 'DF', 'MS', 'F', 'p'].map(key => ({ key }))
+  const COMPARISON_COLUMNS = ['performed', 'reason_code', 'reason_context', 'family', 'family_size', 'adjustment', 'confidence_level', 'reference_treatment_index', 'reference_treatment', 'treatment_index', 'treatment', 'block_count', 'reference_mean', 'treatment_mean', 'difference', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p_raw', 'p_holm', 'significant', 'direction'].map(key => ({ key }))
+  const CONTROL_RESPONSE_COLUMNS = ['performed', 'reason_code', 'reason_context', 'purpose', 'block_numbers', 'reference_treatment_index', 'reference_treatment', 'treatment_index', 'treatment', 'block_count', 'reference_mean', 'treatment_mean', 'difference', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p_raw', 'significant', 'direction'].map(key => ({ key }))
+  const DOSE_TREND_COLUMNS = ['performed', 'reason_code', 'reason_context', 'model', 'block_count', 'observation_count', 'residual_df', 'MSE', 'reference_included_as_zero', 'treatment_index', 'concentration', 'slope', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p', 'r2', 'significant'].map(key => ({ key }))
+  const STUDY_DESIGN_COLUMNS = ['study_design_version', 'status', 'assay_type', 'primary_reference_treatment_index', 'primary_reference_treatment', 'primary_treatment_indices', 'validation_reference_treatment_index', 'validation_treatment_index', 'alpha', 'alternative', 'multiplicity_adjustment', 'confidence_level', 'include_primary_reference_as_zero', 'treatment_index', 'treatment', 'role', 'concentration', 'concentration_unit'].map(key => ({ key }))
+
+  function buildPopulationCsv(analysis) {
+    const population = analysis?.population
+    if (!population || population.performed === false) {
+      return serializeCsv(POPULATION_COLUMNS, [])
+    }
+    const validationIncluded = new Set(population.validation?.includedBlockNumbers || [])
+    const validationExcluded = new Map((population.validation?.excludedBlocks || []).map(block => [block.replicateNumber, joinedReasons(block.reasons)]))
+    const rows = []
+    ;(population.blocks || []).forEach(block => {
+      const primaryReasons = joinedReasons(block.primaryExclusionReasons)
+      ;(block.cells || []).forEach(cell => rows.push({
+        replicate_number: block.replicateNumber,
+        primary_included: String(Boolean(block.primaryIncluded)),
+        primary_exclusion_reasons: primaryReasons,
+        validation_included: String(validationIncluded.has(block.replicateNumber)),
+        validation_exclusion_reasons: validationExcluded.get(block.replicateNumber) || '',
+        treatment_index: cell.treatmentIndex,
+        treatment: cell.treatment,
+        expected_slides: cell.expectedSlides,
+        valid_slides: cell.validSlides,
+        invalid_slides: cell.invalidSlides,
+        absent_slides: cell.absentSlides,
+        score: cell.score ?? '',
+        technical_replication_complete: String(Boolean(cell.technicalReplicationComplete))
+      }))
+    })
+    return serializeCsv(POPULATION_COLUMNS, rows)
+  }
+
+  function buildBlockAnovaCsv(analysis) {
+    const result = analysis?.blockAnova
+    if (!result || result.performed === false) {
+      return serializeCsv(BLOCK_ANOVA_COLUMNS, [unavailableRow(result)])
+    }
+    const common = {
+      performed: 'true', model: result.model, block_count: result.blockCount,
+      treatment_indices: (result.treatmentIndices || []).join(';'), residual_df: result.residualDF, MSE: result.MSE
+    }
+    return serializeCsv(BLOCK_ANOVA_COLUMNS, (result.terms || []).map(term => ({ ...common, ...term })))
+  }
+
+  function comparisonRow(comparison) {
+    return {
+      reference_treatment_index: comparison.referenceTreatmentIndex,
+      reference_treatment: comparison.referenceTreatment,
+      treatment_index: comparison.treatmentIndex,
+      treatment: comparison.treatment,
+      block_count: comparison.blockCount,
+      reference_mean: comparison.referenceMean,
+      treatment_mean: comparison.treatmentMean,
+      difference: comparison.difference,
+      standard_error: comparison.standardError,
+      t: comparison.t,
+      DF: comparison.DF,
+      ci_low: comparison.ciLow,
+      ci_high: comparison.ciHigh,
+      p_raw: comparison.pRaw,
+      p_holm: comparison.pAdjusted ?? '',
+      significant: String(Boolean(comparison.significant)),
+      direction: comparison.direction
+    }
+  }
+
+  function buildComparisonsCsv(analysis) {
+    const result = analysis?.primaryComparisons
+    if (!result || result.performed === false) {
+      return serializeCsv(COMPARISON_COLUMNS, [unavailableRow(result)])
+    }
+    return serializeCsv(COMPARISON_COLUMNS, (result.comparisons || []).map(comparison => ({
+      performed: 'true', family: result.family, family_size: result.familySize,
+      adjustment: result.adjustment, confidence_level: result.confidenceLevel,
+      ...comparisonRow(comparison)
+    })))
+  }
+
+  function buildControlResponseCsv(analysis) {
+    const result = analysis?.controlResponse
+    if (!result || result.performed === false) {
+      return serializeCsv(CONTROL_RESPONSE_COLUMNS, [unavailableRow(result)])
+    }
+    return serializeCsv(CONTROL_RESPONSE_COLUMNS, [{
+      performed: 'true', purpose: result.purpose, block_numbers: (result.blockNumbers || []).join(';'),
+      ...comparisonRow(result.comparison || {})
+    }])
+  }
+
+  function buildDoseTrendCsv(analysis) {
+    const result = analysis?.doseTrend
+    if (!result || result.performed === false) {
+      return serializeCsv(DOSE_TREND_COLUMNS, [unavailableRow(result)])
+    }
+    const common = {
+      performed: 'true', model: result.model, block_count: result.blockCount,
+      observation_count: result.observationCount, residual_df: result.residualDF, MSE: result.MSE,
+      reference_included_as_zero: String(Boolean(result.referenceIncludedAsZero)), slope: result.slope,
+      standard_error: result.standardError, t: result.t, DF: result.DF, ci_low: result.ciLow,
+      ci_high: result.ciHigh, p: result.p, r2: result.r2, significant: String(Boolean(result.significant))
+    }
+    const doses = result.treatmentDoses?.length ? result.treatmentDoses : [{}]
+    return serializeCsv(DOSE_TREND_COLUMNS, doses.map(dose => ({
+      ...common, treatment_index: dose.treatmentIndex ?? '', concentration: dose.concentration ?? ''
+    })))
+  }
+
+  function buildStudyDesignCsv(experiment, analysis) {
+    const design = experiment?.studyDesign || {}
+    const protocol = analysis?.protocol?.performed === false ? {} : (analysis?.protocol || {})
+    const validation = protocol.validationComparison || design.validationComparison || {}
+    const referenceIndex = protocol.primaryReferenceTreatmentIndex ?? design.primaryReferenceTreatmentIndex
+    const primaryIndices = protocol.primaryTreatmentIndices || design.primaryTreatmentIndices || []
+    const common = {
+      study_design_version: protocol.studyDesignVersion ?? design.version ?? '', status: design.status || '',
+      assay_type: protocol.assayType ?? design.assayType ?? '', primary_reference_treatment_index: referenceIndex ?? '',
+      primary_reference_treatment: protocol.primaryReferenceTreatment || experiment?.treatments?.[referenceIndex] || '',
+      primary_treatment_indices: primaryIndices.join(';'), validation_reference_treatment_index: validation.referenceTreatmentIndex ?? '',
+      validation_treatment_index: validation.treatmentIndex ?? '', alpha: protocol.alpha ?? design.alpha ?? '',
+      alternative: protocol.alternative ?? design.alternative ?? '', multiplicity_adjustment: protocol.multiplicityAdjustment ?? design.pAdjustment ?? '',
+      confidence_level: protocol.confidenceLevel ?? '', include_primary_reference_as_zero: String(protocol.includePrimaryReferenceAsZero ?? design.trendReferenceAsZero ?? ''),
+      concentration_unit: experiment?.concUnit || ''
+    }
+    const metadata = experiment?.treatmentMetadata?.length ? experiment.treatmentMetadata : [{}]
+    return serializeCsv(STUDY_DESIGN_COLUMNS, metadata.map(item => ({
+      ...common, treatment_index: item.treatmentIndex ?? '', treatment: experiment?.treatments?.[item.treatmentIndex] || '',
+      role: item.role || '', concentration: item.concentration ?? ''
+    })))
+  }
+
   function htmlTable(headers, rows) {
     return `<table><thead><tr>${headers.map(value => `<th>${escapeHtml(value)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(value => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
   }
@@ -110,19 +261,77 @@
 
   function buildReportHtml(experiment, analysis, lang = 'en') {
     const pt = lang === 'pt'
+    const labels = pt ? {
+      researcher: 'Pesquisador', agent: 'Agente', cells: 'Tipo celular', target: 'Meta de nucleoides', slides: 'Laminas por tratamento',
+      exclusion: 'Laminas ausentes e incompletas nao participam da analise inferencial.', raw: 'Dados brutos', scores: 'Scores por repeticao',
+      replicate: 'Repeticao', treatment: 'Tratamento', slide: 'Lamina', completion: 'Completude', reason: 'Motivo', complete: 'Completas',
+      incomplete: 'Incompletas', absent: 'Ausentes', protocol: 'Protocolo cientifico', population: 'Populacao de analise', item: 'Item', value: 'Valor',
+      primaryIncluded: 'Blocos primarios incluidos', primaryExcluded: 'Blocos primarios excluidos', validationIncluded: 'Blocos de validacao incluidos',
+      rcbd: 'ANOVA em blocos casualizados', term: 'Termo', comparisons: 'Comparacoes primarias planejadas', reference: 'Referencia', difference: 'Diferenca',
+      ci: 'IC 95% nominal', rawP: 'p bruto', holmP: 'p Holm', decision: 'Resultado estatistico', direction: 'Direcao', significant: 'Diferenca detectada', notSignificant: 'Diferenca nao detectada',
+      control: 'Resposta de controle', trend: 'Tendencia de dose ajustada por bloco', slope: 'Inclinacao', blocks: 'Blocos', observations: 'Observacoes',
+      notPerformed: 'Nao realizado', charts: 'Graficos', chartScores: 'Scores por bloco', chartDifferences: 'Diferencas com IC 95%', chartClasses: 'Distribuicao por classes'
+    } : {
+      researcher: 'Researcher', agent: 'Agent', cells: 'Cell type', target: 'Nucleoid target', slides: 'Slides per treatment',
+      exclusion: 'Absent and incomplete slides are excluded from inferential analysis.', raw: 'Raw data', scores: 'Scores by replicate',
+      replicate: 'Replicate', treatment: 'Treatment', slide: 'Slide', completion: 'Completion', reason: 'Reason', complete: 'Complete',
+      incomplete: 'Incomplete', absent: 'Absent', protocol: 'Scientific protocol', population: 'Analysis population', item: 'Item', value: 'Value',
+      primaryIncluded: 'Included primary blocks', primaryExcluded: 'Excluded primary blocks', validationIncluded: 'Included validation blocks',
+      rcbd: 'Randomized complete block ANOVA', term: 'Term', comparisons: 'Planned primary comparisons', reference: 'Reference', difference: 'Difference',
+      ci: 'Nominal 95% CI', rawP: 'Raw p', holmP: 'Holm p', decision: 'Statistical result', direction: 'Direction', significant: 'Difference detected', notSignificant: 'Difference not detected',
+      control: 'Control response', trend: 'Block-adjusted dose trend', slope: 'Slope', blocks: 'Blocks', observations: 'Observations',
+      notPerformed: 'Not performed', charts: 'Charts', chartScores: 'Scores by block', chartDifferences: 'Differences with 95% CI', chartClasses: 'Class distribution'
+    }
     const raw = buildRawRows(experiment)
     const aggregate = core.aggregateReplicateScores(experiment)
     const scoreRows = aggregate.map(row => [row.treatment, row.replicateNumber, row.completeSlides, row.incompleteSlides, row.absentSlides, row.score === null ? '-' : row.score.toFixed(2)])
     const rawRows = raw.map(row => [row.replicate_number, row.treatment, row.gel_number, row.status, row.completion || '-', row.absence_reason || row.incomplete_reason || '-', row.total_counted || '-', row.visual_score || '-'])
-    const chartScore = validPngBase64(analysis?.chartScore) ? `<img src="data:image/png;base64,${analysis.chartScore}" alt="Visual score chart">` : ''
-    const chartClass = validPngBase64(analysis?.chartClass) ? `<img src="data:image/png;base64,${analysis.chartClass}" alt="Class distribution chart">` : ''
-    const analysisJson = analysis ? `<h2>${pt ? 'Resultados estatísticos' : 'Statistical results'}</h2><pre>${escapeHtml(JSON.stringify({ shapiro: analysis.shapiro, anova: analysis.anova, tukey: analysis.tukey, regression: analysis.regression }, null, 2))}</pre>` : ''
-    return `<!DOCTYPE html><html lang="${pt ? 'pt-BR' : 'en'}"><head><meta charset="UTF-8"><title>CometQuant - ${escapeHtml(experiment.agent)}</title><style>body{font-family:Arial,sans-serif;max-width:1000px;margin:auto;padding:32px;color:#17202a}h1,h2{color:#1a56a0}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}th,td{border:1px solid #bbb;padding:6px;text-align:center}th{background:#e8f0fe}img{max-width:100%}pre{white-space:pre-wrap;background:#f4f4f4;padding:12px}.warning{color:#8a5600}</style></head><body><h1>CometQuant Lab</h1><p><strong>${pt ? 'Pesquisador' : 'Researcher'}:</strong> ${escapeHtml(experiment.researcher || '-')}</p><p><strong>${pt ? 'Agente' : 'Agent'}:</strong> ${escapeHtml(experiment.agent)}</p><p><strong>${pt ? 'Tipo celular' : 'Cell type'}:</strong> ${escapeHtml(experiment.cells)}</p><p><strong>${pt ? 'Meta de nucleoides' : 'Nucleoid target'}:</strong> ${experiment.nucleoidsPerGel}</p><p><strong>${pt ? 'Lâminas por tratamento' : 'Slides per treatment'}:</strong> ${experiment.slidesPerTreatment}</p><p class="warning">${pt ? 'Lâminas ausentes e incompletas não participam da análise inferencial.' : 'Absent and incomplete slides are excluded from inferential analysis.'}</p><h2>${pt ? 'Dados brutos' : 'Raw data'}</h2>${htmlTable([pt ? 'Repetição' : 'Replicate', pt ? 'Tratamento' : 'Treatment', pt ? 'Lâmina' : 'Slide', 'Status', pt ? 'Completude' : 'Completion', pt ? 'Motivo' : 'Reason', 'Total', 'Score'], rawRows)}<h2>${pt ? 'Scores por repetição' : 'Scores by replicate'}</h2>${htmlTable([pt ? 'Tratamento' : 'Treatment', pt ? 'Repetição' : 'Replicate', pt ? 'Completas' : 'Complete', pt ? 'Incompletas' : 'Incomplete', pt ? 'Ausentes' : 'Absent', 'Score'], scoreRows)}${analysisJson}${chartScore}${chartClass}<p>Generated by CometQuant Lab - schema ${experiment.schemaVersion}</p></body></html>`
+    const protocol = analysis?.protocol?.performed === false ? null : analysis?.protocol
+    const population = analysis?.population?.performed === false ? null : analysis?.population
+    const protocolRows = protocol ? [
+      ['studyDesignVersion', protocol.studyDesignVersion], ['assayType', protocol.assayType], ['primaryReferenceTreatment', protocol.primaryReferenceTreatment],
+      ['primaryTreatmentIndices', (protocol.primaryTreatmentIndices || []).join(', ')],
+      ['validationComparison', protocol.validationComparison ? `${protocol.validationComparison.referenceTreatmentIndex} / ${protocol.validationComparison.treatmentIndex}` : '-'],
+      ['alpha', protocol.alpha], ['alternative', protocol.alternative], ['multiplicityAdjustment', protocol.multiplicityAdjustment],
+      ['confidenceLevel', protocol.confidenceLevel], ['includePrimaryReferenceAsZero', protocol.includePrimaryReferenceAsZero]
+    ] : [[labels.notPerformed, reasonText(analysis?.protocol?.reason)]]
+    const populationRows = population ? [
+      [labels.primaryIncluded, (population.primary?.includedBlockNumbers || []).join(', ') || '-'],
+      [labels.primaryExcluded, (population.primary?.excludedBlocks || []).map(block => `${block.replicateNumber}: ${joinedReasons(block.reasons)}`).join('; ') || '-'],
+      [labels.validationIncluded, (population.validation?.includedBlockNumbers || []).join(', ') || '-']
+    ] : [[labels.notPerformed, reasonText(analysis?.population?.reason)]]
+    const anova = analysis?.blockAnova
+    const anovaRows = anova?.performed ? (anova.terms || []).map(term => [term.term, term.SS, term.DF, term.MS, term.F ?? '-', term.p ?? '-']) : [[labels.notPerformed, reasonText(anova?.reason), '-', '-', '-', '-']]
+    const comparisons = analysis?.primaryComparisons
+    const comparisonRows = comparisons?.performed ? (comparisons.comparisons || []).map(row => [
+      row.referenceTreatment, row.treatment, row.difference, `${row.ciLow} - ${row.ciHigh}`, row.pRaw, row.pAdjusted,
+      row.significant ? labels.significant : labels.notSignificant, row.direction
+    ]) : [[labels.notPerformed, reasonText(comparisons?.reason), '-', '-', '-', '-', '-', '-']]
+    const control = analysis?.controlResponse
+    const controlRows = control?.performed ? [[
+      control.comparison.referenceTreatment, control.comparison.treatment, control.comparison.difference,
+      `${control.comparison.ciLow} - ${control.comparison.ciHigh}`, control.comparison.pRaw,
+      control.comparison.significant ? labels.significant : labels.notSignificant, control.comparison.direction
+    ]] : [[labels.notPerformed, reasonText(control?.reason), '-', '-', '-', '-', '-']]
+    const trend = analysis?.doseTrend
+    const trendRows = trend?.performed ? [
+      [labels.slope, trend.slope], ['SE', trend.standardError], ['t', trend.t], ['DF', trend.DF], [labels.ci, `${trend.ciLow} - ${trend.ciHigh}`],
+      ['p', trend.p], ['R2', trend.r2], [labels.blocks, trend.blockCount], [labels.observations, trend.observationCount],
+      [labels.decision, trend.significant ? labels.significant : labels.notSignificant]
+    ] : [[labels.notPerformed, reasonText(trend?.reason)]]
+    const chartItems = [
+      [analysis?.charts?.scores, labels.chartScores], [analysis?.charts?.differences, labels.chartDifferences], [analysis?.charts?.classes, labels.chartClasses]
+    ].filter(([image]) => validPngBase64(image)).map(([image, alt]) => `<figure><img src="data:image/png;base64,${image}" alt="${escapeHtml(alt)}"><figcaption>${escapeHtml(alt)}</figcaption></figure>`).join('')
+    return `<!DOCTYPE html><html lang="${pt ? 'pt-BR' : 'en'}"><head><meta charset="UTF-8"><title>CometQuant - ${escapeHtml(experiment.agent)}</title><style>body{font-family:Arial,sans-serif;max-width:1000px;margin:auto;padding:32px;color:#17202a}h1,h2{color:#1a56a0}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}th,td{border:1px solid #bbb;padding:6px;text-align:center}th{background:#e8f0fe}img{max-width:100%}figcaption{text-align:center}.warning{color:#8a5600}</style></head><body><h1>CometQuant Lab</h1><p><strong>${escapeHtml(labels.researcher)}:</strong> ${escapeHtml(experiment.researcher || '-')}</p><p><strong>${escapeHtml(labels.agent)}:</strong> ${escapeHtml(experiment.agent)}</p><p><strong>${escapeHtml(labels.cells)}:</strong> ${escapeHtml(experiment.cells)}</p><p><strong>${escapeHtml(labels.target)}:</strong> ${escapeHtml(experiment.nucleoidsPerGel)}</p><p><strong>${escapeHtml(labels.slides)}:</strong> ${escapeHtml(experiment.slidesPerTreatment)}</p><p class="warning">${escapeHtml(labels.exclusion)}</p><h2>${escapeHtml(labels.raw)}</h2>${htmlTable([labels.replicate, labels.treatment, labels.slide, 'Status', labels.completion, labels.reason, 'Total', 'Score'], rawRows)}<h2>${escapeHtml(labels.scores)}</h2>${htmlTable([labels.treatment, labels.replicate, labels.complete, labels.incomplete, labels.absent, 'Score'], scoreRows)}<h2>${escapeHtml(labels.protocol)}</h2>${htmlTable([labels.item, labels.value], protocolRows)}<h2>${escapeHtml(labels.population)}</h2>${htmlTable([labels.item, labels.value], populationRows)}<h2>${escapeHtml(labels.rcbd)}</h2>${htmlTable([labels.term, 'SS', 'DF', 'MS', 'F', 'p'], anovaRows)}<h2>${escapeHtml(labels.comparisons)}</h2>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.ci, labels.rawP, labels.holmP, labels.decision, labels.direction], comparisonRows)}<h2>${escapeHtml(labels.control)}</h2>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.ci, labels.rawP, labels.decision, labels.direction], controlRows)}<h2>${escapeHtml(labels.trend)}</h2>${htmlTable([labels.item, labels.value], trendRows)}<h2>${escapeHtml(labels.charts)}</h2>${chartItems}<p>Generated by CometQuant Lab - schema ${escapeHtml(experiment.schemaVersion)} / analysis ${escapeHtml(analysis?.analysisSchemaVersion || '-')}</p></body></html>`
   }
 
   function safeFilename(value) {
     return String(value || 'Experiment').normalize('NFKD').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'Experiment'
   }
 
-  return { escapeHtml, escapeCsv, serializeCsv, buildRawRows, buildRawCsv, buildAggregateCsv, buildReportHtml, validPngBase64, safeFilename }
+  return {
+    escapeHtml, escapeCsv, serializeCsv, buildRawRows, buildRawCsv, buildAggregateCsv,
+    buildPopulationCsv, buildBlockAnovaCsv, buildComparisonsCsv, buildControlResponseCsv,
+    buildDoseTrendCsv, buildStudyDesignCsv, buildReportHtml, validPngBase64, safeFilename
+  }
 })

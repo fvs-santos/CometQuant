@@ -1,0 +1,184 @@
+{
+  "provenance": {
+    "method": "Independent SciPy distributions, explicit RCBD sums of squares, contrasts, Holm, and matrix OLS",
+    "scipy": "1.13.0",
+    "dataset": "slides.csv"
+  },
+  "fixture": {
+    "independentExperiments": 3,
+    "slides": 30,
+    "invalidTechnicalSlides": 1,
+    "primaryIncludedBlockNumbers": [
+      1,
+      2,
+      3
+    ]
+  },
+  "scores": {
+    "Negative control": [
+      9.0,
+      12.0,
+      8.0
+    ],
+    "Positive control": [
+      50.0,
+      56.0,
+      47.0
+    ],
+    "Compound 1 uM": [
+      14.0,
+      18.0,
+      13.0
+    ],
+    "Compound 5 uM": [
+      25.0,
+      31.0,
+      23.0
+    ],
+    "Compound 10 uM": [
+      40.0,
+      48.0,
+      35.0
+    ]
+  },
+  "blockAnova": {
+    "model": "score ~ treatment + block",
+    "blockCount": 3,
+    "treatmentIndices": [
+      0,
+      2,
+      3,
+      4
+    ],
+    "residualDF": 6,
+    "MSE": 4.138888888888876,
+    "terms": [
+      {
+        "term": "treatment",
+        "SS": 1730.6666666666667,
+        "DF": 3,
+        "MS": 576.8888888888889,
+        "F": 139.3825503355709,
+        "p": 6.1593383796696e-06
+      },
+      {
+        "term": "block",
+        "SS": 118.5,
+        "DF": 2,
+        "MS": 59.25,
+        "F": 14.315436241610783,
+        "p": 0.005200719747946682
+      },
+      {
+        "term": "residual",
+        "SS": 24.833333333333258,
+        "DF": 6,
+        "MS": 4.138888888888876
+      }
+    ]
+  },
+  "primaryComparisons": [
+    {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 15.0,
+      "difference": 5.333333333333334,
+      "standardError": 1.6611018208584478,
+      "t": 3.2107202980351306,
+      "DF": 6,
+      "ciLow": 1.2687636019163104,
+      "ciHigh": 9.397903064750357,
+      "pRaw": 0.018350366918446104,
+      "treatmentIndex": 2,
+      "pAdjusted": 0.018350366918446104
+    },
+    {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 26.333333333333332,
+      "difference": 16.666666666666664,
+      "standardError": 1.6611018208584478,
+      "t": 10.03350093135978,
+      "DF": 6,
+      "ciLow": 12.60209693524964,
+      "ciHigh": 20.731236398083688,
+      "pRaw": 5.682549087781244e-05,
+      "treatmentIndex": 3,
+      "pAdjusted": 0.00011365098175562489
+    },
+    {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 41.0,
+      "difference": 31.333333333333336,
+      "standardError": 1.6611018208584478,
+      "t": 18.862981750956394,
+      "DF": 6,
+      "ciLow": 27.268763601916312,
+      "ciHigh": 35.39790306475036,
+      "pRaw": 1.4340819926595778e-06,
+      "treatmentIndex": 4,
+      "pAdjusted": 4.302245977978733e-06
+    }
+  ],
+  "controlResponse": {
+    "blockNumbers": [
+      1,
+      2,
+      3
+    ],
+    "blockAnova": {
+      "model": "score ~ treatment + block",
+      "blockCount": 3,
+      "treatmentIndices": [
+        0,
+        1
+      ],
+      "residualDF": 2,
+      "MSE": 3.166666666666817,
+      "terms": [
+        {
+          "term": "treatment",
+          "SS": 2562.6666666666665,
+          "DF": 1,
+          "MS": 2562.6666666666665,
+          "F": 809.2631578946983,
+          "p": 0.001233406292355654
+        },
+        {
+          "term": "block",
+          "SS": 44.333333333333336,
+          "DF": 2,
+          "MS": 22.166666666666668,
+          "F": 6.999999999999668,
+          "p": 0.1250000000000052
+        },
+        {
+          "term": "residual",
+          "SS": 6.333333333333634,
+          "DF": 2,
+          "MS": 3.166666666666817
+        }
+      ]
+    },
+    "comparison": {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 51.0,
+      "difference": 41.333333333333336,
+      "standardError": 1.4529663145135923,
+      "t": 28.447550999948987,
+      "DF": 2,
+      "ciLow": 35.081723854034884,
+      "ciHigh": 47.58494281263179,
+      "pRaw": 0.0012334062923556532
+    }
+  },
+  "doseTrend": {
+    "slope": 3.043010752688172,
+    "standardError": 0.14927223537672588,
+    "t": 20.385644691448295,
+    "DF": 8,
+    "MSE": 4.144489247311825,
+    "ciLow": 2.6987883606382725,
+    "ciHigh": 3.3872331447380715,
+    "p": 3.505955305924891e-08,
+    "r2": 0.9823074098300456
+  }
+}

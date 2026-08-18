@@ -347,6 +347,50 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+.form-help {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.study-design-panel {
+  padding: var(--space-md);
+  border: 1px solid rgba(74, 158, 255, 0.35);
+  border-radius: var(--border-radius-md);
+  background: linear-gradient(145deg, rgba(74, 158, 255, 0.1), rgba(22, 27, 34, 0.9));
+}
+
+.study-design-panel h3 {
+  margin-bottom: var(--space-xs);
+  color: var(--color-accent);
+  font-size: var(--font-size-md);
+}
+
+.study-design-panel > p {
+  margin-bottom: var(--space-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.study-design-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-xs);
+}
+
+.study-design-summary dt {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.study-design-summary dd {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
 #concentrations-container {
   display: flex;
   flex-direction: column;
@@ -748,6 +792,46 @@ button:disabled {
 
 #backup-password-dialog::backdrop {
   background: rgba(0, 0, 0, 0.78);
+}
+
+#legacy-study-design-dialog {
+  width: min(92vw, 560px);
+  max-height: 88vh;
+  margin: auto;
+  padding: var(--space-lg);
+  border: 1px solid var(--color-bg-card-hover);
+  border-radius: var(--border-radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  overflow-y: auto;
+}
+
+#legacy-study-design-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+#legacy-study-design-dialog h2,
+#legacy-study-design-dialog p,
+#legacy-study-design-dialog label,
+#legacy-study-design-dialog select {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--space-sm);
+}
+
+#legacy-study-design-dialog label {
+  margin-top: var(--space-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+#legacy-study-design-dialog select {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-bg-card-hover);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
 }
 
 .backup-dialog-content {
