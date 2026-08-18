@@ -302,11 +302,88 @@ Concluido na continuidade de 17/08/2026:
 - a checklist real de Safari/iOS e armazenamento foi versionada em `docs/safari-ios-storage-checklist.md`;
 - a verificacao final passou com 49 testes JavaScript, 95,39% de cobertura global, 17 cenarios Chromium e 17 cenarios WebKit.
 
-Ordem sugerida para a proxima continuidade:
+Plano estatistico acordado na continuidade de 18/08/2026, ainda nao implementado:
+
+### Compreensao do desenho experimental
+
+- O uso esperado e de tres experimentos independentes, normalmente executados em dias, placas e culturas preparadas independentemente. Cada experimento independente contem todos os tratamentos e funciona como um bloco.
+- Em cada bloco existe uma unidade tratada para cada controle ou concentracao. As duas laminas usuais sao replicas tecnicas dessa unidade, e os cometas contados sao subamostras de mensuracao.
+- A unidade experimental da inferencia continua sendo o experimento independente. Laminas e cometas nao aumentam o `n` biologico.
+- As laminas tecnicas completas sao promediadas dentro de `experimento x tratamento`. Se apenas uma das laminas previstas estiver completa, a celula continua na analise com aviso e contagem explicita das laminas utilizadas.
+- Se nenhuma lamina valida existir para a referencia ou para uma das concentracoes principais, o bloco inteiro e excluido da analise principal e a exclusao deve ser mostrada ao usuario.
+- As comparacoes entre tratamentos sao pareadas pelo experimento, mas o termo mais preciso para o conjunto com varios tratamentos e delineamento em blocos completos.
+
+### Revisao do protocolo atual
+
+- O codigo atual ainda executa Shapiro-Wilk por tratamento, ANOVA one-way, Tukey para todos os pares e regressao/Pearson sem ajustar pelo bloco.
+- A cascata automatica `Shapiro -> parametrico ou nao parametrico -> omnibus -> pos-teste` foi rejeitada para o uso tipico com tres experimentos independentes.
+- Com `n = 3`, Shapiro-Wilk tem pouco poder para avaliar normalidade, e o menor p-valor bilateral exato do Wilcoxon pareado e `0,25`. Uma troca automatica poderia gerar falsos negativos e conclusoes instaveis.
+- Shapiro-Wilk deixara de selecionar o metodo. Friedman e Wilcoxon foram adiados para uma etapa futura e nao farao parte da primeira implementacao do novo protocolo.
+
+### Protocolo principal planejado
+
+- A analise principal sera predefinida e parametrica, usando o modelo `score ~ tratamento + experimento`, com o experimento independente como bloco.
+- A populacao principal contera o controle de referencia e as concentracoes do composto. Outros controles nao integrarao a familia principal de multiplicidade.
+- A ANOVA em blocos apresentara tratamento, bloco e residuo, mas seu p-valor global sera secundario e nao funcionara como gate para comparacoes planejadas.
+- Cada concentracao sera comparada diretamente com a referencia usando o erro residual comum do modelo em blocos.
+- As comparacoes serao sempre bilaterais e os p-valores brutos serao ajustados por Holm dentro da familia formada somente pelas concentracoes.
+- Cada comparacao apresentara medias, diferenca em pontos de score, erro-padrao, estatistica t, graus de liberdade, intervalo de confianca nominal de 95%, p bruto, p ajustado, direcao e decisao estatistica.
+- As decisoes usarao valores em precisao integral; arredondamento ocorrera apenas na apresentacao.
+- Comparacoes planejadas serao executadas independentemente da significancia da ANOVA global.
+- A regressao e a correlacao de Pearson atuais serao substituidas por uma tendencia linear secundaria ajustada por bloco: `score ~ experimento + concentracao`.
+- A referencia sera incluida como concentracao zero do composto teste na tendencia. Os metadados numericos de concentracao deixarao de depender do parsing do rotulo do tratamento.
+- A resposta do controle positivo sera analisada separadamente contra o controle basal, sem entrar na familia Holm das concentracoes e sem classificacao automatica do ensaio como valido ou invalido.
+
+### Tipo de ensaio e controles
+
+- Novos experimentos exigirao a escolha entre **genotoxicidade** e **antigenotoxicidade** antes da geracao dos codigos cegos.
+- Genotoxicidade exigira controle positivo e um controle negativo ou de solvente/veiculo. O usuario escolhera negativo ou solvente como referencia principal quando ambos existirem. O positivo sera comparado separadamente com essa referencia.
+- Antigenotoxicidade exigira o controle positivo com o mutageno isolado, que sera a referencia principal, e um controle negativo ou de solvente como controle basal. Os tratamentos combinados serao comparados com o positivo.
+- O plano analitico ficara bloqueado depois da geracao da primeira assignment e nao sera mostrado durante a contagem cega.
+- A aplicacao informara diferenca estatistica detectada ou nao detectada, magnitude, intervalo, direcao e consistencia. Nao classificara automaticamente um composto como genotoxico, nao genotoxico ou antigenotoxico.
+- Significancia estatistica nao sera apresentada como sinonimo de relevancia biologica, e ausencia de significancia nao sera apresentada como prova de ausencia de efeito.
+
+### Schema, legado e contrato de resultados
+
+- A implementacao planejada incrementara o schema de experimento para a versao 5.
+- O novo documento tera metadados estruturados dos tratamentos e um `studyDesign` versionado com tipo de ensaio, referencia principal, concentracoes participantes, comparacao de validacao, alfa `0,05`, alternativa bilateral, ajuste Holm e inclusao da referencia como dose zero.
+- Indices de tratamento serao reutilizados porque tratamentos, assignments e laminas ja usam `treatmentIndex` e nao podem ser reordenados depois da criacao.
+- Experimentos v1 a v4 serao migrados para um estado analitico `unconfigured`. Tipo e referencia nao serao inferidos silenciosamente.
+- Um experimento legado somente solicitara configuracao unica depois do fim do blinding. O registro indicara que a definicao ocorreu apos a coleta.
+- Experimentos com planos analiticos incompativeis nao poderao ser consolidados.
+- A mudanca documental nao exige nova versao do IndexedDB, salvo se forem adicionados stores ou indices.
+- O resultado cientifico tera `analysisSchemaVersion: 2` e secoes explicitas para protocolo, populacao, descritivas, ANOVA em blocos, comparacoes principais, resposta dos controles, tendencia e graficos.
+- Resultados impossiveis usarao codigos estruturados e localizaveis. `NaN` e valores infinitos continuarao proibidos no JSON.
+
+### Interface, graficos e exportacao planejados
+
+- O cadastro recebera tipo de ensaio, referencia principal, controle basal e resumo das comparacoes antes da codificacao cega.
+- A tela de resultados sera reorganizada em plano da analise, populacao e perdas tecnicas, scores por experimento, comparacoes principais, ANOVA em blocos, resposta dos controles, tendencia e graficos.
+- O grafico de barras com anotacoes de Tukey sera substituido por pontos dos experimentos, conexao visual dos blocos e um grafico das diferencas contra a referencia com intervalos de confianca.
+- O grafico de classes continuara descritivo. Qualquer anotacao de significancia usara o p-valor ajustado.
+- HTML, JSON e ZIP passarao a registrar protocolo, referencia, blocos incluidos/excluidos, comparacoes e tendencia.
+- O ZIP devera acrescentar CSVs especificos para desenho, populacao, ANOVA em blocos, comparacoes principais, controles e tendencia, preservando os arquivos existentes de dados brutos e scores agregados.
+- As protecoes existentes contra injecao HTML, formulas de planilha, PNG invalido e nomes de arquivo inseguros devem ser preservadas.
+
+### Validacao e ordem de implementacao
+
+1. Versionar a especificacao estatistica antes de alterar o motor.
+2. Implementar schema 5, validacao, migracao e configuracao dos dois tipos de ensaio.
+3. Construir uma matriz explicita `bloco x tratamento`, preservando IDs e quantidades de laminas tecnicas.
+4. Criar `tests/reference/v2/` com o desenho tipico de tres experimentos independentes, controles, tres concentracoes e duas laminas por celula; preservar `v1` como historico do protocolo antigo.
+5. Validar de forma independente a ANOVA em blocos, os contrastes, Holm, intervalos e tendencia com calculos SciPy externos ao motor e com R.
+6. Implementar o novo motor Python e os casos degenerados antes da interface.
+7. Criar o contrato de resultados v2, renderizacao, i18n, graficos e exportacoes.
+8. Cobrir genotoxicidade, antigenotoxicidade, legado, uma lamina valida, bloco incompleto, variancia residual zero, referencia ausente e precisao dos p-valores.
+9. Executar o motor real no Pyodide em Chromium e WebKit, incluindo reload offline e inspecao dos arquivos exportados.
+10. Incrementar em sincronia o cache do service worker e o nome de shell usado pelo diagnostico.
+11. Atualizar README, este MEMORY e a versao publica somente depois da verificacao completa.
+
+Pendencias operacionais que continuam validas em paralelo:
 
 1. Executar a checklist em Safari macOS, iPhone e iPad reais, incluindo PWA instalada, baixa disponibilidade de espaco e Pyodide offline.
 2. Validar manualmente a sensacao do feedback tatil em Android real.
-3. Definir politica de deploy e revisao externa do protocolo cientifico.
+3. Definir politica de deploy e submeter o novo protocolo cientifico a revisao externa antes de uso critico.
 
 ## Arquivos de referencia
 
@@ -349,6 +426,7 @@ Ordem sugerida para a proxima continuidade:
 
 - Branch: `main`.
 - A continuidade atual inclui IndexedDB autoritativo, pacote cientifico offline opcional, Web Worker, concorrencia entre abas, codigos cegos compactos, diagnostico de armazenamento e matriz E2E Chromium/WebKit; consultar `git log` para o commit publicado ao fim da sessao.
-- A implementacao possui validacao estatistica automatizada independente, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
+- A implementacao atual ainda usa Shapiro-Wilk por tratamento, ANOVA one-way, Tukey e regressao/Pearson sem bloco. O protocolo em blocos descrito acima foi acordado, mas ainda nao foi implementado.
+- A implementacao possui validacao estatistica automatizada independente para o protocolo atual, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.
