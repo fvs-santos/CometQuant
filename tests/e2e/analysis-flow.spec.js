@@ -144,6 +144,10 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   ])
   await expect(page.locator('#analysis-primary-comparisons tbody tr')).toHaveCount(expected.primaryComparisons.length)
   await expect(page.locator('#analysis-v2-charts img')).toHaveCount(3)
+  await expect(page.locator('#section-analysis-non-parametric .result-title')).toHaveText('Non-parametric Sensitivity')
+  await expect(page.locator('#analysis-non-parametric')).not.toContainText('analysis.v2.')
+  await expect(page.locator('#section-analysis-transformed .result-title')).toHaveText('Transformed Sensitivity')
+  await expect(page.locator('#analysis-transformed')).not.toContainText('analysis.v2.')
   await page.evaluate(() => setLanguage('pt'))
   await expect(page.locator('#analysis-results')).toBeHidden()
   await page.getByRole('button', { name: 'Rodar Análise' }).click()
@@ -158,11 +162,17 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   for (const suffix of [
     'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
     'data/primary_comparisons.csv', 'data/control_response.csv', 'data/dose_trend.csv',
+    'data/non_parametric.csv', 'data/transformed_analysis.csv',
     'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
   ]) {
     expect(archivedNames.some(name => name.endsWith(suffix))).toBe(true)
   }
   const analysisEntry = archive.file(archivedNames.find(name => name.endsWith('data/analysis.json')))
-  expect(JSON.parse(await analysisEntry.async('string')).analysisSchemaVersion).toBe(2)
+  const analysisJson = JSON.parse(await analysisEntry.async('string'))
+  expect(analysisJson.analysisSchemaVersion).toBe(2)
+  expect(analysisJson.nonParametric.performed).toBe(true)
+  expect(analysisJson.nonParametric.friedman.pExact).toBeCloseTo(expected.nonParametric.friedman.pExact, 7)
+  expect(analysisJson.nonParametric.pageTrend.direction).toBe('increasing')
+  expect(analysisJson.transformedAnalysis.scale).toBe('arcsin_sqrt')
   expect(remoteRequests).toHaveLength(installedRequestCount)
 })

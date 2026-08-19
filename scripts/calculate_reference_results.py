@@ -191,6 +191,108 @@ def contrast(reference, treatment, mse, residual_df):
     }
 
 
+def arcsin_sqrt(values):
+    clipped = np.clip(values, 0.0, 100.0)
+    return np.arcsin(np.sqrt(clipped / 100.0))
+
+
+def trend_ols(values, doses):
+    block_count, treatment_count = values.shape
+    y = values.reshape(-1)
+    block_ids = np.repeat(np.arange(block_count), treatment_count)
+    design = np.column_stack(
+        [np.ones(y.size)]
+        + [(block_ids == index).astype(float) for index in range(1, block_count)]
+        + [np.tile(doses, block_count)]
+    )
+    coefficients = np.linalg.solve(design.T @ design, design.T @ y)
+    residuals = y - design @ coefficients
+    trend_df = y.size - design.shape[1]
+    trend_mse = float(residuals @ residuals / trend_df)
+    covariance = trend_mse * np.linalg.inv(design.T @ design)
+    slope = float(coefficients[-1])
+    slope_se = math.sqrt(covariance[-1, -1])
+    slope_t = slope / slope_se
+    slope_critical = float(stats.t.ppf(0.975, trend_df))
+    trend_ss_total = float(np.sum((y - np.mean(y)) ** 2))
+    reduced_design = design[:, :-1]
+    reduced_coefficients = np.linalg.solve(
+        reduced_design.T @ reduced_design, reduced_design.T @ y
+    )
+    reduced_residuals = y - reduced_design @ reduced_coefficients
+    reduced_ss_residual = float(reduced_residuals @ reduced_residuals)
+    r2_partial = 1 - float(residuals @ residuals) / reduced_ss_residual
+    return {
+        "slope": slope,
+        "standardError": slope_se,
+        "t": slope_t,
+        "DF": trend_df,
+        "MSE": trend_mse,
+        "ciLow": slope - slope_critical * slope_se,
+        "ciHigh": slope + slope_critical * slope_se,
+        "p": float(2 * stats.t.sf(abs(slope_t), trend_df)),
+        "r2": 1 - float(residuals @ residuals) / trend_ss_total,
+        "r2Partial": r2_partial,
+    }
+
+
+def friedman_exact(values):
+    block_count, treatment_count = values.shape
+    from itertools import permutations, product
+    from collections import Counter
+
+    ranks = stats.rankdata(values, axis=1)
+    rank_sums = ranks.sum(axis=0)
+    observed_q = 12.0 / (block_count * treatment_count * (treatment_count + 1)) * float(
+        np.sum(rank_sums**2)
+    ) - 3.0 * block_count * (treatment_count + 1)
+    perms = list(permutations(range(treatment_count)))
+    distribution = Counter({(0,) * treatment_count: 1})
+    for block_index in range(block_count):
+        row = ranks[block_index]
+        next_distribution = Counter()
+        for state, count in distribution.items():
+            for perm in perms:
+                next_state = tuple(state[j] + row[perm[j]] for j in range(treatment_count))
+                next_distribution[next_state] += count
+        distribution = next_distribution
+    arrangements = math.factorial(treatment_count) ** block_count
+    exceeded = sum(
+        count
+        for state, count in distribution.items()
+        if 12.0
+        / (block_count * treatment_count * (treatment_count + 1))
+        * sum(value * value for value in state)
+        - 3.0 * block_count * (treatment_count + 1)
+        >= observed_q - 1e-12
+    )
+    return {
+        "statistic": observed_q,
+        "df": treatment_count - 1,
+        "pExact": exceeded / arrangements,
+        "exactArrangements": arrangements,
+    }
+
+
+def page_exact(values, direction):
+    primary_data = values if direction == "increasing" else values[:, ::-1]
+    opposite_data = values[:, ::-1] if direction == "increasing" else values
+    primary = stats.page_trend_test(primary_data, method="exact")
+    opposite = stats.page_trend_test(opposite_data, method="exact")
+    primary_p = min(1.0, float(primary.pvalue))
+    opposite_p = min(1.0, float(opposite.pvalue))
+    if primary_p > 1.0 - 1e-12:
+        primary_p = 1.0
+    if opposite_p > 1.0 - 1e-12:
+        opposite_p = 1.0
+    return {
+        "direction": direction,
+        "statistic": float(primary.statistic),
+        "pExact": primary_p,
+        "pExactOpposite": opposite_p,
+    }
+
+
 def calculate_v2():
     dataset = ROOT / "tests" / "reference" / "v2" / "slides.csv"
     slides = []
@@ -243,27 +345,57 @@ def calculate_v2():
     )
 
     doses = np.asarray([0.0, 1.0, 5.0, 10.0])
-    y = values.reshape(-1)
-    block_ids = np.repeat(np.arange(len(complete_blocks)), len(primary_indices))
-    design = np.column_stack(
-        [np.ones(y.size)]
-        + [(block_ids == index).astype(float) for index in range(1, len(complete_blocks))]
-        + [np.tile(doses, len(complete_blocks))]
-    )
-    coefficients = np.linalg.solve(design.T @ design, design.T @ y)
-    residuals = y - design @ coefficients
-    trend_df = y.size - design.shape[1]
-    trend_mse = float(residuals @ residuals / trend_df)
-    covariance = trend_mse * np.linalg.inv(design.T @ design)
-    slope = float(coefficients[-1])
-    slope_se = math.sqrt(covariance[-1, -1])
-    slope_t = slope / slope_se
-    slope_critical = float(stats.t.ppf(0.975, trend_df))
-    trend_ss_total = float(np.sum((y - np.mean(y)) ** 2))
+    trend = trend_ols(values, doses)
+
+    transformed = arcsin_sqrt(values)
+    transformed_anova = rcbd(transformed, primary_indices)
+    transformed_comparisons = []
+    for column, treatment_index in enumerate(primary_indices[1:], start=1):
+        result = contrast(
+            transformed[:, 0],
+            transformed[:, column],
+            transformed_anova["MSE"],
+            transformed_anova["residualDF"],
+        )
+        result["treatmentIndex"] = treatment_index
+        transformed_comparisons.append(result)
+    transformed_adjusted = holm([item["pRaw"] for item in transformed_comparisons])
+    for item, p_adjusted in zip(transformed_comparisons, transformed_adjusted):
+        item["pAdjusted"] = p_adjusted
+    transformed_trend = trend_ols(transformed, doses)
+
+    non_parametric = {
+        "friedman": friedman_exact(values),
+        "pageTrend": page_exact(values, "increasing"),
+    }
+
+    descriptive_treatments = []
+    for column, treatment_index in enumerate(primary_indices):
+        column_values = values[:, column]
+        mean = float(np.mean(column_values))
+        standard_deviation = float(np.std(column_values, ddof=1)) if len(column_values) > 1 else 0.0
+        descriptive_treatments.append(
+            {
+                "treatmentIndex": treatment_index,
+                "mean": mean,
+                "standardDeviation": standard_deviation,
+                "coefficientOfVariation": standard_deviation / mean * 100.0 if mean > 0 else 0.0,
+            }
+        )
+    deviations = [item["standardDeviation"] for item in descriptive_treatments]
+    maximum = max(deviations)
+    minimum = min(deviations)
+    ratio = (maximum / minimum) if minimum > 0 else None
+    heterogeneity_flag = {
+        "flagged": ratio is None or ratio > 3.0,
+        "maximumStandardDeviation": maximum,
+        "minimumStandardDeviation": minimum,
+        "ratio": ratio,
+    }
 
     return {
         "provenance": {
-            "method": "Independent SciPy distributions, explicit RCBD sums of squares, contrasts, Holm, and matrix OLS",
+            "method": "Independent SciPy distributions, explicit RCBD sums of squares, contrasts, Holm, matrix OLS, exact Friedman/Page permutations, and arcsine-sqrt transformation",
             "scipy": scipy.__version__,
             "dataset": "slides.csv",
         },
@@ -287,16 +419,16 @@ def calculate_v2():
             "blockAnova": validation_anova,
             "comparison": validation_comparison,
         },
-        "doseTrend": {
-            "slope": slope,
-            "standardError": slope_se,
-            "t": slope_t,
-            "DF": trend_df,
-            "MSE": trend_mse,
-            "ciLow": slope - slope_critical * slope_se,
-            "ciHigh": slope + slope_critical * slope_se,
-            "p": float(2 * stats.t.sf(abs(slope_t), trend_df)),
-            "r2": 1 - float(residuals @ residuals) / trend_ss_total,
+        "doseTrend": trend,
+        "nonParametric": non_parametric,
+        "transformedAnalysis": {
+            "blockAnova": transformed_anova,
+            "primaryComparisons": transformed_comparisons,
+            "doseTrend": transformed_trend,
+        },
+        "descriptive": {
+            "treatments": descriptive_treatments,
+            "heterogeneityFlag": heterogeneity_flag,
         },
     }
 

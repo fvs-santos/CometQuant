@@ -40,9 +40,25 @@ function v2Analysis(overrides = {}) {
     },
     controlResponse: { performed: true, purpose: 'separate_validation_comparison', blockNumbers: [1, 2, 3], blockAnova, comparison: { ...comparison, pAdjusted: undefined } },
     doseTrend: {
-      performed: true, model: 'score ~ block + concentration', blockCount: 3, observationCount: 6, residualDF: 2, MSE: 3,
+      performed: true, model: 'score ~ block + concentration (linear)', trendKind: 'linear', blockCount: 3, observationCount: 6, residualDF: 2, MSE: 3,
       treatmentDoses: [{ treatmentIndex: 0, concentration: 0 }, { treatmentIndex: 1, concentration: 1 }], referenceIncludedAsZero: true,
-      slope: 10, standardError: 1.5, t: 6.6667, DF: 2, ciLow: 3.546, ciHigh: 16.454, p: 0.0217, r2: 0.95, significant: true
+      slope: 10, standardError: 1.5, t: 6.6667, DF: 2, ciLow: 3.546, ciHigh: 16.454, p: 0.0217, r2: 0.95, r2Partial: 0.9, significant: true
+    },
+    descriptive: {
+      performed: true, population: 'primary_complete_blocks',
+      treatments: [{ treatmentIndex: 0, treatment: 'Control', blockCount: 3, mean: 10, standardDeviation: 2, coefficientOfVariation: 20, minimum: 8, maximum: 12 }],
+      heterogeneityFlag: { performed: true, flagged: false, maximumStandardDeviation: 2, minimumStandardDeviation: 2, ratio: 1, code: 'homogeneous_variance' }
+    },
+    nonParametric: {
+      performed: true, population: 'primary_complete_blocks',
+      friedman: { performed: true, blockCount: 3, treatmentIndices: [0, 1], statistic: 9, df: 3, pExact: 0.0017, exactArrangements: 13824 },
+      pageTrend: { performed: true, blockCount: 3, treatmentIndices: [0, 1], direction: 'increasing', directionSource: 'assay_type', statistic: 90, pExact: 0.00007, pExactOpposite: 1, exactArrangements: 13824 }
+    },
+    transformedAnalysis: {
+      performed: true, scale: 'arcsin_sqrt',
+      blockAnova,
+      primaryComparisons: { performed: true, comparisons: [comparison] },
+      doseTrend: { performed: true, slope: 0.5, p: 0.01, r2Partial: 0.8 }
     },
     charts: { scores: 'iVBORw0KGgoAAA==', differences: 'iVBORw0KGgoAAA==', classes: 'iVBORw0KGgoAAA==' },
     ...overrides
@@ -83,6 +99,8 @@ describe('safe exports', () => {
       comparisons: exporter.buildComparisonsCsv(analysis),
       control: exporter.buildControlResponseCsv(analysis),
       trend: exporter.buildDoseTrendCsv(analysis),
+      nonParametric: exporter.buildNonParametricCsv(analysis),
+      transformed: exporter.buildTransformedAnalysisCsv(analysis),
       design: exporter.buildStudyDesignCsv(data, analysis)
     }
 
@@ -96,6 +114,12 @@ describe('safe exports', () => {
     expect(outputs.comparisons).toContain('"\'=DANGEROUS()"')
     expect(outputs.control).toContain('"p_raw"')
     expect(outputs.trend).toContain('"concentration"')
+    expect(outputs.trend).toContain('"r2_partial"')
+    expect(outputs.nonParametric).toContain('"friedman"')
+    expect(outputs.nonParametric).toContain('"page"')
+    expect(outputs.nonParametric).toContain('"p_exact"')
+    expect(outputs.transformed).toContain('"arcsin_sqrt"')
+    expect(outputs.transformed).toContain('"section"')
     expect(outputs.design).toContain('"\'=DANGEROUS()"')
   })
 
@@ -110,6 +134,9 @@ describe('safe exports', () => {
     expect(html).toContain('Control response')
     expect(html).toContain('Block-adjusted dose trend')
     expect(html).toContain('Differences with 95% CI')
+    expect(html).toContain('Non-parametric sensitivity')
+    expect(html).toContain('Transformed sensitivity')
+    expect(html).toContain('Per-treatment dispersion')
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(html).not.toContain('<img src=x onerror=alert(1)>')
   })
@@ -128,6 +155,8 @@ describe('safe exports', () => {
     zip.file('data/primary_comparisons.csv', exporter.buildComparisonsCsv(analysis))
     zip.file('data/control_response.csv', exporter.buildControlResponseCsv(analysis))
     zip.file('data/dose_trend.csv', exporter.buildDoseTrendCsv(analysis))
+    zip.file('data/non_parametric.csv', exporter.buildNonParametricCsv(analysis))
+    zip.file('data/transformed_analysis.csv', exporter.buildTransformedAnalysisCsv(analysis))
     zip.file('data/study_design.csv', exporter.buildStudyDesignCsv(data, analysis))
     zip.file('charts/block_scores.png', analysis.charts.scores, { base64: true })
     zip.file('charts/primary_differences.png', analysis.charts.differences, { base64: true })
@@ -137,7 +166,8 @@ describe('safe exports', () => {
     expect(Object.keys(opened.files)).toEqual(expect.arrayContaining([
       'report.html', 'data/experiment.json', 'data/analysis.json', 'data/raw_slides.csv', 'data/replicate_scores.csv',
       'data/population.csv', 'data/block_anova.csv', 'data/primary_comparisons.csv', 'data/control_response.csv',
-      'data/dose_trend.csv', 'data/study_design.csv', 'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
+      'data/dose_trend.csv', 'data/non_parametric.csv', 'data/transformed_analysis.csv', 'data/study_design.csv',
+      'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
     ]))
   })
 })

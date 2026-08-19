@@ -105,6 +105,151 @@ add_metric("doseTrend::ci_high", trend_ci[2])
 add_metric("doseTrend::p", trend_coefficient["Pr(>|t|)"])
 add_metric("doseTrend::r2", trend_summary$r.squared)
 
+reduced_fit <- lm(score ~ replicate_number, primary)
+reduced_residuals <- residuals(reduced_fit)
+trend_residuals <- residuals(trend_fit)
+add_metric("doseTrend::r2_partial", 1 - sum(trend_residuals^2) / sum(reduced_residuals^2))
+
+permutation_matrix <- function(k) {
+  result <- matrix(NA, nrow = factorial(k), ncol = k)
+  index <- 1
+  recurse <- function(prefix, remaining) {
+    if (length(remaining) == 0) {
+      result[index, ] <<- prefix
+      index <<- index + 1
+      return(invisible(NULL))
+    }
+    for (value in remaining) {
+      recurse(c(prefix, value), setdiff(remaining, value))
+    }
+  }
+  recurse(numeric(0), seq_len(k))
+  result
+}
+
+build_matrix <- function(data, indices) {
+  data$treatment_index <- as.numeric(as.character(data$treatment_index))
+  data$replicate_number <- as.numeric(as.character(data$replicate_number))
+  data <- data[data$treatment_index %in% indices, ]
+  blocks <- sort(unique(data$replicate_number))
+  data$treatment_order <- match(data$treatment_index, indices)
+  data <- data[order(data$replicate_number, data$treatment_order), ]
+  matrix(data$score, nrow = length(blocks), ncol = length(indices), byrow = TRUE)
+}
+
+primary_matrix <- build_matrix(primary, primary_indices)
+rank_matrix <- t(apply(primary_matrix, 1, rank, ties.method = "average"))
+n_blocks <- nrow(primary_matrix)
+n_treatments <- ncol(primary_matrix)
+permutations <- permutation_matrix(n_treatments)
+
+column_sums <- colSums(rank_matrix)
+friedman_statistic <- function(sums) {
+  12 / (n_blocks * n_treatments * (n_treatments + 1)) * sum(sums^2) -
+    3 * n_blocks * (n_treatments + 1)
+}
+page_statistic <- function(sums) sum(seq_len(n_treatments) * sums)
+
+exact_ge_count <- function(statistic_fn, observed) {
+  count <- 0
+  recurse <- function(block_index, current_sums) {
+    if (block_index > n_blocks) {
+      if (statistic_fn(current_sums) >= observed - 1e-12) {
+        count <<- count + 1
+      }
+      return(invisible(NULL))
+    }
+    row <- rank_matrix[block_index, ]
+    for (perm_index in seq_len(nrow(permutations))) {
+      recurse(block_index + 1, current_sums + row[permutations[perm_index, ]])
+    }
+  }
+  recurse(1, numeric(n_treatments))
+  count
+}
+
+friedman_observed <- friedman_statistic(column_sums)
+add_metric("nonParametric::friedman::Q", friedman_observed)
+add_metric("nonParametric::friedman::df", n_treatments - 1)
+friedman_total <- factorial(n_treatments)^n_blocks
+add_metric(
+  "nonParametric::friedman::pExact",
+  exact_ge_count(friedman_statistic, friedman_observed) / friedman_total
+)
+add_metric("nonParametric::friedman::exactArrangements", friedman_total)
+
+page_observed <- page_statistic(column_sums)
+add_metric("nonParametric::page::L", page_observed)
+add_metric(
+  "nonParametric::page::pExact",
+  exact_ge_count(page_statistic, page_observed) / friedman_total
+)
+
+reversed_rank_matrix <- rank_matrix[, rev(seq_len(n_treatments))]
+reversed_observed <- page_statistic(colSums(reversed_rank_matrix))
+reversed_count <- 0
+recurse_reversed <- function(block_index, current_sums) {
+  if (block_index > n_blocks) {
+    if (page_statistic(current_sums) >= reversed_observed - 1e-12) {
+      reversed_count <<- reversed_count + 1
+    }
+    return(invisible(NULL))
+  }
+  row <- reversed_rank_matrix[block_index, ]
+  for (perm_index in seq_len(nrow(permutations))) {
+    recurse_reversed(block_index + 1, current_sums + row[permutations[perm_index, ]])
+  }
+}
+recurse_reversed(1, numeric(n_treatments))
+add_metric("nonParametric::page::pExactOpposite", reversed_count / friedman_total)
+
+transformed <- asin(sqrt(pmin(pmax(primary_matrix, 0), 100) / 100))
+transformed_scores <- numeric(nrow(primary))
+for (row_index in seq_len(nrow(primary))) {
+  block_value <- as.numeric(as.character(primary$replicate_number[row_index]))
+  treatment_value <- as.numeric(as.character(primary$treatment_index[row_index]))
+  transformed_scores[row_index] <- transformed[
+    match(block_value, complete_blocks),
+    match(treatment_value, primary_indices)
+  ]
+}
+primary$score_transformed <- transformed_scores
+transformed_fit <- lm(score_transformed ~ treatment_index + replicate_number, primary)
+transformed_anova <- anova(transformed_fit)
+transformed_mse <- transformed_anova["Residuals", "Mean Sq"]
+transformed_residual_df <- transformed_anova["Residuals", "Df"]
+for (term in c("treatment_index", "replicate_number", "Residuals")) {
+  label <- if (term == "treatment_index") "treatment" else if (term == "replicate_number") "block" else "residual"
+  add_metric(paste("transformed::blockAnova", label, "SS", sep = "::"), transformed_anova[term, "Sum Sq"])
+  add_metric(paste("transformed::blockAnova", label, "DF", sep = "::"), transformed_anova[term, "Df"])
+  add_metric(paste("transformed::blockAnova", label, "MS", sep = "::"), transformed_anova[term, "Mean Sq"])
+  if (term != "Residuals") {
+    add_metric(paste("transformed::blockAnova", label, "F", sep = "::"), transformed_anova[term, "F value"])
+    add_metric(paste("transformed::blockAnova", label, "p", sep = "::"), transformed_anova[term, "Pr(>F)"])
+  }
+}
+transformed_reference <- primary$score_transformed[primary$treatment_index == 0]
+transformed_raw_p <- numeric()
+for (index in primary_indices[-1]) {
+  transformed_treatment <- primary$score_transformed[primary$treatment_index == index]
+  transformed_difference <- mean(transformed_treatment) - mean(transformed_reference)
+  transformed_se <- sqrt(transformed_mse * 2 / length(complete_blocks))
+  transformed_t_statistic <- transformed_difference / transformed_se
+  transformed_p <- 2 * pt(-abs(transformed_t_statistic), transformed_residual_df)
+  transformed_raw_p <- c(transformed_raw_p, transformed_p)
+  add_metric(paste("transformed::comparison", index, "difference", sep = "::"), transformed_difference)
+  add_metric(paste("transformed::comparison", index, "p", sep = "::"), transformed_p)
+}
+transformed_adjusted <- p.adjust(transformed_raw_p, method = "holm")
+for (position in seq_along(transformed_adjusted)) {
+  index <- primary_indices[position + 1]
+  add_metric(paste("transformed::comparison", index, "p_adjusted", sep = "::"), transformed_adjusted[position])
+}
+transformed_trend_fit <- lm(score_transformed ~ replicate_number + concentration, primary)
+transformed_trend_summary <- summary(transformed_trend_fit)
+add_metric("transformed::trend::slope", transformed_trend_summary$coefficients["concentration", "Estimate"])
+add_metric("transformed::trend::p", transformed_trend_summary$coefficients["concentration", "Pr(>|t|)"])
+
 cat("Aggregated cells:\n")
 print(cells)
 cat("\nPrimary RCBD:\n")

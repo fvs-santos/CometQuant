@@ -1,6 +1,6 @@
 {
   "provenance": {
-    "method": "Independent SciPy distributions, explicit RCBD sums of squares, contrasts, Holm, and matrix OLS",
+    "method": "Independent SciPy distributions, explicit RCBD sums of squares, contrasts, Holm, matrix OLS, exact Friedman/Page permutations, and arcsine-sqrt transformation",
     "scipy": "1.13.0",
     "dataset": "slides.csv"
   },
@@ -179,6 +179,146 @@
     "ciLow": 2.6987883606382725,
     "ciHigh": 3.3872331447380715,
     "p": 3.505955305924891e-08,
-    "r2": 0.9823074098300456
+    "r2": 0.9823074098300456,
+    "r2Partial": 0.9811131221996613
+  },
+  "nonParametric": {
+    "friedman": {
+      "statistic": 9.0,
+      "df": 3,
+      "pExact": 0.001736111111111111,
+      "exactArrangements": 13824
+    },
+    "pageTrend": {
+      "direction": "increasing",
+      "statistic": 90.0,
+      "pExact": 7.233796296296296e-05,
+      "pExactOpposite": 1.0
+    }
+  },
+  "transformedAnalysis": {
+    "blockAnova": {
+      "model": "score ~ treatment + block",
+      "blockCount": 3,
+      "treatmentIndices": [
+        0,
+        2,
+        3,
+        4
+      ],
+      "residualDF": 6,
+      "MSE": 0.0002333023520541648,
+      "terms": [
+        {
+          "term": "treatment",
+          "SS": 0.2499257197134866,
+          "DF": 3,
+          "MS": 0.08330857323782886,
+          "F": 357.08415497880395,
+          "p": 3.771727185006843e-07
+        },
+        {
+          "term": "block",
+          "SS": 0.016963503393035533,
+          "DF": 2,
+          "MS": 0.008481751696517766,
+          "F": 36.355191543669456,
+          "p": 0.00044295302586511533
+        },
+        {
+          "term": "residual",
+          "SS": 0.0013998141123249888,
+          "DF": 6,
+          "MS": 0.0002333023520541648
+        }
+      ]
+    },
+    "primaryComparisons": [
+      {
+        "referenceMean": 0.31506360403887246,
+        "treatmentMean": 0.39683633958057607,
+        "difference": 0.08177273554170361,
+        "standardError": 0.01247136325224485,
+        "t": 6.55684016957685,
+        "DF": 6,
+        "ciLow": 0.05125640899985182,
+        "ciHigh": 0.11228906208355541,
+        "pRaw": 0.0006024969936187981,
+        "treatmentIndex": 2,
+        "pAdjusted": 0.0006024969936187981
+      },
+      {
+        "referenceMean": 0.31506360403887246,
+        "treatmentMean": 0.5380927998187014,
+        "difference": 0.22302919577982894,
+        "standardError": 0.01247136325224485,
+        "t": 17.88330523847773,
+        "DF": 6,
+        "ciLow": 0.19251286923797714,
+        "ciHigh": 0.2535455223216807,
+        "pRaw": 1.965270362539806e-06,
+        "treatmentIndex": 3,
+        "pAdjusted": 3.930540725079612e-06
+      },
+      {
+        "referenceMean": 0.31506360403887246,
+        "treatmentMean": 0.6943879552041622,
+        "difference": 0.37932435116528973,
+        "standardError": 0.01247136325224485,
+        "t": 30.41562846764256,
+        "DF": 6,
+        "ciLow": 0.34880802462343796,
+        "ciHigh": 0.4098406777071415,
+        "pRaw": 8.382091987820595e-08,
+        "treatmentIndex": 4,
+        "pAdjusted": 2.5146275963461784e-07
+      }
+    ],
+    "doseTrend": {
+      "slope": 0.03634930800236219,
+      "standardError": 0.0019345656876934856,
+      "t": 18.78938938780631,
+      "DF": 8,
+      "MSE": 0.0006961132584001801,
+      "ciLow": 0.03188819152671692,
+      "ciHigh": 0.04081042447800746,
+      "p": 6.650850437472997e-08,
+      "r2": 0.9792428862359411,
+      "r2Partial": 0.9778418611812792
+    }
+  },
+  "descriptive": {
+    "treatments": [
+      {
+        "treatmentIndex": 0,
+        "mean": 9.666666666666666,
+        "standardDeviation": 2.081665999466133,
+        "coefficientOfVariation": 21.534475856546205
+      },
+      {
+        "treatmentIndex": 2,
+        "mean": 15.0,
+        "standardDeviation": 2.6457513110645907,
+        "coefficientOfVariation": 17.638342073763937
+      },
+      {
+        "treatmentIndex": 3,
+        "mean": 26.333333333333332,
+        "standardDeviation": 4.163331998932266,
+        "coefficientOfVariation": 15.810121514932657
+      },
+      {
+        "treatmentIndex": 4,
+        "mean": 41.0,
+        "standardDeviation": 6.557438524302,
+        "coefficientOfVariation": 15.993752498297562
+      }
+    ],
+    "heterogeneityFlag": {
+      "flagged": true,
+      "maximumStandardDeviation": 6.557438524302,
+      "minimumStandardDeviation": 2.081665999466133,
+      "ratio": 3.1500915737605024
+    }
   }
 }

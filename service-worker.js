@@ -2,7 +2,7 @@
 // Quando atualizar o app, mude o número da versão aqui
 const SHELL_CACHE_PREFIX = 'cometquant-shell-'
 const SCIENCE_CACHE_PREFIX = 'cometquant-science-'
-const CACHE_NAME = `${SHELL_CACHE_PREFIX}v11`
+const CACHE_NAME = `${SHELL_CACHE_PREFIX}v12`
 const SHELL_READY_MARKER = './cometquant-shell-ready'
 
 // Lista de todos os arquivos que o Service Worker vai guardar

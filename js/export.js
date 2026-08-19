@@ -121,7 +121,9 @@
   const BLOCK_ANOVA_COLUMNS = ['performed', 'reason_code', 'reason_context', 'model', 'block_count', 'treatment_indices', 'residual_df', 'MSE', 'term', 'SS', 'DF', 'MS', 'F', 'p'].map(key => ({ key }))
   const COMPARISON_COLUMNS = ['performed', 'reason_code', 'reason_context', 'family', 'family_size', 'adjustment', 'confidence_level', 'reference_treatment_index', 'reference_treatment', 'treatment_index', 'treatment', 'block_count', 'reference_mean', 'treatment_mean', 'difference', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p_raw', 'p_holm', 'significant', 'direction'].map(key => ({ key }))
   const CONTROL_RESPONSE_COLUMNS = ['performed', 'reason_code', 'reason_context', 'purpose', 'block_numbers', 'reference_treatment_index', 'reference_treatment', 'treatment_index', 'treatment', 'block_count', 'reference_mean', 'treatment_mean', 'difference', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p_raw', 'significant', 'direction'].map(key => ({ key }))
-  const DOSE_TREND_COLUMNS = ['performed', 'reason_code', 'reason_context', 'model', 'block_count', 'observation_count', 'residual_df', 'MSE', 'reference_included_as_zero', 'treatment_index', 'concentration', 'slope', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p', 'r2', 'significant'].map(key => ({ key }))
+  const DOSE_TREND_COLUMNS = ['performed', 'reason_code', 'reason_context', 'model', 'trend_kind', 'block_count', 'observation_count', 'residual_df', 'MSE', 'reference_included_as_zero', 'treatment_index', 'concentration', 'slope', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p', 'r2', 'r2_partial', 'significant'].map(key => ({ key }))
+  const NON_PARAMETRIC_COLUMNS = ['performed', 'reason_code', 'test', 'block_count', 'treatment_indices', 'direction', 'direction_source', 'statistic', 'df', 'p_exact', 'p_exact_opposite', 'exact_arrangements'].map(key => ({ key }))
+  const TRANSFORMED_COLUMNS = ['performed', 'reason_code', 'scale', 'section', 'reference_treatment', 'treatment', 'difference', 't', 'p', 'p_holm', 'slope', 'r2_partial'].map(key => ({ key }))
   const STUDY_DESIGN_COLUMNS = ['study_design_version', 'status', 'assay_type', 'primary_reference_treatment_index', 'primary_reference_treatment', 'primary_treatment_indices', 'validation_reference_treatment_index', 'validation_treatment_index', 'alpha', 'alternative', 'multiplicity_adjustment', 'confidence_level', 'include_primary_reference_as_zero', 'treatment_index', 'treatment', 'role', 'concentration', 'concentration_unit'].map(key => ({ key }))
 
   function buildPopulationCsv(analysis) {
@@ -216,16 +218,69 @@
       return serializeCsv(DOSE_TREND_COLUMNS, [unavailableRow(result)])
     }
     const common = {
-      performed: 'true', model: result.model, block_count: result.blockCount,
+      performed: 'true', model: result.model, trend_kind: result.trendKind || '', block_count: result.blockCount,
       observation_count: result.observationCount, residual_df: result.residualDF, MSE: result.MSE,
       reference_included_as_zero: String(Boolean(result.referenceIncludedAsZero)), slope: result.slope,
       standard_error: result.standardError, t: result.t, DF: result.DF, ci_low: result.ciLow,
-      ci_high: result.ciHigh, p: result.p, r2: result.r2, significant: String(Boolean(result.significant))
+      ci_high: result.ciHigh, p: result.p, r2: result.r2, r2_partial: result.r2Partial, significant: String(Boolean(result.significant))
     }
     const doses = result.treatmentDoses?.length ? result.treatmentDoses : [{}]
     return serializeCsv(DOSE_TREND_COLUMNS, doses.map(dose => ({
       ...common, treatment_index: dose.treatmentIndex ?? '', concentration: dose.concentration ?? ''
     })))
+  }
+
+  function buildNonParametricCsv(analysis) {
+    const result = analysis?.nonParametric
+    if (!result || result.performed === false) {
+      return serializeCsv(NON_PARAMETRIC_COLUMNS, [unavailableRow(result)])
+    }
+    const rows = []
+    const blockCount = result.friedman?.blockCount ?? result.pageTrend?.blockCount ?? ''
+    const treatmentIndices = (result.friedman?.treatmentIndices || result.pageTrend?.treatmentIndices || []).join(';')
+    if (result.friedman) {
+      const friedman = result.friedman
+      rows.push({
+        performed: 'true', test: 'friedman', block_count: blockCount, treatment_indices: treatmentIndices,
+        direction: '', direction_source: '', statistic: friedman.statistic ?? '', df: friedman.df ?? '',
+        p_exact: friedman.pExact ?? '', p_exact_opposite: '', exact_arrangements: friedman.exactArrangements ?? ''
+      })
+    }
+    if (result.pageTrend) {
+      const page = result.pageTrend
+      rows.push({
+        performed: 'true', test: 'page', block_count: blockCount, treatment_indices: treatmentIndices,
+        direction: page.direction ?? '', direction_source: page.directionSource ?? '', statistic: page.statistic ?? '',
+        df: '', p_exact: page.pExact ?? '', p_exact_opposite: page.pExactOpposite ?? '',
+        exact_arrangements: page.exactArrangements ?? ''
+      })
+    }
+    return serializeCsv(NON_PARAMETRIC_COLUMNS, rows)
+  }
+
+  function buildTransformedAnalysisCsv(analysis) {
+    const result = analysis?.transformedAnalysis
+    if (!result || result.performed === false) {
+      return serializeCsv(TRANSFORMED_COLUMNS, [unavailableRow(result)])
+    }
+    const rows = []
+    const scale = result.scale || ''
+    ;(result.primaryComparisons?.comparisons || []).forEach(comparison => {
+      rows.push({
+        performed: 'true', scale, section: 'comparison',
+        reference_treatment: comparison.referenceTreatment, treatment: comparison.treatment,
+        difference: comparison.difference, t: comparison.t, p: comparison.pRaw,
+        p_holm: comparison.pAdjusted ?? '', slope: '', r2_partial: ''
+      })
+    })
+    if (result.doseTrend && result.doseTrend.performed !== false) {
+      rows.push({
+        performed: 'true', scale, section: 'trend',
+        reference_treatment: '', treatment: '', difference: '', t: '',
+        p: result.doseTrend.p, p_holm: '', slope: result.doseTrend.slope, r2_partial: result.doseTrend.r2Partial ?? ''
+      })
+    }
+    return serializeCsv(TRANSFORMED_COLUMNS, rows)
   }
 
   function buildStudyDesignCsv(experiment, analysis) {
@@ -270,7 +325,10 @@
       rcbd: 'ANOVA em blocos casualizados', term: 'Termo', comparisons: 'Comparacoes primarias planejadas', reference: 'Referencia', difference: 'Diferenca',
       ci: 'IC 95% nominal', rawP: 'p bruto', holmP: 'p Holm', decision: 'Resultado estatistico', direction: 'Direcao', significant: 'Diferenca detectada', notSignificant: 'Diferenca nao detectada',
       control: 'Resposta de controle', trend: 'Tendencia de dose ajustada por bloco', slope: 'Inclinacao', blocks: 'Blocos', observations: 'Observacoes',
-      notPerformed: 'Nao realizado', charts: 'Graficos', chartScores: 'Scores por bloco', chartDifferences: 'Diferencas com IC 95%', chartClasses: 'Distribuicao por classes'
+      notPerformed: 'Nao realizado', charts: 'Graficos', chartScores: 'Scores por bloco', chartDifferences: 'Diferencas com IC 95%', chartClasses: 'Distribuicao por classes',
+      nonParametric: 'Sensibilidade nao-parametrica', friedman: 'Friedman (p exato)', page: 'Page L (tendencia ordenada)', statistic: 'Estatistica', exactP: 'p exato',
+      exactPOpposite: 'p oposto', arrangements: 'Arranjos', direction: 'Direcao', transformed: 'Sensibilidade transformada (arcsine-sqrt)',
+      r2partial: 'R2 parcial', dispersion: 'Dispersao por tratamento', mean: 'Media', sd: 'DP', cv: 'CV (%)'
     } : {
       researcher: 'Researcher', agent: 'Agent', cells: 'Cell type', target: 'Nucleoid target', slides: 'Slides per treatment',
       exclusion: 'Absent and incomplete slides are excluded from inferential analysis.', raw: 'Raw data', scores: 'Scores by replicate',
@@ -280,7 +338,10 @@
       rcbd: 'Randomized complete block ANOVA', term: 'Term', comparisons: 'Planned primary comparisons', reference: 'Reference', difference: 'Difference',
       ci: 'Nominal 95% CI', rawP: 'Raw p', holmP: 'Holm p', decision: 'Statistical result', direction: 'Direction', significant: 'Difference detected', notSignificant: 'Difference not detected',
       control: 'Control response', trend: 'Block-adjusted dose trend', slope: 'Slope', blocks: 'Blocks', observations: 'Observations',
-      notPerformed: 'Not performed', charts: 'Charts', chartScores: 'Scores by block', chartDifferences: 'Differences with 95% CI', chartClasses: 'Class distribution'
+      notPerformed: 'Not performed', charts: 'Charts', chartScores: 'Scores by block', chartDifferences: 'Differences with 95% CI', chartClasses: 'Class distribution',
+      nonParametric: 'Non-parametric sensitivity', friedman: 'Friedman (exact p)', page: 'Page L (ordered trend)', statistic: 'Statistic', exactP: 'Exact p',
+      exactPOpposite: 'Opposite p', arrangements: 'Arrangements', direction: 'Direction', transformed: 'Transformed sensitivity (arcsine-sqrt)',
+      r2partial: 'Partial R2', dispersion: 'Per-treatment dispersion', mean: 'Mean', sd: 'SD', cv: 'CV (%)'
     }
     const raw = buildRawRows(experiment)
     const aggregate = core.aggregateReplicateScores(experiment)
@@ -316,13 +377,49 @@
     const trend = analysis?.doseTrend
     const trendRows = trend?.performed ? [
       [labels.slope, trend.slope], ['SE', trend.standardError], ['t', trend.t], ['DF', trend.DF], [labels.ci, `${trend.ciLow} - ${trend.ciHigh}`],
-      ['p', trend.p], ['R2', trend.r2], [labels.blocks, trend.blockCount], [labels.observations, trend.observationCount],
+      ['p', trend.p], ['R2', trend.r2], [labels.r2partial, trend.r2Partial ?? '-'], [labels.blocks, trend.blockCount], [labels.observations, trend.observationCount],
       [labels.decision, trend.significant ? labels.significant : labels.notSignificant]
     ] : [[labels.notPerformed, reasonText(trend?.reason)]]
+
+    const dispersion = analysis?.descriptive
+    const dispersionRows = dispersion && dispersion.performed !== false
+      ? (dispersion.treatments || []).map(item => [item.treatment, item.mean, item.standardDeviation, item.coefficientOfVariation, item.blockCount])
+      : [[labels.notPerformed, '-', '-', '-', '-']]
+
+    const nonParametric = analysis?.nonParametric
+    const friedman = nonParametric?.friedman
+    const pageTrend = nonParametric?.pageTrend
+    const friedmanRows = friedman && friedman.performed !== false
+      ? [[friedman.statistic, friedman.df, friedman.pExact, friedman.exactArrangements]]
+      : [[labels.notPerformed, reasonText(friedman?.reason) || reasonText(nonParametric?.reason), '-', '-']]
+    const pageRows = pageTrend && pageTrend.performed !== false
+      ? [[pageTrend.direction, pageTrend.statistic, pageTrend.pExact, pageTrend.pExactOpposite, pageTrend.exactArrangements]]
+      : [[labels.notPerformed, reasonText(pageTrend?.reason) || reasonText(nonParametric?.reason), '-', '-', '-']]
+
+    const transformed = analysis?.transformedAnalysis
+    const transformedComparisons = transformed?.primaryComparisons
+    const transformedTrend = transformed?.doseTrend
+    const transformedComparisonRows = transformedComparisons && transformedComparisons.performed !== false
+      ? (transformedComparisons.comparisons || []).map(row => [row.referenceTreatment, row.treatment, row.difference, row.pRaw, row.pAdjusted ?? '-'])
+      : [[labels.notPerformed, reasonText(transformedComparisons?.reason) || reasonText(transformed?.reason), '-', '-', '-']]
+    const transformedTrendRows = transformedTrend && transformedTrend.performed !== false
+      ? [[transformedTrend.slope, transformedTrend.p, transformedTrend.r2Partial ?? '-']]
+      : [[labels.notPerformed, reasonText(transformedTrend?.reason) || reasonText(transformed?.reason), '-']]
+
+    const sensitivityHtml = [
+      `<h2>${escapeHtml(labels.dispersion)}</h2>${htmlTable([labels.treatment, labels.mean, labels.sd, labels.cv, labels.blocks], dispersionRows)}`,
+      `<h2>${escapeHtml(labels.nonParametric)}</h2>`,
+      `<h3>${escapeHtml(labels.friedman)}</h3>${htmlTable([labels.statistic, labels.term, labels.exactP, labels.arrangements], friedmanRows)}`,
+      `<h3>${escapeHtml(labels.page)}</h3>${htmlTable([labels.direction, labels.statistic, labels.exactP, labels.exactPOpposite, labels.arrangements], pageRows)}`,
+      `<h2>${escapeHtml(labels.transformed)}</h2>`,
+      `<h3>${escapeHtml(labels.comparisons)}</h3>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.rawP, labels.holmP], transformedComparisonRows)}`,
+      `<h3>${escapeHtml(labels.trend)}</h3>${htmlTable([labels.slope, labels.rawP, labels.r2partial], transformedTrendRows)}`
+    ].join('')
+
     const chartItems = [
       [analysis?.charts?.scores, labels.chartScores], [analysis?.charts?.differences, labels.chartDifferences], [analysis?.charts?.classes, labels.chartClasses]
     ].filter(([image]) => validPngBase64(image)).map(([image, alt]) => `<figure><img src="data:image/png;base64,${image}" alt="${escapeHtml(alt)}"><figcaption>${escapeHtml(alt)}</figcaption></figure>`).join('')
-    return `<!DOCTYPE html><html lang="${pt ? 'pt-BR' : 'en'}"><head><meta charset="UTF-8"><title>CometQuant - ${escapeHtml(experiment.agent)}</title><style>body{font-family:Arial,sans-serif;max-width:1000px;margin:auto;padding:32px;color:#17202a}h1,h2{color:#1a56a0}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}th,td{border:1px solid #bbb;padding:6px;text-align:center}th{background:#e8f0fe}img{max-width:100%}figcaption{text-align:center}.warning{color:#8a5600}</style></head><body><h1>CometQuant Lab</h1><p><strong>${escapeHtml(labels.researcher)}:</strong> ${escapeHtml(experiment.researcher || '-')}</p><p><strong>${escapeHtml(labels.agent)}:</strong> ${escapeHtml(experiment.agent)}</p><p><strong>${escapeHtml(labels.cells)}:</strong> ${escapeHtml(experiment.cells)}</p><p><strong>${escapeHtml(labels.target)}:</strong> ${escapeHtml(experiment.nucleoidsPerGel)}</p><p><strong>${escapeHtml(labels.slides)}:</strong> ${escapeHtml(experiment.slidesPerTreatment)}</p><p class="warning">${escapeHtml(labels.exclusion)}</p><h2>${escapeHtml(labels.raw)}</h2>${htmlTable([labels.replicate, labels.treatment, labels.slide, 'Status', labels.completion, labels.reason, 'Total', 'Score'], rawRows)}<h2>${escapeHtml(labels.scores)}</h2>${htmlTable([labels.treatment, labels.replicate, labels.complete, labels.incomplete, labels.absent, 'Score'], scoreRows)}<h2>${escapeHtml(labels.protocol)}</h2>${htmlTable([labels.item, labels.value], protocolRows)}<h2>${escapeHtml(labels.population)}</h2>${htmlTable([labels.item, labels.value], populationRows)}<h2>${escapeHtml(labels.rcbd)}</h2>${htmlTable([labels.term, 'SS', 'DF', 'MS', 'F', 'p'], anovaRows)}<h2>${escapeHtml(labels.comparisons)}</h2>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.ci, labels.rawP, labels.holmP, labels.decision, labels.direction], comparisonRows)}<h2>${escapeHtml(labels.control)}</h2>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.ci, labels.rawP, labels.decision, labels.direction], controlRows)}<h2>${escapeHtml(labels.trend)}</h2>${htmlTable([labels.item, labels.value], trendRows)}<h2>${escapeHtml(labels.charts)}</h2>${chartItems}<p>Generated by CometQuant Lab - schema ${escapeHtml(experiment.schemaVersion)} / analysis ${escapeHtml(analysis?.analysisSchemaVersion || '-')}</p></body></html>`
+    return `<!DOCTYPE html><html lang="${pt ? 'pt-BR' : 'en'}"><head><meta charset="UTF-8"><title>CometQuant - ${escapeHtml(experiment.agent)}</title><style>body{font-family:Arial,sans-serif;max-width:1000px;margin:auto;padding:32px;color:#17202a}h1,h2{color:#1a56a0}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}th,td{border:1px solid #bbb;padding:6px;text-align:center}th{background:#e8f0fe}img{max-width:100%}figcaption{text-align:center}.warning{color:#8a5600}</style></head><body><h1>CometQuant Lab</h1><p><strong>${escapeHtml(labels.researcher)}:</strong> ${escapeHtml(experiment.researcher || '-')}</p><p><strong>${escapeHtml(labels.agent)}:</strong> ${escapeHtml(experiment.agent)}</p><p><strong>${escapeHtml(labels.cells)}:</strong> ${escapeHtml(experiment.cells)}</p><p><strong>${escapeHtml(labels.target)}:</strong> ${escapeHtml(experiment.nucleoidsPerGel)}</p><p><strong>${escapeHtml(labels.slides)}:</strong> ${escapeHtml(experiment.slidesPerTreatment)}</p><p class="warning">${escapeHtml(labels.exclusion)}</p><h2>${escapeHtml(labels.raw)}</h2>${htmlTable([labels.replicate, labels.treatment, labels.slide, 'Status', labels.completion, labels.reason, 'Total', 'Score'], rawRows)}<h2>${escapeHtml(labels.scores)}</h2>${htmlTable([labels.treatment, labels.replicate, labels.complete, labels.incomplete, labels.absent, 'Score'], scoreRows)}<h2>${escapeHtml(labels.protocol)}</h2>${htmlTable([labels.item, labels.value], protocolRows)}<h2>${escapeHtml(labels.population)}</h2>${htmlTable([labels.item, labels.value], populationRows)}<h2>${escapeHtml(labels.rcbd)}</h2>${htmlTable([labels.term, 'SS', 'DF', 'MS', 'F', 'p'], anovaRows)}<h2>${escapeHtml(labels.comparisons)}</h2>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.ci, labels.rawP, labels.holmP, labels.decision, labels.direction], comparisonRows)}<h2>${escapeHtml(labels.control)}</h2>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.ci, labels.rawP, labels.decision, labels.direction], controlRows)}<h2>${escapeHtml(labels.trend)}</h2>${htmlTable([labels.item, labels.value], trendRows)}${sensitivityHtml}<h2>${escapeHtml(labels.charts)}</h2>${chartItems}<p>Generated by CometQuant Lab - schema ${escapeHtml(experiment.schemaVersion)} / analysis ${escapeHtml(analysis?.analysisSchemaVersion || '-')}</p></body></html>`
   }
 
   function safeFilename(value) {
@@ -332,6 +429,7 @@
   return {
     escapeHtml, escapeCsv, serializeCsv, buildRawRows, buildRawCsv, buildAggregateCsv,
     buildPopulationCsv, buildBlockAnovaCsv, buildComparisonsCsv, buildControlResponseCsv,
-    buildDoseTrendCsv, buildStudyDesignCsv, buildReportHtml, validPngBase64, safeFilename
+    buildDoseTrendCsv, buildNonParametricCsv, buildTransformedAnalysisCsv, buildStudyDesignCsv,
+    buildReportHtml, validPngBase64, safeFilename
   }
 })

@@ -107,13 +107,18 @@ The version 2 analysis contract provides:
 - nominal 95% confidence intervals, effect direction and unrounded decisions;
 - a separate blocked control-response comparison that does not classify assay validity;
 - a secondary linear dose trend using `score ~ experiment + concentration`, with the reference as dose zero;
-- individual block profiles, difference confidence intervals and descriptive class charts.
+- individual block profiles, difference confidence intervals and descriptive class charts;
+- per-treatment dispersion (mean, SD, CV) with a variance-heterogeneity flag;
+- an exact non-parametric sensitivity block (Friedman omnibus and Page L ordered trend by permutation), with Page's direction derived from the assay type;
+- an arcsine-sqrt transformed sensitivity re-run of the block ANOVA, comparisons and dose trend.
 
 Shapiro-Wilk no longer selects the method. One-way ANOVA, Tukey HSD, pooled
 Pearson correlation and the former power calculation are not part of the v2
-runtime contract. Friedman and Wilcoxon remain deferred because exact paired
-inference has very limited resolution with the common design of three independent
-experiments.
+runtime contract. The non-parametric and transformed blocks are robustness
+checks that confirm consistency; they are not a second attempt at significance.
+The planned comparisons remain parametric because exact paired inference (e.g.
+Wilcoxon) has very limited resolution with the common design of three
+independent experiments.
 
 Undefined analyses return an explicit `performed: false` result and structured
 reason. JSON serialization rejects non-finite values, and small p-values retain
@@ -127,7 +132,8 @@ classify a compound as genotoxic, non-genotoxic or antigenotoxic.
 and two technical slides per cell, including a cell retained with one valid
 slide. Explicit SciPy formulas and base R independently validate the block
 ANOVA, planned contrasts, Holm adjustment, confidence intervals, control
-response and dose trend. `tests/reference/v1/` remains immutable historical
+response, dose trend, exact Friedman/Page permutations, and the arcsine-sqrt
+transformed analysis. `tests/reference/v1/` remains immutable historical
 evidence for the retired protocol. R is never loaded by the browser application.
 
 Playwright also runs the extracted Python engine inside real Pyodide and checks
@@ -173,3 +179,5 @@ and storage eviction remain part of the real-device checklist.
 - Browser automation covers Chromium/Pixel 7 and Playwright WebKit/iPhone emulation; Safari/iOS support still requires the real-device checklist.
 - The comet class illustrations are provisional.
 - Three independent experiments are supported as the common assay design, but estimates and confidence intervals may remain imprecise; statistical non-significance is not evidence of equivalence or absence of effect.
+- The blocked model assumes additive block effects (no treatment-by-experiment interaction), which is undiagnosable with a single replication per cell; this assumption is declared rather than testable.
+- The two-treatment validation block model estimates its residual with few degrees of freedom; the separate model is kept intentionally rather than pooling error with the primary population.

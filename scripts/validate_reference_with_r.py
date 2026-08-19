@@ -90,9 +90,34 @@ def expected_v2_metrics(expected):
         "ciHigh": "ci_high",
         "p": "p",
         "r2": "r2",
+        "r2Partial": "r2_partial",
     }
     for source, target in trend_fields.items():
         metrics[f"doseTrend::{target}"] = expected["doseTrend"][source]
+
+    non_parametric = expected["nonParametric"]
+    friedman = non_parametric["friedman"]
+    metrics["nonParametric::friedman::Q"] = friedman["statistic"]
+    metrics["nonParametric::friedman::df"] = friedman["df"]
+    metrics["nonParametric::friedman::pExact"] = friedman["pExact"]
+    metrics["nonParametric::friedman::exactArrangements"] = friedman["exactArrangements"]
+    page = non_parametric["pageTrend"]
+    metrics["nonParametric::page::L"] = page["statistic"]
+    metrics["nonParametric::page::pExact"] = page["pExact"]
+    metrics["nonParametric::page::pExactOpposite"] = page["pExactOpposite"]
+
+    transformed = expected["transformedAnalysis"]
+    for term in transformed["blockAnova"]["terms"]:
+        for field in ("SS", "DF", "MS", "F", "p"):
+            if field in term:
+                metrics[f"transformed::blockAnova::{term['term']}::{field}"] = term[field]
+    for comparison in transformed["primaryComparisons"]:
+        treatment_index = comparison["treatmentIndex"]
+        metrics[f"transformed::comparison::{treatment_index}::difference"] = comparison["difference"]
+        metrics[f"transformed::comparison::{treatment_index}::p"] = comparison["pRaw"]
+        metrics[f"transformed::comparison::{treatment_index}::p_adjusted"] = comparison["pAdjusted"]
+    metrics["transformed::trend::slope"] = transformed["doseTrend"]["slope"]
+    metrics["transformed::trend::p"] = transformed["doseTrend"]["p"]
     return metrics
 
 

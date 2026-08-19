@@ -2,7 +2,10 @@
 
 import base64
 import io
+import itertools
 import json
+import math
+from collections import Counter
 
 import matplotlib
 import numpy as np
@@ -1008,6 +1011,14 @@ def calculate_control_response(blocks, population, protocol, experiment):
         "blockNumbers": block_numbers,
         "blockAnova": anova,
         "comparison": comparison,
+        "note": {
+            "code": "low_residual_degrees_of_freedom",
+            "detail": (
+                "The two-treatment validation block model estimates a residual with few "
+                "degrees of freedom. The separate model is kept intentionally rather than "
+                "pooling the error with the primary population."
+            ),
+        },
     }
 
 
@@ -1058,9 +1069,20 @@ def calculate_dose_trend(values, treatment_indices, metadata_by_index, protocol)
     t_statistic = slope / standard_error
     p_value = float(2 * stats.t.sf(abs(t_statistic), residual_df))
     critical = float(stats.t.ppf(0.975, residual_df))
+    reduced_design = design[:, :-1]
+    reduced_rank = int(np.linalg.matrix_rank(reduced_design))
+    reduced_residual_df = int(y.size - reduced_rank)
+    if reduced_rank == reduced_design.shape[1] and reduced_residual_df > 0:
+        reduced_coefficients, _, _, _ = np.linalg.lstsq(reduced_design, y, rcond=None)
+        reduced_residuals = y - reduced_design @ reduced_coefficients
+        reduced_ss_residual = float(reduced_residuals @ reduced_residuals)
+        r2_partial = 1.0 - ss_residual / reduced_ss_residual
+    else:
+        r2_partial = 0.0
     return {
         "performed": True,
-        "model": "score ~ block + concentration",
+        "model": "score ~ block + concentration (linear)",
+        "trendKind": "linear",
         "blockCount": block_count,
         "observationCount": int(y.size),
         "residualDF": residual_df,
@@ -1078,6 +1100,7 @@ def calculate_dose_trend(values, treatment_indices, metadata_by_index, protocol)
         "ciHigh": _finite(slope + critical * standard_error),
         "p": _probability(p_value),
         "r2": _finite(1 - ss_residual / ss_total),
+        "r2Partial": _finite(r2_partial),
         "significant": bool(p_value < protocol["alpha"]),
     }
 
@@ -1106,18 +1129,154 @@ def _scores_and_descriptive(blocks, treatment_indices, included_block_numbers):
                 }
             )
         if values:
+            mean = _finite(np.mean(values))
+            standard_deviation = (
+                _finite(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+            )
             descriptive.append(
                 {
                     "treatmentIndex": treatment_index,
                     "treatment": treatment,
                     "blockCount": len(values),
-                    "mean": _finite(np.mean(values)),
-                    "standardDeviation": _finite(np.std(values, ddof=1)) if len(values) > 1 else 0.0,
+                    "mean": mean,
+                    "standardDeviation": standard_deviation,
+                    "coefficientOfVariation": (
+                        _finite(standard_deviation / mean * 100.0) if mean > 0 else 0.0
+                    ),
                     "minimum": _finite(np.min(values)),
                     "maximum": _finite(np.max(values)),
                 }
             )
     return score_rows, descriptive
+
+
+def _heterogeneity_flag(descriptive):
+    deviations = [item["standardDeviation"] for item in descriptive if item["blockCount"] >= 2]
+    if len(deviations) < 2:
+        return {
+            "performed": False,
+            "reason": {
+                "code": "insufficient_dispersion",
+                "detail": "Heterogeneity flag requires at least two treatments with two or more blocks.",
+            },
+        }
+    maximum = max(deviations)
+    minimum = min(deviations)
+    ratio = (maximum / minimum) if minimum > 0 else None
+    flagged = ratio is None or ratio > 3.0
+    return {
+        "performed": True,
+        "flagged": flagged,
+        "maximumStandardDeviation": _finite(maximum),
+        "minimumStandardDeviation": _finite(minimum),
+        "ratio": _finite(ratio) if ratio is not None else None,
+        "code": "heterogeneous_variance" if flagged else "homogeneous_variance",
+    }
+
+
+NONPARAMETRIC_ARRANGEMENT_CAP = 5_000_000
+
+
+def _arcsin_sqrt_transform(values):
+    clipped = np.clip(values, 0.0, 100.0)
+    return np.arcsin(np.sqrt(clipped / 100.0))
+
+
+def _page_direction(assay_type):
+    return "increasing" if assay_type == "genotoxicity" else "decreasing"
+
+
+def _friedman_exact(values, treatment_indices):
+    block_count, treatment_count = values.shape
+    if treatment_count < 3:
+        return _reason(
+            "insufficient_treatments",
+            "Friedman test requires at least three treatments.",
+        )
+    if block_count < 2:
+        return _reason(
+            "insufficient_complete_blocks",
+            "Friedman test requires at least two complete independent experiments.",
+        )
+    arrangements = math.factorial(treatment_count) ** block_count
+    if arrangements > NONPARAMETRIC_ARRANGEMENT_CAP:
+        return _reason(
+            "nonparametric_arrangements_exceeded",
+            "Exact Friedman enumeration exceeds the computational budget for this design.",
+        )
+    ranks = stats.rankdata(values, axis=1)
+    rank_sums = ranks.sum(axis=0)
+    observed_q = 12.0 / (block_count * treatment_count * (treatment_count + 1)) * float(
+        np.sum(rank_sums ** 2)
+    ) - 3.0 * block_count * (treatment_count + 1)
+    perms = list(itertools.permutations(range(treatment_count)))
+    distribution = Counter()
+    distribution[(0,) * treatment_count] = 1
+    for block_index in range(block_count):
+        row = ranks[block_index]
+        next_distribution = Counter()
+        for state, count in distribution.items():
+            for perm in perms:
+                next_state = tuple(state[j] + row[perm[j]] for j in range(treatment_count))
+                next_distribution[next_state] += count
+        distribution = next_distribution
+    exceeded = 0
+    for state, count in distribution.items():
+        statistic = 12.0 / (block_count * treatment_count * (treatment_count + 1)) * sum(
+            value * value for value in state
+        ) - 3.0 * block_count * (treatment_count + 1)
+        if statistic >= observed_q - 1e-12:
+            exceeded += count
+    return {
+        "performed": True,
+        "blockCount": block_count,
+        "treatmentIndices": treatment_indices,
+        "statistic": _finite(observed_q),
+        "df": treatment_count - 1,
+        "pExact": _probability(exceeded / arrangements),
+        "exactArrangements": arrangements,
+    }
+
+
+def _page_exact(values, treatment_indices, direction):
+    block_count, treatment_count = values.shape
+    if treatment_count < 3:
+        return _reason(
+            "insufficient_treatments",
+            "Page test requires at least three treatments.",
+        )
+    if block_count < 2:
+        return _reason(
+            "insufficient_complete_blocks",
+            "Page test requires at least two complete independent experiments.",
+        )
+    arrangements = math.factorial(treatment_count) ** block_count
+    if arrangements > NONPARAMETRIC_ARRANGEMENT_CAP:
+        return _reason(
+            "nonparametric_arrangements_exceeded",
+            "Exact Page enumeration exceeds the computational budget for this design.",
+        )
+    primary_data = values if direction == "increasing" else values[:, ::-1]
+    opposite_data = values[:, ::-1] if direction == "increasing" else values
+    primary = stats.page_trend_test(primary_data, method="exact")
+    opposite = stats.page_trend_test(opposite_data, method="exact")
+    primary_p = min(1.0, float(primary.pvalue))
+    opposite_p = min(1.0, float(opposite.pvalue))
+    if primary_p > 1.0 - 1e-12:
+        primary_p = 1.0
+    if opposite_p > 1.0 - 1e-12:
+        opposite_p = 1.0
+    return {
+        "performed": True,
+        "blockCount": block_count,
+        "treatmentIndices": treatment_indices,
+        "direction": direction,
+        "directionSource": "assay_type",
+        "statistic": _finite(float(primary.statistic)),
+        "pExact": _probability(primary_p),
+        "pExactOpposite": _probability(opposite_p),
+        "exactArrangements": arrangements,
+    }
 
 
 def generate_block_score_chart(blocks, treatment_indices, block_numbers, experiment, lang):
@@ -1172,6 +1331,49 @@ def generate_difference_chart(primary_comparisons, lang):
     return _figure_to_base64(figure)
 
 
+def _calculate_non_parametric(values, treatment_indices, assay_type):
+    if values.size == 0:
+        return _reason(
+            "no_complete_primary_blocks",
+            "Non-parametric sensitivity analysis requires complete primary blocks.",
+        )
+    direction = _page_direction(assay_type)
+    friedman = _friedman_exact(values, treatment_indices)
+    page = _page_exact(values, treatment_indices, direction)
+    if friedman.get("performed", False) and page.get("performed", False):
+        return {
+            "performed": True,
+            "population": "primary_complete_blocks",
+            "friedman": friedman,
+            "pageTrend": page,
+        }
+    reason = friedman if not friedman.get("performed", False) else page
+    return {
+        "performed": False,
+        "reason": reason["reason"],
+        "population": "primary_complete_blocks",
+    }
+
+
+def _calculate_transformed_analysis(values, treatment_indices, metadata_by_index, protocol, experiment):
+    if values.size == 0:
+        return _reason(
+            "no_complete_primary_blocks",
+            "Transformed sensitivity analysis requires complete primary blocks.",
+        )
+    transformed = _arcsin_sqrt_transform(values)
+    anova = _rcbd_anova(transformed, treatment_indices, experiment)
+    comparisons = calculate_primary_comparisons(transformed, anova, protocol, experiment)
+    trend = calculate_dose_trend(transformed, treatment_indices, metadata_by_index, protocol)
+    return {
+        "performed": True,
+        "scale": "arcsin_sqrt",
+        "blockAnova": anova,
+        "primaryComparisons": comparisons,
+        "doseTrend": trend,
+    }
+
+
 def analyze_experiment(experiment, lang="en"):
     try:
         protocol, metadata_by_index = _parse_protocol(experiment)
@@ -1188,6 +1390,8 @@ def analyze_experiment(experiment, lang="en"):
             "primaryComparisons": unavailable,
             "controlResponse": unavailable,
             "doseTrend": unavailable,
+            "nonParametric": unavailable,
+            "transformedAnalysis": unavailable,
             "charts": unavailable,
         }
 
@@ -1214,7 +1418,12 @@ def analyze_experiment(experiment, lang="en"):
             "Dose trend requires complete primary blocks.",
         )
     )
+    non_parametric = _calculate_non_parametric(values, treatment_indices, protocol["assayType"])
+    transformed_analysis = _calculate_transformed_analysis(
+        values, treatment_indices, metadata_by_index, protocol, experiment
+    )
     scores, descriptive = _scores_and_descriptive(blocks, treatment_indices, included_blocks)
+    heterogeneity_flag = _heterogeneity_flag(descriptive)
     return {
         "analysisSchemaVersion": 2,
         "protocol": protocol,
@@ -1223,6 +1432,7 @@ def analyze_experiment(experiment, lang="en"):
             "performed": True,
             "population": "primary_complete_blocks",
             "treatments": descriptive,
+            "heterogeneityFlag": heterogeneity_flag,
         },
         "scores": {
             "performed": True,
@@ -1233,6 +1443,8 @@ def analyze_experiment(experiment, lang="en"):
         "primaryComparisons": primary_comparisons,
         "controlResponse": control_response,
         "doseTrend": dose_trend,
+        "nonParametric": non_parametric,
+        "transformedAnalysis": transformed_analysis,
         "charts": {
             "scores": generate_block_score_chart(
                 blocks, treatment_indices, included_blocks, experiment, lang

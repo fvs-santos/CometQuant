@@ -369,10 +369,13 @@ function renderAnalysisResults(results) {
   const containers = ensureAnalysisV2Containers()
   renderPlanPopulation(containers.planPopulation, results.protocol, results.population)
   renderBlockScores(containers.blockScores, results.scores)
+  renderDispersion(containers.blockScores, results.descriptive)
   renderRcbdAnova(containers.rcbdAnova, results.blockAnova)
   renderPrimaryComparisons(containers.primaryComparisons, results.primaryComparisons)
   renderControlResponse(containers.controlResponse, results.controlResponse)
   renderDoseTrend(containers.doseTrend, results.doseTrend)
+  renderNonParametric(containers.nonParametric, results.nonParametric)
+  renderTransformedAnalysis(containers.transformedAnalysis, results.transformedAnalysis)
   renderCharts(containers.charts, results.charts)
   return containers
 }
@@ -392,6 +395,8 @@ function ensureAnalysisV2Containers() {
     ['primaryComparisons', 'section-analysis-primary-comparisons', 'analysis-primary-comparisons', 'analysis.v2.comparisons.title'],
     ['controlResponse', 'section-analysis-control-response', 'analysis-control-response', 'analysis.v2.control.title'],
     ['doseTrend', 'section-analysis-dose-trend', 'analysis-dose-trend', 'analysis.v2.trend.title'],
+    ['nonParametric', 'section-analysis-non-parametric', 'analysis-non-parametric', 'analysis.v2.nonParametric.title'],
+    ['transformedAnalysis', 'section-analysis-transformed', 'analysis-transformed', 'analysis.v2.transformed.title'],
     ['charts', 'section-analysis-v2-charts', 'analysis-v2-charts', 'analysis.v2.charts.title']
   ]
   const legacySections = ['section-scores', 'section-shapiro', 'section-anova', 'section-tukey', 'section-regression', 'section-charts']
@@ -542,6 +547,7 @@ function renderDoseTrend(container, result) {
   }
   renderResultTable(container, [t('analysis.v2.header.item'), t('analysis.v2.header.value')], [
     [t('analysis.v2.trend.model'), result.model],
+    [t('analysis.v2.trend.kind'), translatedAnalysisValue('trendKind', result.trendKind)],
     [t('analysis.v2.trend.blockCount'), result.blockCount],
     [t('analysis.v2.trend.observationCount'), result.observationCount],
     [t('analysis.v2.trend.slope'), formatAnalysisNumber(result.slope)],
@@ -551,11 +557,98 @@ function renderDoseTrend(container, result) {
     [t('analysis.v2.header.confidenceInterval'), `${formatAnalysisNumber(result.ciLow)} / ${formatAnalysisNumber(result.ciHigh)}`],
     [t('analysis.v2.header.pValue'), formatProbability(result.p)],
     [t('analysis.v2.header.rSquared'), formatAnalysisNumber(result.r2)],
+    [t('analysis.v2.header.rSquaredPartial'), formatAnalysisNumber(result.r2Partial)],
     [t('analysis.v2.header.decision'), result.significant ? t('analysis.v2.decision.significant') : t('analysis.v2.decision.notSignificant')]
   ])
   const doses = (result.treatmentDoses || []).map(item => [item.treatmentIndex, formatAnalysisNumber(item.concentration)])
   appendCaption(container, t('analysis.v2.trend.dosesCaption'))
   renderResultTable(container, [t('analysis.v2.header.treatmentId'), t('analysis.v2.header.concentration')], doses, false)
+}
+
+function renderDispersion(container, descriptive) {
+  if (!descriptive || descriptive.performed === false) return
+  const rows = (descriptive.treatments || []).map(item => [
+    item.treatmentIndex, item.treatment, formatAnalysisNumber(item.mean),
+    formatAnalysisNumber(item.standardDeviation), formatAnalysisNumber(item.coefficientOfVariation),
+    item.blockCount
+  ])
+  appendCaption(container, t('analysis.v2.dispersion.caption'))
+  renderResultTable(container, [
+    t('analysis.v2.header.treatmentId'), t('analysis.v2.header.treatment'), t('analysis.v2.header.mean'),
+    t('analysis.v2.header.standardDeviation'), t('analysis.v2.header.cv'), t('analysis.v2.header.blockId')
+  ], rows, false)
+  const flag = descriptive.heterogeneityFlag
+  if (flag && flag.performed) {
+    appendCaption(container, interpolateAnalysisText(t('analysis.v2.dispersion.heterogeneity'), {
+      code: flag.code,
+      ratio: flag.ratio === null || flag.ratio === undefined ? t('analysis.v2.value.notApplicable') : formatAnalysisNumber(flag.ratio),
+      max: formatAnalysisNumber(flag.maximumStandardDeviation),
+      min: formatAnalysisNumber(flag.minimumStandardDeviation)
+    }))
+  }
+}
+
+function renderNonParametric(container, result) {
+  if (!result || result.performed === false) {
+    renderNotPerformed(container, result)
+    return
+  }
+  appendCaption(container, t('analysis.v2.nonParametric.caption'))
+  if (result.friedman && result.friedman.performed !== false) {
+    const friedman = result.friedman
+    appendCaption(container, t('analysis.v2.nonParametric.friedman.title'))
+    renderResultTable(container, [t('analysis.v2.header.item'), t('analysis.v2.header.value')], [
+      [t('analysis.v2.nonParametric.statistic'), formatAnalysisNumber(friedman.statistic)],
+      [t('analysis.v2.header.df'), friedman.df],
+      [t('analysis.v2.nonParametric.pExact'), formatProbability(friedman.pExact)],
+      [t('analysis.v2.nonParametric.arrangements'), friedman.exactArrangements]
+    ], false)
+  } else {
+    renderNotPerformed(container, result.friedman, false)
+  }
+  if (result.pageTrend && result.pageTrend.performed !== false) {
+    const page = result.pageTrend
+    appendCaption(container, t('analysis.v2.nonParametric.page.title'))
+    renderResultTable(container, [t('analysis.v2.header.item'), t('analysis.v2.header.value')], [
+      [t('analysis.v2.nonParametric.direction'), translatedAnalysisValue('pageDirection', page.direction)],
+      [t('analysis.v2.nonParametric.directionSource'), translatedAnalysisValue('directionSource', page.directionSource)],
+      [t('analysis.v2.nonParametric.statistic'), formatAnalysisNumber(page.statistic)],
+      [t('analysis.v2.nonParametric.pExact'), formatProbability(page.pExact)],
+      [t('analysis.v2.nonParametric.pExactOpposite'), formatProbability(page.pExactOpposite)],
+      [t('analysis.v2.nonParametric.arrangements'), page.exactArrangements]
+    ], false)
+  } else {
+    renderNotPerformed(container, result.pageTrend, false)
+  }
+}
+
+function renderTransformedAnalysis(container, result) {
+  if (!result || result.performed === false) {
+    renderNotPerformed(container, result)
+    return
+  }
+  appendCaption(container, interpolateAnalysisText(t('analysis.v2.transformed.caption'), {
+    scale: result.scale
+  }))
+  appendCaption(container, t('analysis.v2.transformed.blockAnovaCaption'))
+  renderRcbdAnova(container, result.blockAnova, false)
+  appendCaption(container, t('analysis.v2.transformed.comparisonsCaption'))
+  if (result.primaryComparisons && result.primaryComparisons.performed !== false) {
+    renderResultTable(container, comparisonHeaders(), (result.primaryComparisons.comparisons || []).map(row => comparisonValues(row)), false)
+  } else {
+    renderNotPerformed(container, result.primaryComparisons, false)
+  }
+  appendCaption(container, t('analysis.v2.transformed.trendCaption'))
+  if (result.doseTrend && result.doseTrend.performed !== false) {
+    const trend = result.doseTrend
+    renderResultTable(container, [t('analysis.v2.header.item'), t('analysis.v2.header.value')], [
+      [t('analysis.v2.trend.slope'), formatAnalysisNumber(trend.slope)],
+      [t('analysis.v2.header.pValue'), formatProbability(trend.p)],
+      [t('analysis.v2.header.rSquaredPartial'), formatAnalysisNumber(trend.r2Partial)]
+    ], false)
+  } else {
+    renderNotPerformed(container, result.doseTrend, false)
+  }
 }
 
 function renderCharts(container, charts) {
@@ -693,6 +786,8 @@ async function exportZip() {
     data.file('primary_comparisons.csv', CometQuantExport.buildComparisonsCsv(analysisResults))
     data.file('control_response.csv', CometQuantExport.buildControlResponseCsv(analysisResults))
     data.file('dose_trend.csv', CometQuantExport.buildDoseTrendCsv(analysisResults))
+    data.file('non_parametric.csv', CometQuantExport.buildNonParametricCsv(analysisResults))
+    data.file('transformed_analysis.csv', CometQuantExport.buildTransformedAnalysisCsv(analysisResults))
     data.file('study_design.csv', CometQuantExport.buildStudyDesignCsv(currentExperiment, analysisResults))
     const charts = folder.folder('charts')
     if (CometQuantExport.validPngBase64(analysisResults.charts?.scores)) charts.file('block_scores.png', analysisResults.charts.scores, { base64: true })

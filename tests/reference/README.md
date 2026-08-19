@@ -31,9 +31,12 @@ python scripts/calculate_reference_results.py --version v2 --output tests/refere
 The script does not import `python/cometquant_analysis.py`. It independently
 aggregates valid slides, calculates balanced-RCBD sums of squares, planned
 contrasts with common residual MSE/df, nominal 95% intervals, Holm adjustment,
-the separate validation RCBD, and block-adjusted matrix OLS trend. The base R
-oracle in `v2/reference_analysis.R` independently fits the same models with
-`lm`, `anova`, `confint`, and `p.adjust`. Validate either protocol with:
+the separate validation RCBD, block-adjusted matrix OLS trend, exact
+Friedman/Page permutation tests, and the arcsine-sqrt transformed sensitivity
+analysis. The base R oracle in `v2/reference_analysis.R` independently fits the
+same models with `lm`, `anova`, `confint`, and `p.adjust`, and computes the
+exact Friedman/Page p-values by enumerating all `(k!)^n` within-block rank
+permutations in base R. Validate either protocol with:
 
 ```powershell
 python scripts/validate_reference_with_r.py --version v2
@@ -68,6 +71,8 @@ Treatment labels are never parsed for dose.
   "primaryComparisons": {},
   "controlResponse": {},
   "doseTrend": {},
+  "nonParametric": {},
+  "transformedAnalysis": {},
   "charts": {
     "scores": "<PNG base64>",
     "differences": "<PNG base64>",
@@ -89,6 +94,12 @@ means, treatment-minus-reference difference, standard error, t, df, nominal
 95% bounds, raw p, Holm p, direction and decision; `omnibusGateUsed` is false.
 `controlResponse` has its own two-treatment block ANOVA and unadjusted comparison
 without assay-validity classification. `doseTrend` reports
-`score ~ block + concentration`, including reference dose zero. Every
-non-estimable section has `performed: false` and a structured
-`reason: {"code": "...", "detail": "..."}`. NaN and infinities are forbidden.
+`score ~ block + concentration (linear)`, including reference dose zero, plus a
+partial R² for concentration after adjusting for block. `nonParametric` runs the
+exact permutation Friedman test and the exact Page L trend test over the primary
+population (reference plus doses, excluding the positive control), with Page's
+direction derived from the assay type. `transformedAnalysis` re-runs the block
+ANOVA, planned comparisons, and dose trend on the arcsine-sqrt scale as a
+variance-stabilizing sensitivity check. Every non-estimable section has
+`performed: false` and a structured `reason: {"code": "...", "detail": "..."}`.
+NaN and infinities are forbidden.

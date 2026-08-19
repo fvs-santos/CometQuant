@@ -127,10 +127,13 @@ Analises atualmente implementadas no contrato `analysisSchemaVersion: 2`:
 - comparacoes bilaterais planejadas de cada concentracao contra a referencia, sem gate omnibus e com ajuste Holm;
 - diferenca estimada, erro-padrao, IC nominal de 95%, p bruto, p ajustado e direcao;
 - resposta do controle positivo em comparacao separada, sem classificacao automatica da validade do ensaio;
-- tendencia linear secundaria ajustada por bloco, incluindo a referencia como dose zero;
+- tendencia linear secundaria ajustada por bloco, incluindo a referencia como dose zero, com R² parcial da concentracao;
+- dispersao por tratamento (media, DP, CV) e flag de heterogeneidade de variancia (aviso, nao gate);
+- bloco `nonParametric` com Friedman exato por permutacao (omnibus) e Page L exato (tendencia ordenada), sobre a populacao primaria (referencia + doses, sem CP), com direcao do Page derivada do `assayType`;
+- bloco `transformedAnalysis` com reanalise na escala arcsine-sqrt da ANOVA, das comparacoes e da tendencia, como checagem de robustez de variancia;
 - perfis individuais por bloco, grafico das diferencas com IC e distribuicao descritiva das classes.
 
-Shapiro-Wilk, ANOVA one-way, Tukey, Pearson agrupado e o antigo calculo de poder nao integram mais o runtime v2. Friedman e Wilcoxon permanecem adiados. Alteracoes futuras no protocolo estatistico devem continuar sendo validadas contra referencias cientificas independentes.
+Shapiro-Wilk, ANOVA one-way, Tukey, Pearson agrupado e o antigo calculo de poder nao integram mais o runtime v2. Friedman exato e Page substituem o antigo adiamento; o Wilcoxon pareado continua fora porque tem resolucao minima (p=0,25) com n=3. Os blocos nao-parametrico e transformado sao robustez/concordancia, nao segunda tentativa de significancia. Alteracoes futuras no protocolo estatistico devem continuar sendo validadas contra referencias cientificas independentes.
 
 ## Exportacao e seguranca de saida
 
@@ -320,7 +323,7 @@ Plano estatistico implementado na continuidade de 18/08/2026:
 - O codigo anterior executava Shapiro-Wilk por tratamento, ANOVA one-way, Tukey para todos os pares e regressao/Pearson sem ajustar pelo bloco.
 - A cascata automatica `Shapiro -> parametrico ou nao parametrico -> omnibus -> pos-teste` foi rejeitada para o uso tipico com tres experimentos independentes.
 - Com `n = 3`, Shapiro-Wilk tem pouco poder para avaliar normalidade, e o menor p-valor bilateral exato do Wilcoxon pareado e `0,25`. Uma troca automatica poderia gerar falsos negativos e conclusoes instaveis.
-- Shapiro-Wilk deixou de selecionar o metodo. Friedman e Wilcoxon foram adiados para uma etapa futura e nao fazem parte do protocolo v2.
+- Shapiro-Wilk deixou de selecionar o metodo. O Wilcoxon pareado continua fora do protocolo v2 por ter resolucao minima (p = 0,25) com n = 3; Friedman e Page foram incorporados posteriormente como sensibilidade exata.
 
 ### Protocolo principal implementado
 
@@ -335,6 +338,15 @@ Plano estatistico implementado na continuidade de 18/08/2026:
 - A regressao e a correlacao de Pearson antigas foram substituidas por uma tendencia linear secundaria ajustada por bloco: `score ~ experimento + concentracao`.
 - A referencia e incluida como concentracao zero do composto teste na tendencia. Os metadados numericos de concentracao nao dependem mais do parsing do rotulo do tratamento.
 - A resposta do controle positivo e analisada separadamente contra o controle basal, sem entrar na familia Holm das concentracoes e sem classificacao automatica do ensaio como valido ou invalido.
+
+### Decisoes de revisao estatistica (continuidade 2.1.0)
+
+- **Aditividade dos blocos**: o modelo de replica unica assume efeito aditivo de bloco (ausencia de interacao tratamento x experimento). Com n = 3 isso e indiagnosticavel; a suposicao e declarada no manual, nao testada.
+- **Controle positivo em modelo de 2 tratamentos**: o residuo da validacao tem poucos graus de liberdade. Decidiu-se manter o modelo separado (sem pooling do erro com a populacao principal), com nota estruturada `low_residual_degrees_of_freedom` exposta no resultado.
+- **Holm vs Dunnett**: manteve-se Holm como padrao. Os IC ja sao rotulados como "nominal". Dunnett e uma melhoria de poder futura, mas exigiria dependencia R nova (DescTools/multcomp) ou valores criticos manuais.
+- **Direcao do Page pre-especificada**: derivada do `assayType` (genotoxicidade = crescente; antigenotoxicidade = decrescente), nunca escolhida pelos dados, para nao inflar o erro tipo I.
+- **Nao-parametrico/transformado como robustez**: nao sao decisao; a UI e o relatorio os apresentam como concordancia, nao como segunda tentativa de significancia.
+- **Posicionamento regulatorio**: a filosofia "informar, nao decidir" e a recusa ao gate global estao mantidas. Parte da comunidade OECD/IWGT espera criterio de tendencia + reprodutibilidade; isso e registrado como posicionamento no manual, nao como mudanca de motor.
 
 ### Tipo de ensaio e controles
 
@@ -354,7 +366,7 @@ Plano estatistico implementado na continuidade de 18/08/2026:
 - Um experimento legado solicita configuracao unica somente depois do fim do blinding. O registro indica que a definicao ocorreu apos a coleta.
 - Experimentos com planos analiticos incompativeis nao poderao ser consolidados.
 - A mudanca documental nao exige nova versao do IndexedDB, salvo se forem adicionados stores ou indices.
-- O resultado cientifico tem `analysisSchemaVersion: 2` e secoes explicitas para protocolo, populacao, descritivas, ANOVA em blocos, comparacoes principais, resposta dos controles, tendencia e graficos.
+- O resultado cientifico tem `analysisSchemaVersion: 2` e secoes explicitas para protocolo, populacao, descritivas, ANOVA em blocos, comparacoes principais, resposta dos controles, tendencia, `nonParametric`, `transformedAnalysis` e graficos.
 - Resultados impossiveis usarao codigos estruturados e localizaveis. `NaN` e valores infinitos continuarao proibidos no JSON.
 
 ### Interface, graficos e exportacao implementados
@@ -364,7 +376,7 @@ Plano estatistico implementado na continuidade de 18/08/2026:
 - O grafico de barras com anotacoes de Tukey foi substituido por pontos dos experimentos, conexao visual dos blocos e um grafico das diferencas contra a referencia com intervalos de confianca.
 - O grafico de classes continuara descritivo. Qualquer anotacao de significancia usara o p-valor ajustado.
 - HTML, JSON e ZIP registram protocolo, referencia, blocos incluidos/excluidos, comparacoes e tendencia.
-- O ZIP acrescenta CSVs especificos para desenho, populacao, ANOVA em blocos, comparacoes principais, controles e tendencia, preservando os arquivos existentes de dados brutos e scores agregados.
+- O ZIP acrescenta CSVs especificos para desenho, populacao, ANOVA em blocos, comparacoes principais, controles, tendencia, sensibilidade nao-parametrica e analise transformada, preservando os arquivos existentes de dados brutos e scores agregados.
 - As protecoes existentes contra injecao HTML, formulas de planilha, PNG invalido e nomes de arquivo inseguros devem ser preservadas.
 
 ### Validacao e implementacao realizadas
@@ -382,6 +394,44 @@ Plano estatistico implementado na continuidade de 18/08/2026:
 11. Atualizar README, este MEMORY e a versao publica somente depois da verificacao completa.
 
 A verificacao final desta continuidade passou com 77 testes JavaScript e 95,49% de cobertura global, 19 testes Python, 60 metricas v2 comparadas com R, 28 metricas historicas v1 e 19 cenarios E2E em cada projeto Chromium e WebKit. O E2E cientifico executa o motor real no Pyodide, repete a renderizacao em portugues e inspeciona o conteudo do ZIP exportado.
+
+Concluido na continuidade de robustez estatistica (versao 2.1.0):
+
+### Motivacao e decisoes
+
+- A revisao do protocolo identificou nove pontos, do mais critico ao periferico. O principal era a homogeneidade de variancia: o escore e limitado em [0,100], o controle negativo tende ao piso (variancia ~0) e doses altas/CP tem dispersao grande, o que miscalibra o erro comum agrupado.
+- A cascata `Shapiro -> parametrico/nao parametrico -> omnibus -> pos-teste` permaneceu rejeitada; nao ha troca automatica de metodo.
+- A direcao do teste de Page foi **pre-especificada e derivada do `assayType`** (genotoxicidade = crescente; antigenotoxicidade = decrescente), nunca escolhida pelos dados, para nao inflar o erro tipo I.
+- O controle positivo manteve modelo proprio de 2 tratamentos (sem pooling do erro com a populacao principal), com nota estruturada `low_residual_degrees_of_freedom`.
+- Holm permaneceu como ajuste padrao; os IC ja sao rotulados "nominal". Dunnett e uma melhoria de poder futura (exigiria dependencia R nova ou valores criticos manuais).
+- A aditividade dos blocos (ausencia de interacao tratamento x experimento) e declarada, nao testada; com n = 3 e indiagnosticavel.
+
+### Implementado no motor
+
+- `calculate_dose_trend` passou a rotular a tendencia como `linear` e a reportar `r2Partial` (R² parcial da concentracao, ajustada por bloco).
+- `_scores_and_descriptive` ganhou `coefficientOfVariation` e um `heterogeneityFlag` (aviso, nao gate).
+- `_friedman_exact` calcula o omnibus em blocos por enumeracao exata dos arranjos `(k!)^n`, com cap computacional (`nonparametric_arrangements_exceeded`) em vez de degradar para assintotico.
+- `_page_exact` usa `scipy.stats.page_trend_test` (exato) e reporta `pExact` + `pExactOpposite`.
+- `_arcsin_sqrt_transform` e o bloco `transformedAnalysis` reexecutam ANOVA, comparacoes e tendencia na escala arcsine-sqrt.
+- Novos blocos de topo no contrato v2: `nonParametric` e `transformedAnalysis` (sempre presentes; `performed: false` + motivo estruturado quando nao estimavel). `analysisSchemaVersion` permaneceu 2.
+
+### Validacao independente
+
+- `scripts/calculate_reference_results.py` passou a calcular Friedman exato (enumeracao propria), Page via SciPy e a analise transformada, gravando tudo em `expected.json`.
+- `tests/reference/v2/reference_analysis.R` implementou Friedman e Page exatos manualmente em R base (postos + enumeracao recursiva) e a transformada com `lm`; sem pacotes externos.
+- `scripts/validate_reference_with_r.py` estendeu as metricas esperadas.
+- `tests/python/test_cometquant_analysis.py` cobriu os novos blocos, direcao por assayType, empates, blocos incompletos, arranjos excessivos, R² parcial e transformacao nos limites 0/100.
+
+### Interface, i18n e exportacao
+
+- Duas novas secoes de resultados (`nonParametric`, `transformed`) e tabela de dispersao (media/DP/CV/n) com aviso de heterogeneidade.
+- Chaves PT/EN para os novos rotulos, direcoes, motivos estruturados e legendas de enquadramento ("robustez, nao segunda tentativa de significancia").
+- `js/export.js` ganhou `buildNonParametricCsv`, `buildTransformedAnalysisCsv`, secao no relatorio HTML e os dois CSVs no ZIP.
+
+### Verificacao e versionamento
+
+- `npm run check`, 77 testes JavaScript, 25 testes Python, 92 metricas v2 + 28 v1 validadas com R e 38 cenarios E2E (19 Chromium + 19 WebKit) passaram.
+- Cache do shell incrementado para `cometquant-shell-v12` (service worker + diagnostico) e versao publica `2.1.0`.
 
 Pendencias operacionais que continuam validas em paralelo:
 
@@ -431,9 +481,9 @@ Pendencias operacionais que continuam validas em paralelo:
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- A continuidade atual inclui schema 5, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco, contrato cientifico v2 e exportacoes detalhadas.
+- A continuidade atual inclui schema 5, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
-- A aplicacao esta na versao `2.0.0` e o shell offline usa `cometquant-shell-v11`.
+- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v12`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

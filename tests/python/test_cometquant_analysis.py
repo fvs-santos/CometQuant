@@ -359,13 +359,107 @@ class BlockAnalysisV2Tests(unittest.TestCase):
             "ciHigh",
             "p",
             "r2",
+            "r2Partial",
         ):
             self.assert_close(trend[field], self.expected["doseTrend"][field])
         self.assertEqual(trend["DF"], self.expected["doseTrend"]["DF"])
+        self.assertEqual(trend["trendKind"], "linear")
         self.assertEqual(
             [item["concentration"] for item in trend["treatmentDoses"]],
             [0.0, 1.0, 5.0, 10.0],
         )
+
+    def test_non_parametric_matches_independent_exact_oracle(self):
+        result = self.result["nonParametric"]
+        self.assertTrue(result["performed"])
+        self.assertEqual(result["population"], "primary_complete_blocks")
+        friedman = result["friedman"]
+        self.assertTrue(friedman["performed"])
+        self.assertEqual(friedman["treatmentIndices"], [0, 2, 3, 4])
+        self.assert_close(friedman["statistic"], self.expected["nonParametric"]["friedman"]["statistic"])
+        self.assertEqual(friedman["df"], self.expected["nonParametric"]["friedman"]["df"])
+        self.assert_close(friedman["pExact"], self.expected["nonParametric"]["friedman"]["pExact"])
+        self.assertEqual(
+            friedman["exactArrangements"],
+            self.expected["nonParametric"]["friedman"]["exactArrangements"],
+        )
+        page = result["pageTrend"]
+        self.assertTrue(page["performed"])
+        self.assertEqual(page["direction"], "increasing")
+        self.assertEqual(page["directionSource"], "assay_type")
+        self.assert_close(page["statistic"], self.expected["nonParametric"]["pageTrend"]["statistic"])
+        self.assert_close(page["pExact"], self.expected["nonParametric"]["pageTrend"]["pExact"])
+        self.assert_close(
+            page["pExactOpposite"], self.expected["nonParametric"]["pageTrend"]["pExactOpposite"]
+        )
+
+    def test_page_direction_derives_from_assay_type(self):
+        antigenotoxic = reference_v2_experiment()
+        antigenotoxic["studyDesign"]["assayType"] = "antigenotoxicity"
+        result = engine.analyze_experiment(antigenotoxic)
+        page = result["nonParametric"]["pageTrend"]
+        self.assertEqual(page["direction"], "decreasing")
+        self.assertEqual(page["directionSource"], "assay_type")
+
+    def test_transformed_analysis_matches_independent_arcsine_sqrt_oracle(self):
+        result = self.result["transformedAnalysis"]
+        self.assertTrue(result["performed"])
+        self.assertEqual(result["scale"], "arcsin_sqrt")
+        expected = self.expected["transformedAnalysis"]
+        self.assert_anova_matches(result["blockAnova"], expected["blockAnova"])
+        for actual, exp in zip(
+            result["primaryComparisons"]["comparisons"], expected["primaryComparisons"]
+        ):
+            self.assertEqual(actual["treatmentIndex"], exp["treatmentIndex"])
+            for field in ("difference", "standardError", "t", "pRaw", "pAdjusted"):
+                self.assert_close(actual[field], exp[field])
+        for field in ("slope", "standardError", "t", "p", "r2Partial"):
+            self.assert_close(result["doseTrend"][field], expected["doseTrend"][field])
+
+    def test_descriptive_exposes_dispersion_and_heterogeneity_flag(self):
+        descriptive = self.result["descriptive"]
+        self.assertTrue(descriptive["performed"])
+        expected = self.expected["descriptive"]
+        for actual, exp in zip(descriptive["treatments"], expected["treatments"]):
+            self.assertEqual(actual["treatmentIndex"], exp["treatmentIndex"])
+            self.assert_close(actual["mean"], exp["mean"])
+            self.assert_close(actual["standardDeviation"], exp["standardDeviation"])
+            self.assert_close(actual["coefficientOfVariation"], exp["coefficientOfVariation"])
+        flag = descriptive["heterogeneityFlag"]
+        self.assertTrue(flag["performed"])
+        self.assertEqual(flag["flagged"], expected["heterogeneityFlag"]["flagged"])
+        self.assert_close(flag["maximumStandardDeviation"], expected["heterogeneityFlag"]["maximumStandardDeviation"])
+        self.assert_close(flag["minimumStandardDeviation"], expected["heterogeneityFlag"]["minimumStandardDeviation"])
+        self.assert_close(flag["ratio"], expected["heterogeneityFlag"]["ratio"])
+
+    def test_non_parametric_requires_at_least_three_treatments(self):
+        experiment = reference_v2_experiment()
+        experiment["studyDesign"]["primaryTreatmentIndices"] = [2]
+        for replicate in experiment["replicates"]:
+            replicate["gels"] = [
+                gel for gel in replicate["gels"] if gel["treatmentIndex"] not in (3, 4)
+            ]
+            replicate["assignments"] = [
+                item for item in replicate["assignments"] if item["treatmentIndex"] not in (3, 4)
+            ]
+        result = engine.analyze_experiment(experiment)
+        non_parametric = result["nonParametric"]
+        self.assertFalse(non_parametric["performed"])
+        self.assertEqual(non_parametric["reason"]["code"], "insufficient_treatments")
+
+    def test_non_parametric_fails_structured_on_missing_reference(self):
+        experiment = reference_v2_experiment()
+        for replicate in experiment["replicates"]:
+            for gel in replicate["gels"]:
+                if gel["treatmentIndex"] == 0:
+                    gel["completion"] = "incomplete"
+        result = engine.analyze_experiment(experiment)
+        non_parametric = result["nonParametric"]
+        self.assertFalse(non_parametric["performed"])
+        self.assertEqual(non_parametric["reason"]["code"], "no_complete_primary_blocks")
+        transformed = result["transformedAnalysis"]
+        self.assertFalse(transformed["performed"])
+        self.assertEqual(transformed["reason"]["code"], "no_complete_primary_blocks")
 
     def test_contract_is_strict_v2_json_without_retired_analyses(self):
         serialized = engine.run_all_analyses(json.dumps(self.experiment), "en")
@@ -382,12 +476,15 @@ class BlockAnalysisV2Tests(unittest.TestCase):
                 "primaryComparisons",
                 "controlResponse",
                 "doseTrend",
+                "nonParametric",
+                "transformedAnalysis",
                 "charts",
             },
         )
         self.assertEqual(parsed["analysisSchemaVersion"], 2)
         self.assertFalse({"shapiro", "tukey", "pearson", "regression"} & set(parsed))
         self.assertEqual(set(parsed["charts"]), {"scores", "differences", "classes"})
+        self.assertEqual(set(parsed["nonParametric"]), {"performed", "population", "friedman", "pageTrend"})
         for chart in parsed["charts"].values():
             self.assertTrue(chart.startswith("iVBORw0KGgo"))
 
