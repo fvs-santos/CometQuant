@@ -66,29 +66,17 @@ def _correlation_power(correlation, observation_count, alpha=0.05):
 
 def calculate_scores(experiment):
     """Average technical slides within each biological replicate."""
-    nucleoids = float(experiment["nucleoidsPerGel"])
-    if not np.isfinite(nucleoids) or nucleoids <= 0:
-        raise ValueError("nucleoidsPerGel must be a positive finite number")
-
     treatments = experiment["treatments"]
     scores_by_treatment = {treatment: [] for treatment in treatments}
 
     for replicate in experiment["replicates"]:
         replicate_scores = {treatment: [] for treatment in treatments}
         for gel in replicate["gels"]:
-            if (
-                gel.get("status", "counted") != "counted"
-                or gel.get("completion", "complete") != "complete"
-            ):
+            if gel.get("status", "counted") != "counted":
                 continue
-            score = (
-                0.25 * float(gel["class1"])
-                + 0.50 * float(gel["class2"])
-                + 0.75 * float(gel["class3"])
-                + float(gel["class4"])
-            ) / nucleoids * 100
+            score = _valid_slide_score(gel)
             treatment = gel["treatment"]
-            if treatment in replicate_scores and np.isfinite(score):
+            if treatment in replicate_scores and score is not None:
                 replicate_scores[treatment].append(score)
 
         for treatment, slide_scores in replicate_scores.items():
@@ -398,14 +386,7 @@ def calculate_class_summary(experiment):
             for treatment in treatments
         }
         for gel in replicate["gels"]:
-            if (
-                gel.get("status", "counted") != "counted"
-                or gel.get("completion", "complete") != "complete"
-            ):
-                continue
-            if "nucleoidsPerGel" in experiment and _valid_slide_score(
-                gel, float(experiment["nucleoidsPerGel"])
-            ) is None:
+            if _valid_slide_score(gel) is None:
                 continue
             treatment = gel["treatment"]
             if treatment in replicate_counts:
@@ -639,6 +620,8 @@ def _parse_protocol(experiment):
         "multiplicityAdjustment": "holm",
         "confidenceLevel": 0.95,
         "includePrimaryReferenceAsZero": True,
+        "visualScoreDenominator": "effective_counted_nucleoids",
+        "offTargetSlidesIncluded": True,
     }, metadata_by_index
 
 
@@ -653,8 +636,8 @@ def _gel_treatment_index(gel, treatments):
         return None
 
 
-def _valid_slide_score(gel, target):
-    if gel.get("status") != "counted" or gel.get("completion") != "complete":
+def _valid_slide_score(gel, target=None):
+    if gel.get("status", "counted") != "counted":
         return None
     try:
         classes = [float(gel[f"class{index}"]) for index in range(5)]
@@ -667,14 +650,15 @@ def _valid_slide_score(gel, target):
         reported_total = float(reported_total)
     except (TypeError, ValueError):
         return None
-    tolerance = np.finfo(float).eps * max(1.0, target) * 16
+    actual_total = sum(classes)
+    tolerance = np.finfo(float).eps * max(1.0, actual_total) * 16
     if (
         not np.isfinite(reported_total)
-        or abs(reported_total - target) > tolerance
-        or abs(sum(classes) - target) > tolerance
+        or actual_total <= 0
+        or abs(reported_total - actual_total) > tolerance
     ):
         return None
-    score = (0.25 * classes[1] + 0.50 * classes[2] + 0.75 * classes[3] + classes[4]) / target * 100
+    score = (0.25 * classes[1] + 0.50 * classes[2] + 0.75 * classes[3] + classes[4]) / actual_total * 100
     return _finite(score)
 
 
@@ -724,7 +708,7 @@ def build_block_matrix(experiment, protocol):
             ]
             valid_scores = []
             for gel in treatment_gels:
-                score = _valid_slide_score(gel, target)
+                score = _valid_slide_score(gel)
                 if score is not None:
                     valid_scores.append(score)
             absent_slides = sum(item.get("status") == "absent" for item in treatment_assignments)
@@ -743,6 +727,10 @@ def build_block_matrix(experiment, protocol):
                 )
             expected_slides = int(expected_slides)
             invalid_slides = len(treatment_gels) - len(valid_scores)
+            on_target_slides = sum(
+                gel.get("total") == target for gel in treatment_gels
+            )
+            off_target_slides = len(valid_scores) - on_target_slides
             cell = {
                 "replicateNumber": replicate_number,
                 "treatmentIndex": treatment_index,
@@ -751,9 +739,11 @@ def build_block_matrix(experiment, protocol):
                 "recordedSlides": len(treatment_gels),
                 "countedSlides": len(treatment_gels),
                 "validSlides": len(valid_scores),
-                "completeSlides": len(valid_scores),
+                "analyzedSlides": len(valid_scores),
+                "completeSlides": on_target_slides,
                 "invalidSlides": invalid_slides,
-                "incompleteSlides": invalid_slides,
+                "incompleteSlides": off_target_slides,
+                "offTargetSlides": off_target_slides,
                 "absentSlides": absent_slides,
                 "score": _finite(np.mean(valid_scores)) if valid_scores else None,
                 "technicalReplicationComplete": bool(

@@ -52,11 +52,17 @@ describe('visual score', () => {
   ])('scores pure %s as %s', (key, expected) => {
     const gel = { class0: 0, class1: 0, class2: 0, class3: 0, class4: 0 }
     gel[key] = 100
-    expect(core.calculateVisualScore(gel, 100)).toBe(expected)
+    expect(core.calculateVisualScore(gel)).toBe(expected)
   })
 
   it('rejects invalid counts', () => {
-    expect(core.calculateVisualScore({ class0: -1, class1: 0, class2: 0, class3: 0, class4: 0 }, 100)).toBeNull()
+    expect(core.calculateVisualScore({ class0: -1, class1: 0, class2: 0, class3: 0, class4: 0 })).toBeNull()
+    expect(core.calculateVisualScore({ class0: 0, class1: 0, class2: 0, class3: 0, class4: 0 })).toBeNull()
+  })
+
+  it('uses the effective count as the denominator', () => {
+    const gel = { class0: 49, class1: 0, class2: 50, class3: 0, class4: 0, total: 99 }
+    expect(core.calculateVisualScore(gel)).toBeCloseTo(25.252525)
   })
 })
 
@@ -364,7 +370,7 @@ describe('blind code allocation', () => {
 })
 
 describe('aggregation and consolidation', () => {
-  it('averages complete technical slides and excludes incomplete slides', () => {
+  it('averages all analyzable technical slides while reporting target adherence', () => {
     const data = experiment({ slidesPerTreatment: 3 })
     const rep = data.replicates[0]
     rep.assignments = [
@@ -374,7 +380,8 @@ describe('aggregation and consolidation', () => {
     ]
     rep.gels = [completeGel(), completeGel({ blindCode: 'ABCD-02', gelNumber: 2, class2: 0, class4: 100 }), completeGel({ blindCode: 'ABCD-03', gelNumber: 3, total: 50, class2: 50, completion: 'incomplete', incompleteReason: { code: 'poor-quality', detail: '' } })]
     const row = core.aggregateReplicateScores(data)[0]
-    expect(row.score).toBe(75)
+    expect(row.score).toBeCloseTo(2 * 100 / 3)
+    expect(row.analyzedSlides).toBe(3)
     expect(row.completeSlides).toBe(2)
     expect(row.incompleteSlides).toBe(1)
   })

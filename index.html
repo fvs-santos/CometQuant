@@ -64,6 +64,10 @@
            accept=".json"
            multiple
            style="display: none">
+    <input type="file"
+           id="input-legacy-xlsx"
+           accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+           style="display: none">
 
     <div class="app-version">
       <p data-i18n="app.version">CometQuant Lab v2.0.0</p>
@@ -266,6 +270,8 @@
     <div id="experiments-list" class="experiments-list"></div>
     <button class="btn-secondary mt-md" id="btn-import-experiment"
             data-i18n="experiments.import">Import JSON</button>
+    <button class="btn-secondary mt-md" id="btn-import-legacy-xlsx"
+            data-i18n="legacyXlsx.open">Import legacy XLSX</button>
     <button class="btn-secondary mt-md" id="btn-export-recovery" hidden
             data-i18n="storage.exportRecovery">Export Storage Recovery</button>
   </div>
@@ -574,6 +580,25 @@
   </div>
 </dialog>
 
+<dialog id="legacy-xlsx-dialog" aria-labelledby="legacy-xlsx-title">
+  <div class="legacy-xlsx-content">
+    <h2 id="legacy-xlsx-title" data-i18n="legacyXlsx.title">Review legacy spreadsheet</h2>
+    <p class="muted-text" data-i18n="legacyXlsx.description">Confirm treatment roles before importing the raw counts.</p>
+    <dl id="legacy-xlsx-metadata" class="legacy-xlsx-metadata"></dl>
+    <div id="legacy-xlsx-warnings" class="notice-card" hidden></div>
+    <div class="form-group">
+      <label for="legacy-xlsx-unit" data-i18n="legacyXlsx.unit">Concentration unit</label>
+      <input id="legacy-xlsx-unit" type="text" maxlength="20">
+    </div>
+    <div id="legacy-xlsx-treatments" class="legacy-xlsx-treatments"></div>
+    <p id="legacy-xlsx-error" class="warning-text" role="alert"></p>
+    <div class="backup-dialog-actions">
+      <button type="button" class="btn-secondary" id="legacy-xlsx-cancel" data-i18n="backup.cancel">Cancel</button>
+      <button type="button" class="btn-primary" id="legacy-xlsx-submit" data-i18n="legacyXlsx.import">Import counts</button>
+    </div>
+  </div>
+</dialog>
+
 
   <!-- ============================================
     SCRIPTS — ordem importa
@@ -588,6 +613,7 @@
   </script>
 
   <script src="./vendor/jszip.min.js"></script>
+  <script src="./js/legacy-xlsx.js"></script>
   <script src="./js/backup.js"></script>
   <script src="./js/core.js"></script>
   <script src="./js/repository.js"></script>

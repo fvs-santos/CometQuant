@@ -49,8 +49,8 @@
 
   function rawRow(experiment, replicate, assignment, gel) {
     const treatmentIndex = assignment?.treatmentIndex ?? gel?.treatmentIndex ?? experiment.treatments.indexOf(gel?.treatment)
-    const included = core.isIncludedGel(gel, experiment.nucleoidsPerGel)
-    const score = gel ? core.calculateVisualScore(gel, experiment.nucleoidsPerGel) : null
+    const included = core.isIncludedGel(gel)
+    const score = gel ? core.calculateVisualScore(gel) : null
     return {
       schema_version: experiment.schemaVersion,
       experiment_id: experiment.id,
@@ -84,7 +84,7 @@
   }
 
   const RAW_COLUMNS = ['schema_version', 'experiment_id', 'created_at', 'updated_at', 'researcher', 'agent', 'cells', 'negative_control', 'positive_control', 'solvent_control', 'concentration_unit', 'target_nucleoids', 'slides_per_treatment', 'replicate_number', 'replicate_date', 'blind_code', 'treatment_index', 'treatment', 'gel_number', 'status', 'absence_reason', 'incomplete_reason', 'recorded_at', 'class0', 'class1', 'class2', 'class3', 'class4', 'total_counted', 'completion', 'included_in_analysis', 'visual_score'].map(key => ({ key }))
-  const AGGREGATE_COLUMNS = ['treatment_index', 'treatment', 'replicate_number', 'expected_slides', 'counted_slides', 'complete_slides', 'incomplete_slides', 'absent_slides', 'replicate_score_mean'].map(key => ({ key }))
+  const AGGREGATE_COLUMNS = ['treatment_index', 'treatment', 'replicate_number', 'expected_slides', 'counted_slides', 'analyzed_slides', 'complete_slides', 'incomplete_slides', 'absent_slides', 'replicate_score_mean'].map(key => ({ key }))
 
   function buildRawCsv(experiment) {
     return serializeCsv(RAW_COLUMNS, buildRawRows(experiment))
@@ -93,7 +93,7 @@
   function buildAggregateCsv(experiment) {
     const rows = core.aggregateReplicateScores(experiment).map(row => ({
       treatment_index: row.treatmentIndex, treatment: row.treatment, replicate_number: row.replicateNumber,
-      expected_slides: row.expectedSlides, counted_slides: row.countedSlides, complete_slides: row.completeSlides,
+      expected_slides: row.expectedSlides, counted_slides: row.countedSlides, analyzed_slides: row.analyzedSlides, complete_slides: row.completeSlides,
       incomplete_slides: row.incompleteSlides, absent_slides: row.absentSlides,
       replicate_score_mean: row.score === null ? '' : row.score.toFixed(4)
     }))
@@ -318,9 +318,9 @@
     const pt = lang === 'pt'
     const labels = pt ? {
       researcher: 'Pesquisador', agent: 'Agente', cells: 'Tipo celular', target: 'Meta de nucleoides', slides: 'Laminas por tratamento',
-      exclusion: 'Laminas ausentes e incompletas nao participam da analise inferencial.', raw: 'Dados brutos', scores: 'Scores por repeticao',
-      replicate: 'Repeticao', treatment: 'Tratamento', slide: 'Lamina', completion: 'Completude', reason: 'Motivo', complete: 'Completas',
-      incomplete: 'Incompletas', absent: 'Ausentes', protocol: 'Protocolo cientifico', population: 'Populacao de analise', item: 'Item', value: 'Valor',
+      exclusion: 'Laminas contadas fora da meta usam o total efetivo e permanecem na analise; apenas ausentes ou sem contagem valida sao excluidas.', raw: 'Dados brutos', scores: 'Scores por repeticao',
+      replicate: 'Repeticao', treatment: 'Tratamento', slide: 'Lamina', completion: 'Completude', reason: 'Motivo', analyzed: 'Analisadas', complete: 'Na meta',
+      incomplete: 'Fora da meta', absent: 'Ausentes', protocol: 'Protocolo cientifico', population: 'Populacao de analise', item: 'Item', value: 'Valor',
       primaryIncluded: 'Blocos primarios incluidos', primaryExcluded: 'Blocos primarios excluidos', validationIncluded: 'Blocos de validacao incluidos',
       rcbd: 'ANOVA em blocos casualizados', term: 'Termo', comparisons: 'Comparacoes primarias planejadas', reference: 'Referencia', difference: 'Diferenca',
       ci: 'IC 95% nominal', rawP: 'p bruto', holmP: 'p Holm', decision: 'Resultado estatistico', direction: 'Direcao', significant: 'Diferenca detectada', notSignificant: 'Diferenca nao detectada',
@@ -331,9 +331,9 @@
       r2partial: 'R2 parcial', dispersion: 'Dispersao por tratamento', mean: 'Media', sd: 'DP', cv: 'CV (%)'
     } : {
       researcher: 'Researcher', agent: 'Agent', cells: 'Cell type', target: 'Nucleoid target', slides: 'Slides per treatment',
-      exclusion: 'Absent and incomplete slides are excluded from inferential analysis.', raw: 'Raw data', scores: 'Scores by replicate',
-      replicate: 'Replicate', treatment: 'Treatment', slide: 'Slide', completion: 'Completion', reason: 'Reason', complete: 'Complete',
-      incomplete: 'Incomplete', absent: 'Absent', protocol: 'Scientific protocol', population: 'Analysis population', item: 'Item', value: 'Value',
+      exclusion: 'Counted slides outside the target use their effective total and remain in analysis; only absent slides or slides without a valid count are excluded.', raw: 'Raw data', scores: 'Scores by replicate',
+      replicate: 'Replicate', treatment: 'Treatment', slide: 'Slide', completion: 'Completion', reason: 'Reason', analyzed: 'Analyzed', complete: 'On target',
+      incomplete: 'Off target', absent: 'Absent', protocol: 'Scientific protocol', population: 'Analysis population', item: 'Item', value: 'Value',
       primaryIncluded: 'Included primary blocks', primaryExcluded: 'Excluded primary blocks', validationIncluded: 'Included validation blocks',
       rcbd: 'Randomized complete block ANOVA', term: 'Term', comparisons: 'Planned primary comparisons', reference: 'Reference', difference: 'Difference',
       ci: 'Nominal 95% CI', rawP: 'Raw p', holmP: 'Holm p', decision: 'Statistical result', direction: 'Direction', significant: 'Difference detected', notSignificant: 'Difference not detected',
@@ -354,7 +354,8 @@
       ['primaryTreatmentIndices', (protocol.primaryTreatmentIndices || []).join(', ')],
       ['validationComparison', protocol.validationComparison ? `${protocol.validationComparison.referenceTreatmentIndex} / ${protocol.validationComparison.treatmentIndex}` : '-'],
       ['alpha', protocol.alpha], ['alternative', protocol.alternative], ['multiplicityAdjustment', protocol.multiplicityAdjustment],
-      ['confidenceLevel', protocol.confidenceLevel], ['includePrimaryReferenceAsZero', protocol.includePrimaryReferenceAsZero]
+      ['confidenceLevel', protocol.confidenceLevel], ['includePrimaryReferenceAsZero', protocol.includePrimaryReferenceAsZero],
+      ['visualScoreDenominator', protocol.visualScoreDenominator], ['offTargetSlidesIncluded', protocol.offTargetSlidesIncluded]
     ] : [[labels.notPerformed, reasonText(analysis?.protocol?.reason)]]
     const populationRows = population ? [
       [labels.primaryIncluded, (population.primary?.includedBlockNumbers || []).join(', ') || '-'],

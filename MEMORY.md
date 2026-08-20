@@ -11,7 +11,7 @@ O CometQuant Lab e uma aplicacao movel/PWA para apoiar a avaliacao visual de ens
 - contagem de nucleoides nas classes visuais 0 a 4;
 - persistencia local e retomada da contagem;
 - registro de laminas ausentes ou incompletas com justificativa;
-- consolidacao, importacao e exportacao de experimentos;
+- consolidacao, importacao JSON, importacao de planilhas XLSX legadas e exportacao de experimentos;
 - calculo do score visual;
 - analises estatisticas no navegador;
 - geracao de CSV, JSON, relatorio HTML, graficos PNG e pacote ZIP.
@@ -26,6 +26,7 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 
 - `js/core.js`: regras de dominio, schema, migracao, validacao, score, agregacao de laminas tecnicas e consolidacao de experimentos. Tambem oferece compatibilidade CommonJS para os testes em Node.
 - `js/app.js`: navegacao, estado da interface, setup, geracao dos codigos cegos, contagem, undo, autosave, resumo, importacao e exportacao JSON.
+- `js/legacy-xlsx.js`: leitor OOXML restrito ao formato legado Comet VisualScore, conversao das contagens brutas para o schema atual e suporte offline usando o JSZip ja vendorizado.
 - `js/repository.js`: IndexedDB autoritativo, migracao do `localStorage`, quarentena, revisoes, tombstones, mirror de transicao e notificacao entre abas.
 - `js/export.js`: serializacao canonica de CSV e relatorio, escape HTML, neutralizacao de formulas de planilha, validacao de PNG e nomes de arquivo seguros.
 - `js/analysis.js`: estados da interface cientifica, comunicacao com o worker, apresentacao dos resultados, graficos e exportacao do pacote final.
@@ -62,13 +63,13 @@ Um experimento contem, em linhas gerais:
 - progresso parcial da contagem, quando houver;
 - repeticoes com assignments cegas e laminas contabilizadas.
 
-Cada assignment associa um `blindCode` a um tratamento e numero de lamina. Seus estados possiveis sao `pending`, `counting`, `counted` e `absent`. Laminas contabilizadas armazenam `class0` a `class4`, total, estado e indicacao de contagem completa ou incompleta.
+Cada assignment associa um `blindCode` a um tratamento e numero de lamina. Seus estados possiveis sao `pending`, `counting`, `counted` e `absent`. Laminas contabilizadas armazenam `class0` a `class4`, total, estado e indicacao de aderencia a meta (`complete` quando exata; `incomplete` quando abaixo ou acima). A elegibilidade analitica e separada dessa aderencia: uma contagem positiva e internamente consistente continua analisavel fora da meta.
 
 Dados antigos sao migrados antes do uso:
 
 - objetos sem versao sao tratados como schema 1;
 - versoes futuras sao recusadas;
-- laminas legadas abaixo da meta sao marcadas como incompletas com motivo `legacy-unjustified`;
+- laminas legadas fora da meta sao marcadas como incompletas com motivo `legacy-unjustified`, mas permanecem analisaveis se o total efetivamente contado for positivo e consistente;
 - schemas 1 a 4 recebem metadados conservadores e um plano analitico `unconfigured`, sem inferencia silenciosa do tipo de ensaio ou referencia;
 - o status do experimento e recalculado a partir das assignments pendentes.
 
@@ -92,7 +93,7 @@ Ao finalizar uma lamina:
 - total menor que a meta exige justificativa e resulta em `incomplete`;
 - uma lamina ausente tambem exige justificativa.
 
-Laminas incompletas e ausentes sao preservadas para rastreabilidade, mas excluidas das analises.
+Laminas ausentes sao preservadas e excluidas das analises. Laminas contadas abaixo ou acima da meta sao preservadas, sinalizadas e incluidas usando o total efetivo como denominador; somente uma contagem sem total positivo ou internamente inconsistente nao produz score.
 
 ### Regra de blinding
 
@@ -111,15 +112,21 @@ A importacao aceita um ou varios JSONs, com limite de 5 MB por arquivo. Um arqui
 
 Experimentos consolidados precisam ter metadados e tratamentos compativeis. Conflitos detectados na mesma lamina/codigo interrompem o merge. Um experimento importado com ID ja existente substitui a copia local.
 
+Existe tambem um fluxo separado **Importar XLSX legado**. Ele aceita uma planilha por vez, localiza a aba `Comet Assay`, le apenas as linhas `Gel N` dos cinco blocos de classes e ignora medias/desvios exportados. Os nomes das colunas sao tratados como rotulos opacos: o usuario classifica cada tratamento na previa como controle positivo, negativo, de solvente, concentracao ou outro. O controle de solvente e opcional.
+
+Para cada combinacao lamina x tratamento, cinco numeros inteiros nao negativos formam uma contagem; cinco celulas vazias formam uma assignment `absent` sem gel; preenchimento parcial e recusado por ser ambiguo e nunca e convertido silenciosamente em zero. A numeracao global de geis e dividida por `Gels/Experiment` para reconstruir repeticoes biologicas e laminas tecnicas. Datas ausentes permanecem `null` e sao exibidas como nao informadas. A origem, data de importacao e nome do arquivo ficam em `provenance`.
+
 ### Analise cientifica
 
-A regra central e tratar a repeticao como unidade experimental. Laminas tecnicas completas sao primeiro promediadas dentro de cada repeticao, evitando que sejam usadas como replicas independentes na inferencia.
+A regra central e tratar a repeticao como unidade experimental. Laminas tecnicas com contagem valida sao primeiro promediadas dentro de cada repeticao, evitando que sejam usadas como replicas independentes na inferencia.
 
 O score visual e calculado por:
 
 ```text
-(0.25*C1 + 0.50*C2 + 0.75*C3 + 1.00*C4) / alvo * 100
+(0.25*C1 + 0.50*C2 + 0.75*C3 + 1.00*C4) / (C0+C1+C2+C3+C4) * 100
 ```
+
+A meta `nucleoidsPerGel` continua limitando a coleta interativa e serve para relatar aderencia, mas nao e mais o denominador cientifico. O contrato v2 registra `visualScoreDenominator: effective_counted_nucleoids` e `offTargetSlidesIncluded: true`.
 
 Analises atualmente implementadas no contrato `analysisSchemaVersion: 2`:
 
@@ -200,7 +207,7 @@ npm run vendor
 
 Nao existe script de build, start ou dev. O Playwright inicia `http-server` na porta 4173. Em uma instalacao nova, pode ser necessario instalar o navegador do Playwright separadamente.
 
-A cobertura atual inclui regras centrais, exportacao, protecoes basicas, autosave e um fluxo mobile de criacao/contagem/restauracao. A cobertura esta configurada apenas para `js/core.js` e `js/export.js`; o codigo Python embutido em `js/analysis.js` nao e exercitado automaticamente.
+A cobertura atual inclui regras centrais, importacao XLSX real, exportacao, protecoes basicas, autosave e fluxos mobile de criacao/contagem/restauracao. O motor Python extraido e exercitado por unittest e no Pyodide real pelos testes E2E.
 
 Existe um resultado local do Playwright indicando uma execucao sem falhas, mas ele nao possui timestamp suficiente para garantir correspondencia com o `HEAD`. Ao retomar o desenvolvimento, execute novamente pelo menos `npm run check`, `npm test` e `npm run test:e2e`.
 
@@ -208,7 +215,7 @@ Existe um resultado local do Playwright indicando uma execucao sem falhas, mas e
 
 - A aplicacao e local-first e deve continuar utilizavel como hospedagem estatica, salvo decisao explicita de arquitetura.
 - A repeticao, nao a lamina tecnica, e a unidade experimental da inferencia.
-- Laminas ausentes ou incompletas exigem justificativa, permanecem auditaveis e nao entram na inferencia.
+- Laminas ausentes permanecem auditaveis e nao entram na inferencia. Laminas contadas fora da meta permanecem auditaveis e entram com denominador efetivo; celulas parcialmente preenchidas nunca devem ser interpretadas como zero.
 - O resumo e as exportacoes reveladoras permanecem bloqueados enquanto o experimento nao estiver integralmente contado ou justificado.
 - Importacoes passam por migracao e validacao antes de substituir dados locais.
 - Conflitos de consolidacao nao devem ser resolvidos silenciosamente.
@@ -314,7 +321,7 @@ Plano estatistico implementado na continuidade de 18/08/2026:
 - O uso esperado e de tres experimentos independentes, normalmente executados em dias, placas e culturas preparadas independentemente. Cada experimento independente contem todos os tratamentos e funciona como um bloco.
 - Em cada bloco existe uma unidade tratada para cada controle ou concentracao. As duas laminas usuais sao replicas tecnicas dessa unidade, e os cometas contados sao subamostras de mensuracao.
 - A unidade experimental da inferencia continua sendo o experimento independente. Laminas e cometas nao aumentam o `n` biologico.
-- As laminas tecnicas completas sao promediadas dentro de `experimento x tratamento`. Se apenas uma das laminas previstas estiver completa, a celula continua na analise com aviso e contagem explicita das laminas utilizadas.
+- As laminas tecnicas com total positivo e consistente sao promediadas dentro de `experimento x tratamento`, mesmo fora da meta nominal. Se apenas uma das laminas previstas for analisavel, a celula continua na analise com aviso e contagem explicita das laminas utilizadas.
 - Se nenhuma lamina valida existir para a referencia ou para uma das concentracoes principais, o bloco inteiro e excluido da analise principal e a exclusao deve ser mostrada ao usuario.
 - As comparacoes entre tratamentos sao pareadas pelo experimento, mas o termo mais preciso para o conjunto com varios tratamentos e delineamento em blocos completos.
 
@@ -431,7 +438,35 @@ Concluido na continuidade de robustez estatistica (versao 2.1.0):
 ### Verificacao e versionamento
 
 - `npm run check`, 77 testes JavaScript, 25 testes Python, 92 metricas v2 + 28 v1 validadas com R e 38 cenarios E2E (19 Chromium + 19 WebKit) passaram.
-- Cache do shell incrementado para `cometquant-shell-v12` (service worker + diagnostico) e versao publica `2.1.0`.
+- Cache do shell era `cometquant-shell-v12` na versao publica `2.1.0`; a importacao XLSX posterior incrementou-o para `v13`.
+
+Concluido na continuidade de 20/08/2026 (importacao XLSX legada e denominador efetivo):
+
+### Importador legado
+
+- `js/legacy-xlsx.js` implementa um leitor OOXML deliberadamente restrito ao formato produzido pelo antigo Comet VisualScore. Ele usa JSZip e DOMParser, suporta strings inline/compartilhadas, limita arquivo, entradas, XML, linhas e colunas e nao adiciona dependencia de planilha generica.
+- A aba esperada e `Comet Assay`; os blocos das classes 0 a 4, cabecalhos e linhas de geis precisam ser consistentes. `Mean` e `SD` sao ignorados.
+- Rotulos de tratamento nao definem papeis. A previa exige classificacao explicita e aceita ausencia de controle de solvente; padroes numericos de concentracao sao apenas sugestoes editaveis.
+- Cinco classes vazias representam lamina ausente com motivo legado nao informado. Qualquer mistura entre celulas vazias e preenchidas bloqueia a importacao.
+- `Gels/Experiment` define as replicas tecnicas por repeticao biologica. O exemplo `Comet_VKM35_V79.xlsx` gera tres repeticoes, duas laminas por tratamento, sete tratamentos e 42 combinacoes.
+- O simbolo de unidade corrompido `�` e normalizado para `µ`. Datas experimentais nao presentes nao sao inventadas.
+- A interface, traducoes PT/EN, fallback FileReader para WebKit e cache offline `cometquant-shell-v13` foram atualizados.
+
+### Score e populacao de analise
+
+- `calculateVisualScore` e `_valid_slide_score` usam a soma efetiva das cinco classes como denominador. O total registrado deve coincidir com a soma e ser positivo.
+- A validacao aceita totais acima da meta em dados importados. A interface normal continua impedindo incrementos acima da meta.
+- `completion` continua informando aderencia exata a meta, enquanto `isIncludedGel` informa elegibilidade analitica. Totais abaixo ou acima sao analisados e reportados como fora da meta.
+- O motor Python, agregacao JavaScript, resumo, CSV, relatorio HTML, graficos de classes e contrato de protocolo foram alinhados com a mesma regra.
+- As referencias cientificas que precisavam representar perda tecnica passaram a usar contagem zero, mantendo os oraculos estatisticos independentes sem confundir contagem fora da meta com ausencia de dados.
+
+### Validacao desta continuidade
+
+- `npm run check` passou.
+- `npm test` passou com 83 testes JavaScript.
+- `npm run test:analysis` passou com 26 testes Python.
+- O E2E dedicado de importacao passou em Chromium/Pixel 7 e WebKit/iPhone, incluindo classificacao sem controle de solvente, persistencia das 42 contagens, datas desconhecidas e total 103 preservado.
+- A execucao E2E completa passou em 38 de 40 cenarios na primeira rodada paralela; os dois cenarios preexistentes afetados por encerramento/timeout do navegador passaram quando repetidos isoladamente. O importador e o E2E cientifico passaram nos dois motores.
 
 Pendencias operacionais que continuam validas em paralelo:
 
@@ -451,6 +486,7 @@ Pendencias operacionais que continuam validas em paralelo:
 - `js/analysis.js`
 - `js/analysis-worker.js`
 - `js/science-package.js`
+- `js/legacy-xlsx.js`
 - `science-assets.json`
 - `python/cometquant_analysis.py`
 - `js/export.js`
@@ -466,12 +502,14 @@ Pendencias operacionais que continuam validas em paralelo:
 - `tests/unit/export.test.js`
 - `tests/unit/repository.test.js`
 - `tests/unit/science-package.test.js`
+- `tests/unit/legacy-xlsx.test.js`
 - `tests/integration/persistence.test.js`
 - `tests/e2e/experiment-flow.spec.js`
 - `tests/e2e/analysis-flow.spec.js`
 - `tests/e2e/backup-flow.spec.js`
 - `tests/e2e/storage-concurrency.spec.js`
 - `tests/e2e/storage-diagnostics.spec.js`
+- `tests/e2e/legacy-xlsx-flow.spec.js`
 - `docs/safari-ios-storage-checklist.md`
 - `tests/python/test_cometquant_analysis.py`
 - `tests/reference/v1/`
@@ -481,9 +519,9 @@ Pendencias operacionais que continuam validas em paralelo:
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- A continuidade atual inclui schema 5, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
+- A continuidade atual inclui schema 5, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
-- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v12`.
+- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v13`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

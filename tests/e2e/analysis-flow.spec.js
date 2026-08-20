@@ -32,17 +32,17 @@ function referenceExperiment() {
     }
     replicate.assignments.push({ blindCode, treatmentIndex, gelNumber, status: 'counted', recordedAt })
     const completion = row.completion
-    const total = completion === 'complete' ? 100 : 99
+    const total = completion === 'complete' ? 100 : 0
     replicate.gels.push({
       blindCode,
       treatment: row.treatment,
       treatmentIndex,
       gelNumber,
-      class0: total - score,
+      class0: completion === 'complete' ? total - score : 0,
       class1: 0,
       class2: 0,
       class3: 0,
-      class4: score,
+      class4: completion === 'complete' ? score : 0,
       total,
       status: 'counted',
       completion,

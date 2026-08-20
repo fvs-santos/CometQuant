@@ -1,0 +1,30 @@
+const path = require('node:path')
+const { test, expect } = require('@playwright/test')
+
+test('imports legacy raw counts after explicit treatment classification', async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear())
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.locator('#input-legacy-xlsx').setInputFiles(path.resolve(__dirname, '../../Comet_VKM35_V79.xlsx'))
+
+  const dialog = page.locator('#legacy-xlsx-dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('VKM35')
+  await expect(dialog).toContainText('4 slide(s) outside the target')
+
+  await dialog.locator('.legacy-xlsx-treatment').filter({ hasText: 'MMS' }).locator('select').selectOption('positive-control')
+  await dialog.locator('.legacy-xlsx-treatment').filter({ hasText: 'DMEM/F12' }).locator('select').selectOption('negative-control')
+  await dialog.locator('.legacy-xlsx-treatment').filter({ hasText: 'DMSO' }).locator('select').selectOption('other')
+  await dialog.getByRole('button', { name: 'Import counts' }).click()
+
+  await expect(dialog).not.toBeVisible()
+  await expect(page.locator('.experiment-card h3')).toHaveText('VKM35')
+  const imported = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments'))[0])
+  expect(imported.solControl).toBe('')
+  expect(imported.replicates).toHaveLength(3)
+  expect(imported.replicates.flatMap(replicate => replicate.gels)).toHaveLength(42)
+  expect(imported.replicates[0].date).toBeNull()
+  const overTarget = imported.replicates[0].gels.find(gel => gel.treatment === '100.0 µM' && gel.gelNumber === 1)
+  expect(overTarget.total).toBe(103)
+  expect(overTarget.completion).toBe('incomplete')
+})

@@ -23,6 +23,7 @@ let legacyConfigurationPending = false
 let hapticFeedbackEnabled = false
 let storageInitialization = { status: 'checking', error: null }
 let lastStorageDiagnostics = null
+let pendingLegacyXlsx = null
 const revealedLegacyMappings = new Set()
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -479,8 +480,16 @@ function initExperimentScreens() {
     showScreen('screen-replicates')
   })
   document.getElementById('btn-import-experiment').addEventListener('click', () => document.getElementById('input-load-files').click())
+  document.getElementById('btn-import-legacy-xlsx').addEventListener('click', () => document.getElementById('input-legacy-xlsx').click())
   document.getElementById('btn-export-recovery').addEventListener('click', exportStorageRecovery)
   document.getElementById('input-load-files').addEventListener('change', handleLoadFiles)
+  document.getElementById('input-legacy-xlsx').addEventListener('change', handleLegacyXlsxFile)
+  document.getElementById('legacy-xlsx-cancel').addEventListener('click', closeLegacyXlsxDialog)
+  document.getElementById('legacy-xlsx-submit').addEventListener('click', importLegacyXlsx)
+  document.getElementById('legacy-xlsx-dialog').addEventListener('cancel', event => {
+    event.preventDefault()
+    closeLegacyXlsxDialog()
+  })
   document.getElementById('btn-generate-replicate').addEventListener('click', handleAddReplicate)
   document.getElementById('btn-open-summary').addEventListener('click', showSummary)
   document.getElementById('input-slide-absent').addEventListener('change', updateCodeEntryAction)
@@ -1187,7 +1196,7 @@ function renderSummaryTable() {
   currentExperiment.replicates.forEach(replicate => {
     const title = document.createElement('h3')
     title.className = 'summary-replicate-title'
-    title.textContent = `${t('blind.replicate')} ${replicate.replicateNumber} — ${replicate.date}`
+    title.textContent = `${t('blind.replicate')} ${replicate.replicateNumber} — ${replicate.date || t('legacyXlsx.unknownDate')}`
     container.appendChild(title)
     const wrapper = document.createElement('div')
     wrapper.className = 'table-scroll'
@@ -1220,7 +1229,7 @@ function renderSummaryTable() {
 }
 
 function calculateScore(gel) {
-  return CometQuantCore.calculateVisualScore(gel, currentExperiment.nucleoidsPerGel) || 0
+  return CometQuantCore.calculateVisualScore(gel) || 0
 }
 
 function exportExperimentData(experiment) {
@@ -1339,6 +1348,147 @@ function requestBackupPassphrase(requireConfirmation) {
     dialog.showModal()
     setTimeout(() => password.focus(), 0)
   })
+}
+
+async function handleLegacyXlsxFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  const button = document.getElementById('btn-import-legacy-xlsx')
+  button.disabled = true
+  try {
+    pendingLegacyXlsx = await CometQuantLegacyXlsx.parse(file)
+    renderLegacyXlsxDialog(pendingLegacyXlsx)
+    document.getElementById('legacy-xlsx-dialog').showModal()
+    document.getElementById('legacy-xlsx-unit').focus()
+  } catch (error) {
+    console.error('Legacy XLSX import error:', error)
+    alert(formatLegacyXlsxError(error))
+  } finally {
+    button.disabled = false
+  }
+}
+
+function formatLegacyXlsxError(error) {
+  const code = String(error?.message || '')
+  if (code.startsWith('partial-count:')) {
+    const [, gel, treatment] = code.split(':')
+    return t('legacyXlsx.partialError').replace('{gel}', gel).replace('{treatment}', treatment)
+  }
+  if (code === 'missing-comet-assay-sheet') return t('legacyXlsx.sheetError')
+  if (code === 'gels-not-divisible-by-slides') return t('legacyXlsx.gelCountError')
+  return t('legacyXlsx.invalid').replace('{code}', code || 'invalid-xlsx')
+}
+
+function renderLegacyXlsxDialog(parsed) {
+  const metadata = document.getElementById('legacy-xlsx-metadata')
+  metadata.replaceChildren()
+  const fields = [
+    [t('legacyXlsx.file'), parsed.fileName],
+    [t('legacyXlsx.agent'), parsed.agent],
+    [t('legacyXlsx.cells'), parsed.cells],
+    [t('legacyXlsx.target'), parsed.target],
+    [t('legacyXlsx.replicates'), parsed.replicateCount],
+    [t('legacyXlsx.slides'), parsed.slidesPerTreatment]
+  ]
+  fields.forEach(([label, value]) => {
+    const term = document.createElement('dt')
+    term.textContent = label
+    const detail = document.createElement('dd')
+    detail.textContent = String(value)
+    metadata.append(term, detail)
+  })
+
+  const warnings = document.getElementById('legacy-xlsx-warnings')
+  warnings.replaceChildren()
+  const warningLines = []
+  if (parsed.absentCount) warningLines.push(t('legacyXlsx.absentWarning').replace('{count}', String(parsed.absentCount)))
+  if (parsed.mismatches.length) warningLines.push(t('legacyXlsx.mismatchWarning').replace('{count}', String(parsed.mismatches.length)))
+  if (warningLines.length) {
+    const list = document.createElement('ul')
+    warningLines.forEach(line => {
+      const item = document.createElement('li')
+      item.textContent = line
+      list.appendChild(item)
+    })
+    warnings.appendChild(list)
+  }
+  warnings.hidden = warningLines.length === 0
+
+  document.getElementById('legacy-xlsx-unit').value = parsed.suggestedUnit
+  document.getElementById('legacy-xlsx-error').textContent = ''
+  const treatments = document.getElementById('legacy-xlsx-treatments')
+  treatments.replaceChildren()
+  parsed.treatments.forEach((treatment, treatmentIndex) => {
+    const row = document.createElement('div')
+    row.className = 'legacy-xlsx-treatment'
+    row.dataset.treatmentIndex = String(treatmentIndex)
+    const name = document.createElement('strong')
+    name.textContent = treatment
+    const role = document.createElement('select')
+    role.setAttribute('aria-label', `${t('legacyXlsx.role')}: ${treatment}`)
+    ;[
+      ['other', 'legacyXlsx.role.other'],
+      ['positive-control', 'legacyXlsx.role.positive'],
+      ['negative-control', 'legacyXlsx.role.negative'],
+      ['solvent-control', 'legacyXlsx.role.solvent'],
+      ['test-concentration', 'legacyXlsx.role.concentration']
+    ].forEach(([value, key]) => {
+      const option = document.createElement('option')
+      option.value = value
+      option.textContent = t(key)
+      role.appendChild(option)
+    })
+    const suggestion = parsed.concentrationSuggestions[treatmentIndex]
+    role.value = suggestion ? 'test-concentration' : 'other'
+    const concentration = document.createElement('input')
+    concentration.type = 'number'
+    concentration.min = '0'
+    concentration.step = 'any'
+    concentration.placeholder = t('legacyXlsx.concentration')
+    concentration.setAttribute('aria-label', `${t('legacyXlsx.concentration')}: ${treatment}`)
+    concentration.value = suggestion?.concentration ?? ''
+    const updateConcentration = () => { concentration.hidden = role.value !== 'test-concentration' }
+    role.addEventListener('change', updateConcentration)
+    updateConcentration()
+    row.append(name, role, concentration)
+    treatments.appendChild(row)
+  })
+}
+
+function closeLegacyXlsxDialog() {
+  const dialog = document.getElementById('legacy-xlsx-dialog')
+  if (dialog.open) dialog.close()
+  pendingLegacyXlsx = null
+}
+
+async function importLegacyXlsx() {
+  if (!pendingLegacyXlsx) return
+  const submit = document.getElementById('legacy-xlsx-submit')
+  const errorOutput = document.getElementById('legacy-xlsx-error')
+  const roles = Array.from(document.querySelectorAll('.legacy-xlsx-treatment'), row => {
+    const role = row.querySelector('select').value
+    const concentration = row.querySelector('input').value
+    return { role, concentration: role === 'test-concentration' ? Number(concentration) : null }
+  })
+  submit.disabled = true
+  errorOutput.textContent = ''
+  try {
+    const experiment = CometQuantLegacyXlsx.buildExperiment(pendingLegacyXlsx, {
+      roles,
+      unit: document.getElementById('legacy-xlsx-unit').value
+    }, createId)
+    await saveImportedExperiment(experiment)
+    closeLegacyXlsxDialog()
+    showExperimentsScreen()
+  } catch (error) {
+    console.error('Legacy XLSX conversion error:', error)
+    errorOutput.textContent = t(`legacyXlsx.error.${error.message}`) === `legacyXlsx.error.${error.message}`
+      ? t('legacyXlsx.configurationError')
+      : t(`legacyXlsx.error.${error.message}`)
+  } finally {
+    submit.disabled = false
+  }
 }
 
 async function handleLoadFiles(event) {

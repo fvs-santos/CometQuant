@@ -83,17 +83,18 @@ def reference_v2_experiment():
                 }
             )
             score = float(row["score"])
+            counted = row["completion"] == "complete"
             replicate["gels"].append(
                 {
                     "treatment": row["treatment"],
                     "treatmentIndex": treatment_index,
                     "gelNumber": slide,
-                    "class0": 100 - score,
+                    "class0": 100 - score if counted else 0,
                     "class1": 0,
                     "class2": 0,
                     "class3": 0,
-                    "class4": score,
-                    "total": 100,
+                    "class4": score if counted else 0,
+                    "total": 100 if counted else 0,
                     "status": row["status"],
                     "completion": row["completion"],
                 }
@@ -186,6 +187,19 @@ class ReferenceResultsTests(unittest.TestCase):
                 self.assert_close(regression["pearson"][field], expected)
 
 class EdgeCaseTests(unittest.TestCase):
+    def test_slide_score_uses_the_effective_total(self):
+        gel = {
+            "class0": 49,
+            "class1": 0,
+            "class2": 50,
+            "class3": 0,
+            "class4": 0,
+            "total": 99,
+            "status": "counted",
+            "completion": "incomplete",
+        }
+        self.assertAlmostEqual(engine._valid_slide_score(gel), 50 / 99 * 50)
+
     def test_probability_preserves_positive_values_below_machine_epsilon(self):
         self.assertEqual(engine._probability(1e-50), 1e-50)
         self.assertGreater(engine._probability(0), 0)
@@ -264,6 +278,13 @@ class EdgeCaseTests(unittest.TestCase):
 
 
 class BlockAnalysisV2Tests(unittest.TestCase):
+    @staticmethod
+    def _remove_counts(gel):
+        for index in range(5):
+            gel[f"class{index}"] = 0
+        gel["total"] = 0
+        gel["completion"] = "incomplete"
+
     @classmethod
     def setUpClass(cls):
         cls.experiment = reference_v2_experiment()
@@ -452,7 +473,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         for replicate in experiment["replicates"]:
             for gel in replicate["gels"]:
                 if gel["treatmentIndex"] == 0:
-                    gel["completion"] = "incomplete"
+                    self._remove_counts(gel)
         result = engine.analyze_experiment(experiment)
         non_parametric = result["nonParametric"]
         self.assertFalse(non_parametric["performed"])
@@ -482,6 +503,11 @@ class BlockAnalysisV2Tests(unittest.TestCase):
             },
         )
         self.assertEqual(parsed["analysisSchemaVersion"], 2)
+        self.assertEqual(
+            parsed["protocol"]["visualScoreDenominator"],
+            "effective_counted_nucleoids",
+        )
+        self.assertTrue(parsed["protocol"]["offTargetSlidesIncluded"])
         self.assertFalse({"shapiro", "tukey", "pearson", "regression"} & set(parsed))
         self.assertEqual(set(parsed["charts"]), {"scores", "differences", "classes"})
         self.assertEqual(set(parsed["nonParametric"]), {"performed", "population", "friedman", "pageTrend"})
@@ -504,7 +530,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         experiment = reference_v2_experiment()
         for gel in experiment["replicates"][1]["gels"]:
             if gel["treatmentIndex"] == 3:
-                gel["completion"] = "incomplete"
+                self._remove_counts(gel)
         result = engine.analyze_experiment(experiment)
         primary = result["population"]["primary"]
         self.assertEqual(primary["includedBlockNumbers"], [1, 3])
@@ -529,7 +555,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         for replicate in missing_reference["replicates"]:
             for gel in replicate["gels"]:
                 if gel["treatmentIndex"] == 0:
-                    gel["completion"] = "incomplete"
+                    self._remove_counts(gel)
         missing_result = engine.analyze_experiment(missing_reference)
         self.assertEqual(
             missing_result["blockAnova"]["reason"]["code"],

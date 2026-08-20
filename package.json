@@ -16,7 +16,7 @@
     "test:e2e": "playwright test",
     "test:e2e:chromium": "playwright test --project=chromium-pixel-7",
     "test:e2e:webkit": "playwright test --project=webkit-iphone",
-    "check": "node --check js/core.js && node --check js/repository.js && node --check js/backup.js && node --check js/export.js && node --check js/science-package.js && node --check js/analysis-worker.js && node --check js/app.js && node --check js/analysis.js && node --check js/i18n.js && node --check service-worker.js"
+    "check": "node --check js/core.js && node --check js/repository.js && node --check js/backup.js && node --check js/legacy-xlsx.js && node --check js/export.js && node --check js/science-package.js && node --check js/analysis-worker.js && node --check js/app.js && node --check js/analysis.js && node --check js/i18n.js && node --check service-worker.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",

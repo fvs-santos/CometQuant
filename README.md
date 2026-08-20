@@ -35,6 +35,7 @@ Use `npx http-server . -p 4173 -c-1` to run the application locally.
 
 - `index.html` and `css/style.css`: static application shell and responsive UI.
 - `js/app.js`: navigation, blinded counting and transactional local persistence.
+- `js/legacy-xlsx.js`: constrained offline importer for legacy Comet VisualScore workbooks.
 - `js/backup.js`: password-based encrypted backup envelopes for active blinding.
 - `js/core.js`: schema migration, validation, scoring, aggregation and merge.
 - `js/analysis.js`: Pyodide bridge, result rendering and analysis exports.
@@ -93,15 +94,18 @@ before handling data with stricter confidentiality requirements.
 ## Statistical Protocol
 
 An independent experiment is the experimental unit and statistical block.
-Complete technical slides are averaged within each experiment and treatment;
-one valid slide keeps the cell in the analysis while the technical loss is
-reported. If no valid slide exists for the primary reference or any primary
+Counted technical slides with a positive, internally consistent class total are
+scored using that effective total and averaged within each experiment and
+treatment. A count above or below the collection target remains analyzable and
+is reported as off-target. One valid slide keeps the cell in the analysis while
+the technical loss is reported. If no valid slide exists for the primary reference or any primary
 concentration, that complete block is explicitly excluded from primary
 inference.
 
 The version 2 analysis contract provides:
 
 - randomized complete block ANOVA using `score ~ treatment + experiment`;
+- visual scores divided by the effective positive class-count total for each slide, with off-target slides retained and flagged;
 - planned two-sided comparisons of each concentration against the configured reference;
 - a common residual error estimate and Holm-adjusted p-values without an omnibus gate;
 - nominal 95% confidence intervals, effect direction and unrounded decisions;

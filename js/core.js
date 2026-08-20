@@ -62,15 +62,17 @@
     return bases
   }
 
-  function calculateVisualScore(gel, target) {
-    if (!isObject(gel) || !Number.isInteger(target) || target < 1) return null
+  function calculateVisualScore(gel) {
+    if (!isObject(gel)) return null
     const values = [gel.class0, gel.class1, gel.class2, gel.class3, gel.class4]
     if (!values.every(value => Number.isInteger(value) && value >= 0)) return null
-    return ((0.25 * values[1] + 0.5 * values[2] + 0.75 * values[3] + values[4]) / target) * 100
+    const total = values.reduce((sum, value) => sum + value, 0)
+    if (total < 1 || (gel.total !== undefined && gel.total !== total)) return null
+    return ((0.25 * values[1] + 0.5 * values[2] + 0.75 * values[3] + values[4]) / total) * 100
   }
 
-  function isIncludedGel(gel, target) {
-    return gel && gel.status === 'counted' && gel.completion === 'complete' && gel.total === target
+  function isIncludedGel(gel) {
+    return gel?.status === 'counted' && calculateVisualScore(gel) !== null
   }
 
   function reasonObject(value, fallbackCode) {
@@ -374,7 +376,7 @@
         const counts = [gel.class0, gel.class1, gel.class2, gel.class3, gel.class4]
         push(counts.every(value => Number.isInteger(value) && value >= 0), `${item}-counts`)
         const sum = counts.reduce((total, value) => total + (Number.isInteger(value) ? value : 0), 0)
-        push(Number.isInteger(gel.total) && gel.total === sum && gel.total <= experiment.nucleoidsPerGel, `${item}-total`)
+        push(Number.isInteger(gel.total) && gel.total === sum, `${item}-total`)
         push(gel.status === 'counted', `${item}-status`)
         push(gel.completion === (gel.total === experiment.nucleoidsPerGel ? 'complete' : 'incomplete'), `${item}-completion`)
         if (gel.completion === 'incomplete') push(validateReason(gel.incompleteReason, INCOMPLETE_REASONS, true), `${item}-incomplete-reason`)
@@ -479,8 +481,9 @@
     experiment.replicates.forEach(replicate => {
       experiment.treatments.forEach((treatment, treatmentIndex) => {
         const gels = replicate.gels.filter(gel => gel.treatmentIndex === treatmentIndex || (!Number.isInteger(gel.treatmentIndex) && gel.treatment === treatment))
-        const complete = gels.filter(gel => isIncludedGel(gel, experiment.nucleoidsPerGel))
-        const scores = complete.map(gel => calculateVisualScore(gel, experiment.nucleoidsPerGel))
+        const analyzable = gels.filter(isIncludedGel)
+        const scores = analyzable.map(calculateVisualScore)
+        const onTarget = gels.filter(gel => gel.total === experiment.nucleoidsPerGel)
         const assignments = replicate.assignments?.filter(item => item.treatmentIndex === treatmentIndex) || []
         rows.push({
           treatmentIndex,
@@ -488,8 +491,9 @@
           replicateNumber: replicate.replicateNumber,
           expectedSlides: assignments.length || experiment.slidesPerTreatment,
           countedSlides: gels.length,
-          completeSlides: complete.length,
-          incompleteSlides: gels.length - complete.length,
+          analyzedSlides: analyzable.length,
+          completeSlides: onTarget.length,
+          incompleteSlides: gels.length - onTarget.length,
           absentSlides: assignments.filter(item => item.status === 'absent').length,
           score: scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null
         })

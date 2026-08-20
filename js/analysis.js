@@ -440,7 +440,9 @@ function renderPlanPopulation(container, protocol, population) {
     [t('analysis.v2.protocol.alpha'), protocol.alpha],
     [t('analysis.v2.protocol.alternative'), translatedAnalysisValue('alternative', protocol.alternative)],
     [t('analysis.v2.protocol.adjustment'), translatedAnalysisValue('adjustment', protocol.multiplicityAdjustment)],
-    [t('analysis.v2.protocol.confidenceLevel'), protocol.confidenceLevel]
+    [t('analysis.v2.protocol.confidenceLevel'), protocol.confidenceLevel],
+    [t('analysis.v2.protocol.scoreDenominator'), t('analysis.v2.protocol.effectiveCount')],
+    [t('analysis.v2.protocol.offTarget'), protocol.offTargetSlidesIncluded ? t('analysis.v2.value.yes') : t('analysis.v2.value.no')]
   ], false)
   appendCaption(container, t('analysis.v2.population.caption'))
   if (!population || population.performed === false) {
