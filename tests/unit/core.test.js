@@ -63,6 +63,7 @@ describe('visual score', () => {
   it('uses the effective count as the denominator', () => {
     const gel = { class0: 49, class1: 0, class2: 50, class3: 0, class4: 0, total: 99 }
     expect(core.calculateVisualScore(gel)).toBeCloseTo(25.252525)
+    expect(core.isIncludedGel({ ...gel, status: 'counted', completion: 'incomplete' })).toBe(true)
   })
 })
 

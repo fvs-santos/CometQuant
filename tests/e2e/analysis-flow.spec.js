@@ -92,7 +92,7 @@ function referenceExperiment() {
   }
 }
 
-test('runs the extracted Python engine in Pyodide with reference results', async ({ page, browserName }) => {
+test('runs the extracted Python engine in Pyodide with reference results', async ({ page, browserName }, testInfo) => {
   test.setTimeout(360000)
   const remoteRequests = []
   page.on('request', request => {
@@ -160,7 +160,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   const archive = await JSZip.loadAsync(fs.readFileSync(await download.path()))
   const archivedNames = Object.keys(archive.files)
   for (const suffix of [
-    'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
+    'report.html', 'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
     'data/primary_comparisons.csv', 'data/control_response.csv', 'data/dose_trend.csv',
     'data/non_parametric.csv', 'data/transformed_analysis.csv',
     'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
@@ -174,5 +174,28 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   expect(analysisJson.nonParametric.friedman.pExact).toBeCloseTo(expected.nonParametric.friedman.pExact, 7)
   expect(analysisJson.nonParametric.pageTrend.direction).toBe('increasing')
   expect(analysisJson.transformedAnalysis.scale).toBe('arcsin_sqrt')
+  const reportEntry = archive.file(archivedNames.find(name => name.endsWith('report.html')))
+  const reportHtml = await reportEntry.async('string')
+  expect(reportHtml).toContain('Conclusão em 30 segundos')
+  expect(reportHtml).toContain('Evidência de efeito')
+  expect(reportHtml).toContain('Qualidade da relação dose-resposta')
+  expect(reportHtml).toContain('<svg viewBox="0 0 900 500"')
+  expect(reportHtml).not.toMatch(/<link\b|<script\b|https?:\/\//)
+  const reportPath = testInfo.outputPath('CometQuant_reference_report_pt.html')
+  fs.writeFileSync(reportPath, reportHtml)
+  await testInfo.attach('reference-report', { path: reportPath, contentType: 'text/html' })
+
+  const reportPage = await page.context().newPage()
+  const reportRequests = []
+  reportPage.on('request', request => reportRequests.push(request.url()))
+  await reportPage.setContent(reportHtml)
+  await expect(reportPage.locator('.status-card')).toHaveCount(3)
+  await expect(reportPage.locator('.dose-chart').getByText('Controle negativo', { exact: true })).toBeVisible()
+  await expect(reportPage.locator('.dose-chart').getByText('Controle positivo', { exact: true })).toBeVisible()
+  await expect(reportPage.locator('.dose-chart .data-point')).toHaveCount(15)
+  await expect(reportPage.locator('link, script, iframe, object, embed')).toHaveCount(0)
+  expect(reportRequests).toEqual([])
+  await expect(reportPage.locator('#raw details')).not.toHaveAttribute('open', '')
+  await reportPage.close()
   expect(remoteRequests).toHaveLength(installedRequestCount)
 })

@@ -12,7 +12,7 @@ function loadAppFunctions() {
   }
   return new Function(
     'CometQuantCore', 'document', 'window', 'setLanguage',
-    `${source}\nreturn { buildTreatmentPlan, buildStudyDesign, updateSetupStudyDesign, requestLegacyStudyDesign }`
+    `${source}\nreturn { buildTreatmentPlan, buildStudyDesign, updateSetupStudyDesign, requestLegacyStudyDesign, renderSummaryTable, setCurrentExperiment: value => { currentExperiment = value } }`
   )(core, documentFacade, {}, () => {})
 }
 
@@ -126,6 +126,44 @@ describe('app schema 5 study design flow', () => {
 
     await expect(selectionPromise).resolves.toEqual({ assayType: 'antigenotoxicity', basalTreatmentIndex: 1 })
     expect(document.getElementById('legacy-study-design-dialog')).toBeNull()
+  })
+
+  it('shows the effective-total score for a counted slide below the target', () => {
+    vi.stubGlobal('t', key => ({
+      'blind.replicate': 'Replicate', 'legacyXlsx.unknownDate': 'date not provided',
+      'summary.treatment': 'Treatment', 'summary.gel': 'Slide', 'summary.status': 'Status', 'summary.reason': 'Reason',
+      'summary.class0': 'Class 0', 'summary.class1': 'Class 1', 'summary.class2': 'Class 2', 'summary.class3': 'Class 3',
+      'summary.class4': 'Class 4', 'summary.total': 'Total', 'summary.score': 'Score', 'summary.incomplete': 'Incomplete',
+      'summary.offTargetIncluded': 'Off target (included)',
+      'summary.excluded': 'Excluded from analysis', 'replicates.counted': 'counted'
+    })[key] || key)
+    const { renderSummaryTable, setCurrentExperiment } = loadAppFunctions()
+    const container = document.createElement('div')
+    container.id = 'summary-table-container'
+    document.body.appendChild(container)
+    setCurrentExperiment({
+      treatments: ['1.25 µM'],
+      nucleoidsPerGel: 100,
+      slidesPerTreatment: 1,
+      replicates: [{
+        replicateNumber: 3,
+        date: '',
+        assignments: [],
+        gels: [{
+          treatment: '1.25 µM', treatmentIndex: 0, gelNumber: 2, status: 'counted', completion: 'incomplete',
+          incompleteReason: { code: 'legacy-unjustified', detail: '' },
+          class0: 26, class1: 34, class2: 23, class3: 9, class4: 7, total: 99
+        }]
+      }]
+    })
+
+    renderSummaryTable()
+
+    const cells = Array.from(container.querySelectorAll('tbody td'), cell => cell.textContent)
+    expect(cells[2]).toBe('Off target (included)')
+    expect(cells[9]).toBe('99')
+    expect(cells[10]).toBe('34.09')
+    expect(cells[10]).not.toBe('Excluded from analysis')
   })
 })
 

@@ -65,6 +65,62 @@ function v2Analysis(overrides = {}) {
   }
 }
 
+function reportScenario() {
+  const data = experiment({
+    treatments: ['Negative control', 'Positive control', 'Compound 1 uM', 'Compound 5 uM'],
+    treatmentMetadata: [
+      { treatmentIndex: 0, role: 'negative-control', concentration: null },
+      { treatmentIndex: 1, role: 'positive-control', concentration: null },
+      { treatmentIndex: 2, role: 'test-concentration', concentration: 1 },
+      { treatmentIndex: 3, role: 'test-concentration', concentration: 5 }
+    ],
+    concUnit: 'uM'
+  })
+  const analysis = v2Analysis()
+  const comparison = analysis.primaryComparisons.comparisons[0]
+  Object.assign(comparison, {
+    referenceTreatmentIndex: 0, referenceTreatment: 'Negative control', treatmentIndex: 2, treatment: 'Compound 1 uM',
+    referenceMean: 10, treatmentMean: 20, pRaw: 0.068, pAdjusted: 0.068, significant: false
+  })
+  Object.assign(analysis.protocol, {
+    primaryReferenceTreatmentIndex: 0, primaryReferenceTreatment: 'Negative control', primaryTreatmentIndices: [2, 3],
+    validationComparison: { referenceTreatmentIndex: 0, treatmentIndex: 1 }
+  })
+  Object.assign(analysis.controlResponse.comparison, {
+    referenceTreatmentIndex: 0, referenceTreatment: 'Negative control', treatmentIndex: 1, treatment: 'Positive control',
+    referenceMean: 10, treatmentMean: 48, difference: 38, pRaw: 0.003, significant: true, direction: 'higher'
+  })
+  analysis.primaryComparisons.familySize = 2
+  analysis.primaryComparisons.comparisons.push({
+    ...comparison, treatmentIndex: 3, treatment: 'Compound 5 uM', treatmentMean: 30, difference: 20, pRaw: 0.0005, pAdjusted: 0.001, significant: true
+  })
+  analysis.transformedAnalysis.primaryComparisons.comparisons = analysis.primaryComparisons.comparisons.map(row => ({ ...row, significant: true, pAdjusted: Math.min(row.pAdjusted, 0.04) }))
+  analysis.transformedAnalysis.doseTrend.significant = true
+  analysis.doseTrend.treatmentDoses = [{ treatmentIndex: 0, concentration: 0 }, { treatmentIndex: 2, concentration: 1 }, { treatmentIndex: 3, concentration: 5 }]
+  analysis.nonParametric.friedman.treatmentIndices = [0, 2, 3]
+  analysis.nonParametric.pageTrend.treatmentIndices = [0, 2, 3]
+  analysis.descriptive.treatments = [
+    { treatmentIndex: 0, treatment: 'Negative control', blockCount: 3, mean: 10, standardDeviation: 2, coefficientOfVariation: 20, minimum: 8, maximum: 12 },
+    { treatmentIndex: 2, treatment: 'Compound 1 uM', blockCount: 3, mean: 20, standardDeviation: 3, coefficientOfVariation: 15, minimum: 17, maximum: 23 },
+    { treatmentIndex: 3, treatment: 'Compound 5 uM', blockCount: 3, mean: 30, standardDeviation: 4, coefficientOfVariation: 13.33, minimum: 26, maximum: 34 }
+  ]
+  analysis.descriptive.heterogeneityFlag = { performed: true, flagged: true, maximumStandardDeviation: 6.4, minimumStandardDeviation: 2, ratio: 3.2, code: 'heterogeneous_variance' }
+  analysis.population.blocks = [1, 2, 3].map((replicateNumber, index) => ({
+    replicateNumber,
+    primaryIncluded: true,
+    primaryExclusionReasons: [],
+    cells: [
+      { treatmentIndex: 0, treatment: 'Negative control', score: [8, 10, 12][index] },
+      { treatmentIndex: 1, treatment: 'Positive control', score: [45, 48, 51][index] },
+      { treatmentIndex: 2, treatment: 'Compound 1 uM', score: [17, 20, 23][index] },
+      { treatmentIndex: 3, treatment: 'Compound 5 uM', score: [26, 30, 34][index] }
+    ]
+  }))
+  analysis.population.primary = { includedBlockNumbers: [1, 2, 3], includedBlockCount: 3, excludedBlocks: [] }
+  analysis.population.validation = { includedBlockNumbers: [1, 2, 3], includedBlockCount: 3, excludedBlocks: [] }
+  return { data, analysis }
+}
+
 describe('safe exports', () => {
   it('escapes HTML payloads in reports', () => {
     const data = experiment({ agent: '<img src=x onerror=alert(1)>', treatments: ['<script>alert(1)</script>'] })
@@ -81,6 +137,20 @@ describe('safe exports', () => {
     expect(csv).toContain('"\'=HYPERLINK(""bad"")"')
     expect(csv).toContain('"Control, ""quoted"""')
     expect(csv).toContain('\r\n')
+  })
+
+  it('exports an off-target counted slide with its effective-total score', () => {
+    const data = experiment()
+    Object.assign(data.replicates[0].gels[0], {
+      class0: 26, class1: 34, class2: 23, class3: 9, class4: 7, total: 99,
+      status: 'counted', completion: 'incomplete', incompleteReason: { code: 'legacy-unjustified', detail: '' }
+    })
+
+    const [row] = exporter.buildRawRows(data)
+    expect(row.included_in_analysis).toBe('true')
+    expect(row.visual_score).toBe('34.0909')
+    expect(exporter.buildRawCsv(data)).toContain('"34.0909"')
+    expect(exporter.buildReportHtml(data, null, 'en')).toContain('34.0909')
   })
 
   it('builds safe CSVs for every analysis v2 result', () => {
@@ -139,6 +209,77 @@ describe('safe exports', () => {
     expect(html).toContain('Per-treatment dispersion')
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(html).not.toContain('<img src=x onerror=alert(1)>')
+  })
+
+  it('puts a plain-language conclusion and individual replicate chart before technical details', () => {
+    const { data, analysis } = reportScenario()
+    const html = exporter.buildReportHtml(data, analysis, 'pt')
+
+    expect(html).toContain('Conclusão em 30 segundos')
+    expect(html).toContain('Validade do ensaio')
+    expect(html).toContain('Válido')
+    expect(html).toContain('Evidência de efeito')
+    expect(html).toContain('1 de 2 concentrações mostraram aumento de dano (Compound 5 uM)')
+    expect(html).toContain('Compound 1 uM não mostrou diferença (p Holm=0,068)')
+    expect(html).toContain('Forte')
+    expect(html).toContain('não classifica automaticamente a substância')
+    expect(html).toContain('JSON e CSV preservam a precisão integral')
+    expect(html.indexOf('Conclusão em 30 segundos')).toBeLessThan(html.indexOf('Dados brutos'))
+    expect(html).toContain('<details>')
+    expect(html).toContain('Detalhamento técnico')
+    expect(html).toContain('<svg viewBox="0 0 900 500"')
+    expect(html).toContain('Controle negativo')
+    expect(html).toContain('Controle positivo')
+    expect(html).toContain('Experimento independente 1: 8,00')
+    expect(html).toContain('Média do motor: 20,00')
+    expect(html).toContain('Nenhum limite universal de CV elevado foi aplicado')
+    expect(html).toContain('O motor sinalizou variabilidade desigual entre tratamentos')
+    expect(html).toContain('2 de 2 comparações foram significativas na escala transformada')
+    expect(html).toContain('a decisão de significância mudou após a transformação para Compound 1 uM')
+    expect(html).not.toContain('p=<')
+    expect(html).toContain('scope="col"')
+    expect(html).toContain('name="viewport"')
+    expect(html).toContain('Dados acessíveis do gráfico')
+    expect(html).not.toContain('Controle negativo (0,00 uM)')
+    expect(html).not.toMatch(/<(?:link|script|iframe|object|embed)\b/i)
+    expect(html).not.toMatch(/\b(?:src|href)=["'](?:https?:)?\/\//i)
+  })
+
+  it('adapts effect direction and wording for antigenotoxicity', () => {
+    const { data, analysis } = reportScenario()
+    analysis.protocol.assayType = 'antigenotoxicity'
+    analysis.protocol.primaryReferenceTreatmentIndex = 1
+    analysis.protocol.primaryReferenceTreatment = 'Positive control'
+    analysis.primaryComparisons.comparisons = analysis.primaryComparisons.comparisons.map((comparison, index) => ({
+      ...comparison,
+      referenceTreatmentIndex: 1, referenceTreatment: 'Positive control', referenceMean: 48,
+      treatmentMean: index === 0 ? 20 : 10, difference: index === 0 ? -28 : -38, direction: 'lower', significant: true
+    }))
+    analysis.doseTrend.slope = -10
+    analysis.doseTrend.treatmentDoses = [{ treatmentIndex: 1, concentration: 0 }, { treatmentIndex: 2, concentration: 1 }, { treatmentIndex: 3, concentration: 5 }]
+    analysis.nonParametric.pageTrend.direction = 'decreasing'
+    analysis.descriptive.treatments = [
+      { treatmentIndex: 1, treatment: 'Positive control', blockCount: 3, mean: 48, standardDeviation: 3, coefficientOfVariation: 6.25 },
+      { treatmentIndex: 2, treatment: 'Compound 1 uM', blockCount: 3, mean: 20, standardDeviation: 3, coefficientOfVariation: 15 },
+      { treatmentIndex: 3, treatment: 'Compound 5 uM', blockCount: 3, mean: 10, standardDeviation: 2, coefficientOfVariation: 20 }
+    ]
+
+    const html = exporter.buildReportHtml(data, analysis, 'pt')
+    expect(html).toContain('Sinal de antigenotoxicidade')
+    expect(html).toContain('redução de dano')
+    expect(html).toContain('tendência significativa, ordenada')
+  })
+
+  it('flags a significant but non-monotonic response as weak and irregular', () => {
+    const { data, analysis } = reportScenario()
+    analysis.primaryComparisons.comparisons[1].treatmentMean = 15
+    analysis.primaryComparisons.comparisons[1].difference = 5
+    analysis.primaryComparisons.comparisons[1].pAdjusted = 0.02
+
+    const html = exporter.buildReportHtml(data, analysis, 'pt')
+    expect(html).toContain('Fraca/irregular')
+    expect(html).toContain('1 reversão(ões) entre médias de doses sucessivas')
+    expect(html).toContain('Uma dose maior apresentou média de dano menos favorável')
   })
 
   it('provides content suitable for the complete ZIP', async () => {

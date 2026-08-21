@@ -1211,8 +1211,9 @@ function renderSummaryTable() {
     replicate.gels.forEach(gel => {
       const row = document.createElement('tr')
       const incomplete = gel.completion === 'incomplete'
-      ;[gel.treatment, gel.gelNumber, incomplete ? t('summary.incomplete') : t('replicates.counted'), formatReason(gel.incompleteReason), gel.class0, gel.class1, gel.class2, gel.class3,
-        gel.class4, gel.total, incomplete ? t('summary.excluded') : calculateScore(gel).toFixed(2)].forEach(value => appendCell(row, 'td', value))
+      const score = CometQuantCore.isIncludedGel(gel) ? calculateScore(gel) : null
+      ;[gel.treatment, gel.gelNumber, incomplete ? t('summary.offTargetIncluded') : t('replicates.counted'), formatReason(gel.incompleteReason), gel.class0, gel.class1, gel.class2, gel.class3,
+        gel.class4, gel.total, score === null ? t('summary.excluded') : score.toFixed(2)].forEach(value => appendCell(row, 'td', value))
       tbody.appendChild(row)
     })
     ;(replicate.assignments || []).filter(item => item.status === 'absent').forEach(item => {
@@ -1229,7 +1230,7 @@ function renderSummaryTable() {
 }
 
 function calculateScore(gel) {
-  return CometQuantCore.calculateVisualScore(gel) || 0
+  return CometQuantCore.calculateVisualScore(gel)
 }
 
 function exportExperimentData(experiment) {
