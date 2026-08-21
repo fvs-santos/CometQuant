@@ -468,6 +468,45 @@ Concluido na continuidade de 20/08/2026 (importacao XLSX legada e denominador ef
 - O E2E dedicado de importacao passou em Chromium/Pixel 7 e WebKit/iPhone, incluindo classificacao sem controle de solvente, persistencia das 42 contagens, datas desconhecidas e total 103 preservado.
 - A execucao E2E completa passou em 38 de 40 cenarios na primeira rodada paralela; os dois cenarios preexistentes afetados por encerramento/timeout do navegador passaram quando repetidos isoladamente. O importador e o E2E cientifico passaram nos dois motores.
 
+Concluido na continuidade de 21/08/2026 (reformulacao da apresentacao do relatorio HTML):
+
+### Objetivo e organizacao do relatorio
+
+- O relatorio HTML deixou de ser predominantemente uma sequencia de metadados, tabelas estatisticas e dados brutos e passou a ser apresentado como um relatorio de evidencias em camadas, voltado tambem a pesquisadores da area de genetica sem formacao estatistica aprofundada.
+- A ordem de leitura foi invertida para apresentar primeiro a sintese, depois as evidencias principais, os detalhes tecnicos e, por fim, os elementos de auditoria. Scores agregados e dados brutos continuam no documento, mas foram deslocados para o final.
+- O topo ganhou o quadro `Conclusao em 30 segundos`, com cartoes para validade do ensaio, sinal de geno/antigenotoxicidade e qualidade da relacao dose-resposta.
+- Comparacoes primarias e resposta dos controles foram promovidas em relacao a ANOVA. A ANOVA, o protocolo, a populacao, as analises de sensibilidade, os graficos tecnicos, os scores e os dados brutos permanecem disponiveis em secoes posteriores.
+- As secoes ganharam uma camada `Leitura simples`; tabelas e estatisticas extensas ficam em blocos recolhiveis de `Detalhamento tecnico`. Foi incluido um `Glossario de bancada` para os principais termos estatisticos.
+
+### Interpretacao e comunicacao estatistica
+
+- O relatorio passou a produzir uma sintese narrativa da balanca de evidencias, traduzindo a direcao das comparacoes para aumento ou reducao de dano de acordo com o tipo de ensaio.
+- A sintese informa quantas concentracoes apresentaram efeito estatisticamente detectado na direcao esperada e separa esse resultado da existencia de uma tendencia dose-resposta.
+- A qualidade da dose-resposta integra tendencia linear ajustada por bloco, Page L e reversoes observadas entre doses sucessivas. Isso permite mostrar, por exemplo, efeito em concentracoes individuais sem afirmar que existe uma relacao dose-resposta ordenada.
+- Friedman, Page L e a analise arcsine-sqrt continuam sendo analises de sensibilidade/robustez, nao uma segunda tentativa de obter significancia. O relatorio agora explica essa funcao em linguagem comum e pode destacar discordancias em relacao a analise principal.
+- Significancia estatistica continua nao sendo sinonimo de relevancia biologica. A sintese declara que nao classifica automaticamente a substancia e lembra que citotoxicidade, controles historicos e o guia cientifico adotado tambem devem ser considerados.
+
+### Graficos, acessibilidade e arquivo autocontido
+
+- Foi adicionada a secao prioritaria `Visao da dose-resposta`, com grafico SVG dos pontos de cada experimento independente e indicacao da media por tratamento. Os PNGs de perfis por bloco, diferencas com IC e distribuicao por classes permanecem como graficos tecnicos.
+- O SVG possui titulo, descricao e tabela textual equivalente para tecnologia assistiva. As tabelas usam cabecalhos semanticos, e os estados nao dependem apenas de cor.
+- O documento ganhou hierarquia visual por cartoes, caixas de leitura simples, avisos e destaque de resultados, alem de comportamento responsivo, rolagem de tabelas e estilo para impressao.
+- O HTML permanece autocontido e adequado a consulta offline: CSS, SVG e PNGs sao incorporados sem scripts ou recursos externos. Valores exibidos sao arredondados para leitura, enquanto JSON e CSV preservam a precisao integral.
+
+### Pontos para reavaliacao do relatorio HTML
+
+1. Reavaliar o status `Valido` no cartao de validade do ensaio. A regra atual resume a resposta estatistica do controle positivo na direcao esperada, mas o termo pode ser interpretado como validacao experimental ou regulatoria completa. Isso diverge da decisao historica registrada nas secoes de protocolo de apresentar a resposta do controle sem classificar automaticamente o ensaio como valido ou invalido. Considerar uma formulacao mais delimitada, como resposta esperada do controle detectada, sem antecipar a redacao final.
+2. Reavaliar o titulo `Conclusao em 30 segundos`. Verificar com o publico-alvo se ele transmite sintese cientifica sem parecer informal, promocional ou excessivamente conclusivo. Possiveis nomes devem ser discutidos antes de qualquer alteracao.
+3. Reavaliar os rotulos categorizados `Evidencia de efeito`, `Forte`, `Fraca/irregular` e `Ausente`. Em particular, `Ausente` na dose-resposta pode ser confundido com ausencia de efeito, e `Evidencia de efeito` pode ser lido como conclusao biologica ou regulatoria. Os rotulos devem deixar claro o objeto da conclusao e seus limites.
+4. Simplificar os rotulos do eixo x em `Visao da dose-resposta`: mostrar somente o nome do tratamento e sua media. Textos adicionais como `controle do solvente` e `controle positivo` poluem o grafico e devem permanecer, quando necessarios, na legenda, no texto ou no detalhamento tecnico, nao no rotulo principal do eixo.
+5. Incluir no rodape do relatorio o codigo de identificacao do experimento do qual o artefato foi derivado. Avaliar tambem timestamp da analise/geracao e versao publica do CometQuant para melhorar a vinculacao entre HTML, JSON e CSV e a rastreabilidade do arquivo isolado.
+6. Adicionar um grafico de colunas como visualizacao complementar, mesmo que parcialmente redundante com os graficos existentes, por ser uma forma de apresentacao familiar aos pesquisadores. O grafico deve indicar com `*` as comparacoes contra o controle que atendam a `p <= 0,05`.
+7. Antes de implementar o grafico de colunas, definir explicitamente qual controle sera a referencia em cada tipo de ensaio e qual p-valor alimentara o asterisco. A politica ja registrada determina que anotacoes de significancia usem o p-valor ajustado; portanto, a opcao coerente e usar o p ajustado por Holm das comparacoes planejadas, e nao o p bruto, salvo revisao cientifica documentada.
+8. No grafico de colunas, explicitar o que as barras e os elementos de incerteza representam (por exemplo, media dos experimentos independentes e DP ou IC), preservar `n` como numero de experimentos independentes e evitar que laminas ou nucleoides sejam percebidos como replicas biologicas.
+9. Reduzir a mistura entre linguagem amigavel em portugues e nomes internos como `lower`, `treatment`, `block`, `residual`, `antigenotoxicity` e campos do schema. Os nomes tecnicos podem permanecer para auditoria, mas devem receber rotulos localizados ou explicacao.
+10. Avaliar um indice com links internos para as secoes do relatorio, pois a nova leitura progressiva melhorou a hierarquia, mas o documento completo continua longo.
+11. Preservar, em qualquer revisao, a separacao entre efeito em doses individuais, tendencia dose-resposta, relevancia biologica e validade regulatoria; preservar tambem os dados completos, a acessibilidade, a operacao offline e as protecoes de seguranca da exportacao.
+
 Pendencias operacionais que continuam validas em paralelo:
 
 1. Executar a checklist em Safari macOS, iPhone e iPad reais, incluindo PWA instalada, baixa disponibilidade de espaco e Pyodide offline.
