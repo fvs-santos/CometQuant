@@ -216,6 +216,10 @@
     if (actualRevision !== expectedRevision) {
       throw new ConflictError(validData.id, expectedRevision, actualRevision)
     }
+    if (existing?.data) {
+      const transition = root.CometQuantCore.validateExperimentTransition(existing.data, validData)
+      if (!transition.valid) throw new Error(`invalid-experiment-transition-${transition.errors.join(',')}`)
+    }
     const record = { id: validData.id, revision: actualRevision + 1, deleted: false, data: validData }
     store.put(record)
     await transactionComplete(transaction)

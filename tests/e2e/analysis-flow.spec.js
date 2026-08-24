@@ -162,7 +162,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   for (const suffix of [
     'report.html', 'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
     'data/primary_comparisons.csv', 'data/control_response.csv', 'data/dose_trend.csv',
-    'data/non_parametric.csv', 'data/transformed_analysis.csv',
+    'data/non_parametric.csv', 'data/transformed_analysis.csv', 'data/slide_corrections.csv',
     'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
   ]) {
     expect(archivedNames.some(name => name.endsWith(suffix))).toBe(true)

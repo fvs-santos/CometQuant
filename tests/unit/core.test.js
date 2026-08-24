@@ -72,7 +72,7 @@ describe('migration and validation', () => {
     const legacy = experiment({ schemaVersion: 2 })
     legacy.replicates[0].gels[0] = completeGel({ total: 90, class2: 90, completion: undefined })
     const migrated = core.migrateExperiment(legacy)
-    expect(migrated.schemaVersion).toBe(5)
+    expect(migrated.schemaVersion).toBe(6)
     expect(migrated.replicates[0].gels[0].completion).toBe('incomplete')
     expect(migrated.replicates[0].gels[0].incompleteReason.code).toBe('legacy-unjustified')
   })
@@ -101,7 +101,7 @@ describe('migration and validation', () => {
 
     const result = core.validateExperiment(legacy, { source: 'import' })
     expect(result.valid).toBe(true)
-    expect(result.experiment.schemaVersion).toBe(5)
+    expect(result.experiment.schemaVersion).toBe(6)
     expect(result.experiment.replicates[0].assignments[0].blindCode).toBe('ABCD-01')
     expect(result.experiment.replicates[0].gels[0].blindCode).toBe('ABCD-01')
   })
@@ -128,7 +128,8 @@ describe('migration and validation', () => {
 
     const first = core.migrateExperiment(legacy)
     expect(first).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
+      slideEditHistory: [],
       customAuditField: { preserved: true },
       studyDesign: {
         version: 1,
@@ -370,6 +371,124 @@ describe('blind code allocation', () => {
   })
 })
 
+describe('audited slide corrections', () => {
+  function correctedExperiment(mutator) {
+    const original = experiment()
+    const corrected = JSON.parse(JSON.stringify(original))
+    const replicate = corrected.replicates[0]
+    const assignment = replicate.assignments[0]
+    const oldGel = replicate.gels[0]
+    const before = core.createSlideEditSnapshot(assignment, oldGel)
+    mutator(replicate, assignment, oldGel)
+    const currentGel = replicate.gels.find(item => item.blindCode === assignment.blindCode) || null
+    const after = core.createSlideEditSnapshot(assignment, currentGel)
+    corrected.slideEditHistory.push({
+      version: 1,
+      editId: 'edit-1',
+      editedAt: '2026-01-03T00:00:00.000Z',
+      editedBy: 'Reviewer',
+      reason: 'Source worksheet was checked.',
+      slide: { replicateNumber: 1, blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1 },
+      before,
+      after
+    })
+    corrected.updatedAt = '2026-01-03T00:00:00.000Z'
+    return { original, corrected }
+  }
+
+  it('validates and authorizes a counted slide correction with matching snapshots', () => {
+    const { original, corrected } = correctedExperiment((replicate, assignment, gel) => {
+      gel.class2 = 90
+      gel.class3 = 10
+    })
+    expect(core.validateExperiment(corrected).valid).toBe(true)
+    expect(core.validateExperimentTransition(original, corrected)).toEqual({ valid: true, errors: [] })
+  })
+
+  it('supports counted to absent while preserving the complete previous record', () => {
+    const { original, corrected } = correctedExperiment((replicate, assignment) => {
+      replicate.gels = []
+      assignment.status = 'absent'
+      assignment.absenceReason = { code: 'quality', detail: '' }
+    })
+    expect(core.validateExperiment(corrected).valid).toBe(true)
+    expect(corrected.slideEditHistory[0].before.gel.total).toBe(100)
+    expect(corrected.slideEditHistory[0].after.gel).toBeNull()
+    expect(core.validateExperimentTransition(original, corrected).valid).toBe(true)
+  })
+
+  it('supports absent to counted with a newly created valid gel', () => {
+    const original = experiment()
+    const assignment = original.replicates[0].assignments[0]
+    original.replicates[0].gels = []
+    assignment.status = 'absent'
+    assignment.absenceReason = { code: 'quality', detail: '' }
+    const corrected = JSON.parse(JSON.stringify(original))
+    const correctedAssignment = corrected.replicates[0].assignments[0]
+    const before = core.createSlideEditSnapshot(correctedAssignment, null)
+    correctedAssignment.status = 'counted'
+    correctedAssignment.recordedAt = '2026-01-03T00:00:00.000Z'
+    delete correctedAssignment.absenceReason
+    const gel = completeGel({ recordedAt: '2026-01-03T00:00:00.000Z' })
+    corrected.replicates[0].gels.push(gel)
+    const after = core.createSlideEditSnapshot(correctedAssignment, gel)
+    corrected.slideEditHistory.push({
+      version: 1, editId: 'edit-absence', editedAt: '2026-01-03T00:00:00.000Z', editedBy: 'Reviewer', reason: 'Counts recovered from source record.',
+      slide: { replicateNumber: 1, blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1 }, before, after
+    })
+    expect(core.validateExperiment(corrected).valid).toBe(true)
+    expect(core.validateExperimentTransition(original, corrected).valid).toBe(true)
+  })
+
+  it('rejects terminal changes without an event and rejects audit rewriting', () => {
+    const original = experiment()
+    const silent = JSON.parse(JSON.stringify(original))
+    silent.replicates[0].gels[0].class2 = 90
+    silent.replicates[0].gels[0].class3 = 10
+    expect(core.validateExperiment(silent).valid).toBe(true)
+    expect(core.validateExperimentTransition(original, silent).valid).toBe(false)
+
+    const { corrected } = correctedExperiment((replicate, assignment, gel) => {
+      gel.class2 = 90
+      gel.class3 = 10
+    })
+    const rewritten = JSON.parse(JSON.stringify(corrected))
+    rewritten.slideEditHistory[0].reason = 'Rewritten reason'
+    expect(core.validateExperimentTransition(corrected, rewritten).errors).toContain('slide-edit-history-not-append-only')
+  })
+
+  it('rejects broken chains, missing accountability, and history that disagrees with current data', () => {
+    const { corrected } = correctedExperiment((replicate, assignment, gel) => {
+      gel.class2 = 90
+      gel.class3 = 10
+    })
+    const missingEditor = JSON.parse(JSON.stringify(corrected))
+    missingEditor.slideEditHistory[0].editedBy = ''
+    expect(core.validateExperiment(missingEditor).valid).toBe(false)
+
+    const staleCurrent = JSON.parse(JSON.stringify(corrected))
+    staleCurrent.replicates[0].gels[0].class2 = 80
+    staleCurrent.replicates[0].gels[0].class3 = 20
+    expect(core.validateExperiment(staleCurrent).errors.some(error => error.startsWith('slide-edit-current-state-'))).toBe(true)
+  })
+
+  it('treats reordered JSON object properties as the same audited snapshot', () => {
+    const { corrected } = correctedExperiment((replicate, assignment, gel) => {
+      gel.class2 = 90
+      gel.class3 = 10
+    })
+    const original = corrected.slideEditHistory[0].before.assignment
+    corrected.slideEditHistory[0].before.assignment = {
+      status: original.status,
+      gelNumber: original.gelNumber,
+      treatmentIndex: original.treatmentIndex,
+      recordedAt: original.recordedAt,
+      blindCode: original.blindCode
+    }
+    expect(core.validateExperiment(corrected).valid).toBe(true)
+  })
+})
+
 describe('aggregation and consolidation', () => {
   it('averages all analyzable technical slides while reporting target adherence', () => {
     const data = experiment({ slidesPerTreatment: 3 })
@@ -393,6 +512,36 @@ describe('aggregation and consolidation', () => {
     second.replicates[0].gels[0].class2 = 0
     second.replicates[0].gels[0].class4 = 100
     expect(() => core.mergeExperiments([first, second], () => 'merged')).toThrow(/gel-conflict/)
+  })
+
+  it('uses an audited descendant when consolidating pre- and post-correction exports', () => {
+    const before = experiment()
+    const after = JSON.parse(JSON.stringify(before))
+    const assignment = after.replicates[0].assignments[0]
+    const gel = after.replicates[0].gels[0]
+    const previousSnapshot = core.createSlideEditSnapshot(assignment, gel)
+    gel.class2 = 90
+    gel.class3 = 10
+    const correctedSnapshot = core.createSlideEditSnapshot(assignment, gel)
+    after.slideEditHistory.push({
+      version: 1, editId: 'edit-1', editedAt: '2026-01-03T00:00:00.000Z', editedBy: 'Reviewer', reason: 'Checked source record.',
+      slide: { replicateNumber: 1, blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1 }, before: previousSnapshot, after: correctedSnapshot
+    })
+    const merged = core.mergeExperiments([before, after], () => 'merged')
+    expect(merged.replicates[0].gels[0].class3).toBe(10)
+    expect(merged.slideEditHistory).toHaveLength(1)
+
+    const falseAncestor = JSON.parse(JSON.stringify(before))
+    falseAncestor.replicates[0].gels[0].class2 = 0
+    falseAncestor.replicates[0].gels[0].class4 = 100
+    expect(() => core.mergeExperiments([falseAncestor, after], () => 'merged')).toThrow(/slide-edit-ancestor-conflict/)
+
+    const complementary = experiment({ id: 'complementary' })
+    complementary.replicates[0].replicateNumber = 2
+    complementary.replicates[0].assignments[0].blindCode = 'BB1'
+    complementary.replicates[0].gels[0].blindCode = 'BB1'
+    const combined = core.mergeExperiments([after, complementary], () => 'combined')
+    expect(combined.replicates.map(item => item.replicateNumber)).toEqual([1, 2])
   })
 
   it('rejects consolidation while partial counting is active', () => {

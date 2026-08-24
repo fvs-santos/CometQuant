@@ -49,7 +49,7 @@ is significant.
 
 ## Data And Blinding
 
-The current experiment schema is version 5. Each replicate contains a complete
+The current experiment schema is version 6. Each replicate contains a complete
 mapping of blind assignments and counted slides. Assignment states are
 `pending`, `counting`, `counted` or `absent`.
 
@@ -60,6 +60,14 @@ numeric concentration metadata. Genotoxicity compares concentrations with the
 selected negative or vehicle control. Antigenotoxicity compares combined
 treatments with the positive mutagen-only control. The design is not shown while
 counting is blinded.
+
+After blinding is complete, a counted or absent slide can be corrected from the
+experiment summary. Every correction requires a responsible person's name and a
+free-text reason. The application saves the previous and corrected terminal
+states in an append-only `slideEditHistory` event in the same IndexedDB
+transaction. Current `gels` and `assignments` remain the only scientific input;
+the history is exported separately in HTML and `slide_corrections.csv` and is
+included in JSON, encrypted backups and ZIP packages.
 
 New blind codes use two ordered letters and an unpadded slide number, such as
 `AB1`, `AB2` or `CY10`. The 676 bases from `AA` through `ZZ` are allocated
@@ -80,7 +88,7 @@ While blinding is active, the experiment list offers an encrypted backup instead
 of plaintext JSON export. The envelope uses PBKDF2-SHA-256 with 600,000
 iterations and AES-256-GCM with random salt and IV. The password is never stored
 and cannot be recovered. Import detects `.cqbackup.json` files and decrypts them
-before normal schema validation. Experiments from schemas 1 through 4 migrate
+before normal schema validation. Experiments from schemas 1 through 5 migrate
 without an inferred scientific intent and require one explicit study-design
 confirmation after blinding is complete before the new analysis can run.
 

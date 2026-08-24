@@ -50,6 +50,8 @@ function renderAnalysisState() {
   const disabledStates = new Set(['idle', 'checking', 'downloading', 'initializing', 'running'])
   button.disabled = disabledStates.has(analysisState)
   cancel.hidden = !['downloading', 'initializing', 'running'].includes(analysisState)
+  const editHistoryButton = document.getElementById('btn-export-edit-history')
+  if (editHistoryButton) editHistoryButton.hidden = !(currentExperiment?.slideEditHistory?.length)
   if (analysisState === 'missing') button.textContent = t('analysis.install')
   else if (analysisState === 'error') button.textContent = t('analysis.retry')
   else if (analysisState === 'running') button.textContent = t('analysis.running')
@@ -248,6 +250,9 @@ function initAnalysis() {
   document.getElementById('btn-export-csv')
     .addEventListener('click', exportCsv)
 
+  document.getElementById('btn-export-edit-history')
+    .addEventListener('click', exportSlideEditHistory)
+
   document.getElementById('btn-export-zip')
     .addEventListener('click', exportZip)
 
@@ -269,6 +274,7 @@ function runAnalysis() {
   const experimentContext = {
     id: currentExperiment.id,
     updatedAt: currentExperiment.updatedAt,
+    revision: currentExperimentRevision,
     lang: currentLanguage
   }
 
@@ -295,7 +301,7 @@ function handleAnalysisWorkerMessage(message) {
   if (message.type !== 'result') return
   const context = activeAnalysisRequest.context
   activeAnalysisRequest = null
-  if (!currentExperiment || currentExperiment.id !== context.id || currentExperiment.updatedAt !== context.updatedAt || currentLanguage !== context.lang) {
+  if (!currentExperiment || currentExperiment.id !== context.id || currentExperiment.updatedAt !== context.updatedAt || currentExperimentRevision !== context.revision || currentLanguage !== context.lang) {
     invalidateAnalysisResults()
     setAnalysisState('ready', 'analysis.ready', 100)
     return
@@ -355,6 +361,7 @@ function hasCurrentAnalysisResults() {
     currentExperiment &&
     analysisResultsContext.id === currentExperiment.id &&
     analysisResultsContext.updatedAt === currentExperiment.updatedAt &&
+    analysisResultsContext.revision === currentExperimentRevision &&
     analysisResultsContext.lang === currentLanguage
   )
 }
@@ -769,6 +776,13 @@ function exportCsv() {
 }
 
 
+function exportSlideEditHistory() {
+  if (!hasCurrentAnalysisResults() || !currentExperiment?.slideEditHistory?.length) return
+  if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  downloadFile(CometQuantExport.buildSlideEditCsv(currentExperiment), `${exportBaseName()}_slide_corrections.csv`, 'text/csv;charset=utf-8')
+}
+
+
 async function exportZip() {
   if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
@@ -782,6 +796,7 @@ async function exportZip() {
     data.file('experiment.json', JSON.stringify(currentExperiment, null, 2))
     data.file('analysis.json', JSON.stringify(analysisResults, null, 2))
     data.file('raw_slides.csv', CometQuantExport.buildRawCsv(currentExperiment))
+    data.file('slide_corrections.csv', CometQuantExport.buildSlideEditCsv(currentExperiment))
     data.file('replicate_scores.csv', CometQuantExport.buildAggregateCsv(currentExperiment))
     data.file('population.csv', CometQuantExport.buildPopulationCsv(analysisResults))
     data.file('block_anova.csv', CometQuantExport.buildBlockAnovaCsv(analysisResults))

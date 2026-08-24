@@ -284,7 +284,7 @@
       return index >= 0 ? parsed.treatments[index] : ''
     }
     const experiment = {
-      schemaVersion: 5,
+      schemaVersion: CometQuantCore.SCHEMA_VERSION,
       id: createId(),
       createdAt: now,
       updatedAt: now,
@@ -309,6 +309,7 @@
         primaryTreatmentIndices: [], validationComparison: null, alpha: 0.05, alternative: 'two-sided',
         pAdjustment: 'holm', trendReferenceAsZero: true, configurationSource: null
       },
+      slideEditHistory: [],
       replicates: [],
       progress: null,
       provenance: {

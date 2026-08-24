@@ -139,6 +139,51 @@ describe('safe exports', () => {
     expect(csv).toContain('\r\n')
   })
 
+  it('exports slide corrections separately and safely in CSV and HTML', () => {
+    const data = experiment()
+    const assignment = data.replicates[0].assignments[0]
+    const gel = data.replicates[0].gels[0]
+    const before = require('../../js/core.js').createSlideEditSnapshot(assignment, gel)
+    gel.class2 = 90
+    gel.class3 = 10
+    const after = require('../../js/core.js').createSlideEditSnapshot(assignment, gel)
+    data.slideEditHistory.push({
+      version: 1, editId: 'edit-1', editedAt: '2026-01-03T00:00:00.000Z', editedBy: '=DANGEROUS()',
+      reason: '<img src=x onerror=alert(1)>',
+      slide: { replicateNumber: 1, blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1 }, before, after
+    })
+
+    const csv = exporter.buildSlideEditCsv(data)
+    expect(csv).toContain('"slide_corrections"'.replace('slide_corrections', 'edit_id'))
+    expect(csv).toContain('"\'=DANGEROUS()"')
+    expect(csv).toContain('"before_class2"')
+    expect(csv).toContain('"before_assignment_recorded_at"')
+    expect(csv).toContain('"before_gel_recorded_at"')
+    expect(exporter.buildRawRows(data)).toHaveLength(1)
+
+    const html = exporter.buildReportHtml(data, v2Analysis(), 'en')
+    expect(html).toContain('Slide correction history')
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(html).not.toContain('<img src=x onerror=alert(1)>')
+  })
+
+  it('shows an incomplete-reason-only correction distinctly in the report', () => {
+    const data = experiment()
+    const assignment = data.replicates[0].assignments[0]
+    const gel = data.replicates[0].gels[0]
+    Object.assign(gel, { class2: 90, total: 90, completion: 'incomplete', incompleteReason: { code: 'poor-quality', detail: '' } })
+    const before = require('../../js/core.js').createSlideEditSnapshot(assignment, gel)
+    gel.incompleteReason = { code: 'technical-error', detail: '' }
+    const after = require('../../js/core.js').createSlideEditSnapshot(assignment, gel)
+    data.slideEditHistory.push({
+      version: 1, editId: 'edit-reason', editedAt: '2026-01-03T00:00:00.000Z', editedBy: 'Reviewer', reason: 'Reason corrected.',
+      slide: { replicateNumber: 1, blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1 }, before, after
+    })
+    const html = exporter.buildReportHtml(data, v2Analysis(), 'en')
+    expect(html).toContain('incomplete_reason=poor-quality')
+    expect(html).toContain('incomplete_reason=technical-error')
+  })
+
   it('exports an off-target counted slide with its effective-total score', () => {
     const data = experiment()
     Object.assign(data.replicates[0].gels[0], {

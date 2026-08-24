@@ -608,6 +608,19 @@ button:focus-visible {
   font-size: var(--font-size-sm);
 }
 
+.notice-card h3 {
+  margin-bottom: var(--space-sm);
+  color: var(--color-text-primary);
+}
+
+.notice-card p + p {
+  margin-top: var(--space-sm);
+}
+
+#replicates-list {
+  margin-top: var(--space-md);
+}
+
 .experiment-status {
   margin: var(--space-sm) 0 var(--space-md);
 }
@@ -788,6 +801,76 @@ button:disabled {
   background: var(--color-bg-secondary);
   color: var(--color-text-primary);
   padding: 0;
+}
+
+#slide-edit-dialog {
+  width: min(94vw, 720px);
+  max-height: 92vh;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--color-bg-card-hover);
+  border-radius: var(--border-radius-lg);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+#slide-edit-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.slide-edit-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-height: 92vh;
+  padding: var(--space-lg);
+  overflow-y: auto;
+}
+
+.slide-edit-count-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(72px, 1fr));
+  gap: var(--space-sm);
+}
+
+.slide-edit-count-grid input,
+#slide-edit-dialog select,
+#slide-edit-dialog input,
+#slide-edit-dialog textarea {
+  width: 100%;
+}
+
+.btn-compact {
+  min-height: 36px;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.slide-edit-history {
+  margin: var(--space-lg) 0;
+}
+
+.slide-edit-history details {
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--color-bg-card-hover);
+}
+
+.slide-edit-history summary {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.slide-edit-history details p {
+  margin-top: var(--space-sm);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .slide-edit-count-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 #backup-password-dialog::backdrop {

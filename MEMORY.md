@@ -11,6 +11,7 @@ O CometQuant Lab e uma aplicacao movel/PWA para apoiar a avaliacao visual de ens
 - contagem de nucleoides nas classes visuais 0 a 4;
 - persistencia local e retomada da contagem;
 - registro de laminas ausentes ou incompletas com justificativa;
+- correcao auditavel de laminas finalizadas, com responsavel, justificativa e estados anterior/posterior;
 - consolidacao, importacao JSON, importacao de planilhas XLSX legadas e exportacao de experimentos;
 - calculo do score visual;
 - analises estatisticas no navegador;
@@ -24,11 +25,11 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 
 ### Modulos principais
 
-- `js/core.js`: regras de dominio, schema, migracao, validacao, score, agregacao de laminas tecnicas e consolidacao de experimentos. Tambem oferece compatibilidade CommonJS para os testes em Node.
-- `js/app.js`: navegacao, estado da interface, setup, geracao dos codigos cegos, contagem, undo, autosave, resumo, importacao e exportacao JSON.
+- `js/core.js`: regras de dominio, schema, migracao, validacao, snapshots e transicoes de correcoes auditaveis, score, agregacao de laminas tecnicas e consolidacao de experimentos. Tambem oferece compatibilidade CommonJS para os testes em Node.
+- `js/app.js`: navegacao, estado da interface, setup, geracao dos codigos cegos, contagem, undo, autosave, edicao de laminas finalizadas, resumo, importacao e exportacao JSON.
 - `js/legacy-xlsx.js`: leitor OOXML restrito ao formato legado Comet VisualScore, conversao das contagens brutas para o schema atual e suporte offline usando o JSZip ja vendorizado.
-- `js/repository.js`: IndexedDB autoritativo, migracao do `localStorage`, quarentena, revisoes, tombstones, mirror de transicao e notificacao entre abas.
-- `js/export.js`: serializacao canonica de CSV e relatorio, escape HTML, neutralizacao de formulas de planilha, validacao de PNG e nomes de arquivo seguros.
+- `js/repository.js`: IndexedDB autoritativo, migracao do `localStorage`, quarentena, revisoes, tombstones, mirror de transicao, validacao transacional do historico de correcoes e notificacao entre abas.
+- `js/export.js`: serializacao canonica de CSV, historico de correcoes e relatorio, escape HTML, neutralizacao de formulas de planilha, validacao de PNG e nomes de arquivo seguros.
 - `js/analysis.js`: estados da interface cientifica, comunicacao com o worker, apresentacao dos resultados, graficos e exportacao do pacote final.
 - `js/analysis-worker.js`: inicializacao isolada do Pyodide e execucao do motor estatistico fora da thread principal.
 - `js/science-package.js`: instalacao opcional, verificacao SHA-256 e gerenciamento do cache cientifico.
@@ -50,7 +51,7 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 
 ## Modelo de dados
 
-O schema atual e a versao 5, definida em `js/core.js`.
+O schema atual e a versao 6, definida em `js/core.js`.
 
 Um experimento contem, em linhas gerais:
 
@@ -60,6 +61,7 @@ Um experimento contem, em linhas gerais:
 - quantidade de laminas por tratamento;
 - unidade de concentracao e lista de tratamentos;
 - metadados estruturados dos tratamentos e `studyDesign` versionado;
+- `slideEditHistory`, um log append-only de correcoes em laminas finalizadas;
 - progresso parcial da contagem, quando houver;
 - repeticoes com assignments cegas e laminas contabilizadas.
 
@@ -71,6 +73,7 @@ Dados antigos sao migrados antes do uso:
 - versoes futuras sao recusadas;
 - laminas legadas fora da meta sao marcadas como incompletas com motivo `legacy-unjustified`, mas permanecem analisaveis se o total efetivamente contado for positivo e consistente;
 - schemas 1 a 4 recebem metadados conservadores e um plano analitico `unconfigured`, sem inferencia silenciosa do tipo de ensaio ou referencia;
+- schemas 1 a 5 recebem `slideEditHistory: []`; historicos existentes no schema 6 sao validados sem reescrita;
 - o status do experimento e recalculado a partir das assignments pendentes.
 
 ## Fluxos implementados
@@ -95,6 +98,14 @@ Ao finalizar uma lamina:
 
 Laminas ausentes sao preservadas e excluidas das analises. Laminas contadas abaixo ou acima da meta sao preservadas, sinalizadas e incluidas usando o total efetivo como denominador; somente uma contagem sem total positivo ou internamente inconsistente nao produz score.
 
+### Correcao auditavel de laminas finalizadas
+
+Uma lamina `counted` ou `absent` pode ser corrigida pelo resumo somente quando nao existe assignment `pending`/`counting` nem `experiment.progress`. A operacao exige nome do responsavel e justificativa em texto livre. Sao aceitas as quatro transicoes terminais: `counted -> counted`, `counted -> absent`, `absent -> counted` e `absent -> absent`.
+
+Cada correcao acrescenta um evento versionado em `slideEditHistory`, identificado pela combinacao `replicateNumber + blindCode + treatmentIndex + gelNumber`. O evento preserva snapshots canonicos de assignment e gel antes/depois, `editId`, `editedAt`, `editedBy` e `reason`. Os timestamps de estado da assignment e da contagem do gel sao armazenados e apresentados separadamente; mudancas de status recebem o timestamp da correcao.
+
+O repositorio valida a transicao dentro da mesma operacao IndexedDB com compare-and-swap. Eventos anteriores nao podem ser removidos, reordenados ou alterados, e qualquer mudanca em uma lamina terminal precisa corresponder exatamente ao ultimo evento acrescentado. A igualdade estrutural usa serializacao canonica independente da ordem das propriedades JSON. Uma correcao tambem invalida resultados analiticos anteriores para impedir associacao silenciosa entre uma analise e dados revisados.
+
 ### Regra de blinding
 
 Enquanto qualquer assignment estiver `pending` ou `counting`, ficam bloqueados:
@@ -110,7 +121,7 @@ Esse bloqueio e uma decisao de fluxo para reduzir revelacao acidental durante a 
 
 A importacao aceita um ou varios JSONs, com limite de 5 MB por arquivo. Um arquivo e importado diretamente; varios sao consolidados.
 
-Experimentos consolidados precisam ter metadados e tratamentos compativeis. Conflitos detectados na mesma lamina/codigo interrompem o merge. Um experimento importado com ID ja existente substitui a copia local.
+Experimentos consolidados precisam ter metadados e tratamentos compativeis. Conflitos detectados na mesma lamina/codigo interrompem o merge. Historicos de correcao precisam ser identicos ou ter relacao ancestral por prefixo. Para uma fonte ancestral, o estado esperado e reconstruido evento a evento e comparado por lamina compartilhada; divergencias sao recusadas, enquanto repeticoes complementares continuam sendo incorporadas normalmente. Um experimento importado com ID ja existente substitui a copia local.
 
 Existe tambem um fluxo separado **Importar XLSX legado**. Ele aceita uma planilha por vez, localiza a aba `Comet Assay`, le apenas as linhas `Gel N` dos cinco blocos de classes e ignora medias/desvios exportados. Os nomes das colunas sao tratados como rotulos opacos: o usuario classifica cada tratamento na previa como controle positivo, negativo, de solvente, concentracao ou outro. O controle de solvente e opcional.
 
@@ -151,6 +162,8 @@ As rotinas canonicas de exportacao ficam em `js/export.js`. Elas foram separadas
 - CSV com BOM e terminacoes CRLF;
 - sanitizacao de nomes de arquivo;
 - verificacao basica do PNG em base64.
+
+O historico auditavel integra o JSON do experimento e o backup criptografado. O relatorio HTML apresenta a trilha de correcoes com motivos e timestamps separados, e o pacote de analise inclui `data/slide_corrections.csv`. O mesmo CSV pode ser exportado diretamente pelo resumo.
 
 O JSZip e copiado para `vendor/` durante `npm install`, permitindo a geracao do pacote ZIP em hospedagem estatica sem depender de uma CDN para essa biblioteca.
 
@@ -201,6 +214,9 @@ npm test
 npm run test:watch
 npm run test:coverage
 npm run test:e2e
+npm run test:e2e:chromium
+npm run test:e2e:webkit
+npm run test:analysis
 npm run check
 npm run vendor
 ```
@@ -219,6 +235,7 @@ Existe um resultado local do Playwright indicando uma execucao sem falhas, mas e
 - O resumo e as exportacoes reveladoras permanecem bloqueados enquanto o experimento nao estiver integralmente contado ou justificado.
 - Importacoes passam por migracao e validacao antes de substituir dados locais.
 - Conflitos de consolidacao nao devem ser resolvidos silenciosamente.
+- O historico de correcoes deve permanecer append-only; alteracoes terminais sem evento correspondente devem ser rejeitadas na camada de persistencia.
 - Conteudo controlado pelo usuario nao deve ser inserido com `innerHTML`.
 - CSVs devem continuar neutralizando formulas de planilha.
 - Mudancas de schema exigem incremento de versao e migracao explicita.
@@ -231,6 +248,8 @@ Existe um resultado local do Playwright indicando uma execucao sem falhas, mas e
 O mapeamento entre codigos e tratamentos e armazenado em texto claro no IndexedDB. O bloqueio existe somente na interface. DevTools, acesso ao perfil do navegador ou uma copia do perfil revelam o mapa.
 
 O modelo atual deve ser descrito como **blinding operacional contra revelacao acidental**, nao como protecao contra um usuario adversarial. Nao ha autenticacao, criptografia, assinatura, controle de acesso ou separacao tecnica entre codificador e avaliador.
+
+Pelo mesmo motivo, o historico de correcoes oferece rastreabilidade operacional e protecao contra alteracoes silenciosas pelo fluxo normal da aplicacao, mas nao e uma assinatura digital nem um log inviolavel contra adulteracao deliberada do armazenamento ou de um JSON exportado.
 
 ### Concorrencia nao faz merge automatico
 
@@ -507,6 +526,33 @@ Concluido na continuidade de 21/08/2026 (reformulacao da apresentacao do relator
 10. Avaliar um indice com links internos para as secoes do relatorio, pois a nova leitura progressiva melhorou a hierarquia, mas o documento completo continua longo.
 11. Preservar, em qualquer revisao, a separacao entre efeito em doses individuais, tendencia dose-resposta, relevancia biologica e validade regulatoria; preservar tambem os dados completos, a acessibilidade, a operacao offline e as protecoes de seguranca da exportacao.
 
+Concluido na continuidade de 24/08/2026 (correcao auditavel de laminas finalizadas):
+
+### Modelo, integridade e persistencia
+
+- O schema de experimento passou de 5 para 6 e ganhou `slideEditHistory`, inicializado vazio na migracao de documentos anteriores.
+- O historico e append-only e preserva snapshots completos antes/depois, identidade logica da lamina, responsavel, justificativa e timestamp da edicao.
+- A validacao permite corrigir contagens, transformar contagem em ausencia e restaurar uma ausencia como contagem, sempre mantendo as invariantes entre assignment e gel.
+- `validateExperimentTransition` e a camada IndexedDB rejeitam remocao/reordenacao do historico, adulteracao de eventos anteriores e mudancas de dados terminais sem evento correspondente. O commit continua atomico e protegido por revisao compare-and-swap.
+- A comparacao estrutural dos snapshots foi tornada independente da ordem das propriedades JSON.
+- O merge aceita historicos iguais ou ancestrais por prefixo. O estado no ponto ancestral e reconstruido por lamina para aceitar somente diferencas explicadas pelas correcoes, sem ocultar conflitos em outras laminas e sem impedir repeticoes complementares.
+
+### Interface, auditoria e exportacoes
+
+- O resumo ganhou indicadores de revisao, historico detalhado e dialogo responsivo para editar uma lamina concluida. Responsavel e justificativa sao obrigatorios.
+- A apresentacao distingue `assignment.recordedAt` de `gel.recordedAt` e localiza motivos de ausencia/incompletude em portugues e ingles.
+- JSON e backup criptografado preservam o log; o relatorio HTML inclui a trilha; o CSV dedicado `slide_corrections.csv` pode ser baixado no resumo e integra o ZIP cientifico.
+- Uma correcao invalida o resultado analitico anterior, mas o motor Python ignora o campo de auditoria e continua calculando apenas sobre o estado cientifico atual.
+- O shell offline foi incrementado para `cometquant-shell-v17` para distribuir os novos HTML, CSS e scripts.
+
+### Validacao desta continuidade
+
+- `npm run check` passou.
+- `npm test` passou com 98 testes JavaScript.
+- `npm run test:analysis` passou com 27 testes Python.
+- As suites E2E completas passaram com 21 cenarios em Chromium/Pixel 7 e 21 em WebKit/iPhone, incluindo correcoes sucessivas, transicoes entre contado/ausente e inclusao do CSV no ZIP.
+- A revisao final nao encontrou findings de severidade alta ou media nas regras de ancestralidade do merge e na rastreabilidade dos timestamps.
+
 Pendencias operacionais que continuam validas em paralelo:
 
 1. Executar a checklist em Safari macOS, iPhone e iPad reais, incluindo PWA instalada, baixa disponibilidade de espaco e Pyodide offline.
@@ -558,9 +604,9 @@ Pendencias operacionais que continuam validas em paralelo:
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- A continuidade atual inclui schema 5, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
+- A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
-- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v15`.
+- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v17`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

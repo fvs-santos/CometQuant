@@ -16,7 +16,7 @@ function loadAppFunctions() {
   )(core, documentFacade, {}, () => {})
 }
 
-describe('app schema 5 study design flow', () => {
+describe('app schema 6 study design and correction flow', () => {
   beforeEach(() => {
     document.body.replaceChildren()
     globalThis.currentLanguage = 'en'
@@ -160,10 +160,10 @@ describe('app schema 5 study design flow', () => {
     renderSummaryTable()
 
     const cells = Array.from(container.querySelectorAll('tbody td'), cell => cell.textContent)
-    expect(cells[2]).toBe('Off target (included)')
-    expect(cells[9]).toBe('99')
-    expect(cells[10]).toBe('34.09')
-    expect(cells[10]).not.toBe('Excluded from analysis')
+    expect(cells[3]).toBe('Off target (included)')
+    expect(cells[10]).toBe('99')
+    expect(cells[11]).toBe('34.09')
+    expect(cells[11]).not.toBe('Excluded from analysis')
   })
 })
 

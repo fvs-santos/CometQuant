@@ -5,7 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict'
 
-  const SCHEMA_VERSION = 5
+  const SCHEMA_VERSION = 6
   const STUDY_DESIGN_VERSION = 1
   const MAX_FILE_SIZE = 5 * 1024 * 1024
   const LIMITS = { nucleoids: 10000, slides: 100, concentrations: 100, text: 120, detail: 500 }
@@ -152,7 +152,7 @@
         missingRequiredFields
       }
     }
-    // Schema v5 adds an explicit analytical design while preserving blind codes verbatim.
+    // Schema v6 adds an append-only slide correction history.
     experiment.schemaVersion = SCHEMA_VERSION
     experiment.slidesPerTreatment = Number.isInteger(Number(experiment.slidesPerTreatment))
       ? Number(experiment.slidesPerTreatment) : 1
@@ -167,6 +167,7 @@
     if (version < 5 || experiment.studyDesign === undefined) {
       experiment.studyDesign = unconfiguredStudyDesign()
     }
+    if (version < 6) experiment.slideEditHistory = []
 
     experiment.replicates.forEach(replicate => {
       replicate.gels = Array.isArray(replicate.gels) ? replicate.gels : []
@@ -294,6 +295,111 @@
     return errors
   }
 
+  function createSlideEditSnapshot(assignment, gel) {
+    if (!isObject(assignment)) return null
+    const assignmentSnapshot = {
+      blindCode: assignment.blindCode,
+      treatmentIndex: assignment.treatmentIndex,
+      gelNumber: assignment.gelNumber,
+      status: assignment.status
+    }
+    if (assignment.recordedAt !== undefined) assignmentSnapshot.recordedAt = assignment.recordedAt
+    if (assignment.status === 'absent') assignmentSnapshot.absenceReason = clone(assignment.absenceReason)
+
+    let gelSnapshot = null
+    if (gel !== null && gel !== undefined) {
+      gelSnapshot = {
+        blindCode: gel.blindCode,
+        treatment: gel.treatment,
+        treatmentIndex: gel.treatmentIndex,
+        gelNumber: gel.gelNumber,
+        class0: gel.class0,
+        class1: gel.class1,
+        class2: gel.class2,
+        class3: gel.class3,
+        class4: gel.class4,
+        total: gel.total,
+        status: gel.status,
+        completion: gel.completion
+      }
+      if (gel.recordedAt !== undefined) gelSnapshot.recordedAt = gel.recordedAt
+      if (gel.completion === 'incomplete') gelSnapshot.incompleteReason = clone(gel.incompleteReason)
+    }
+    return { assignment: assignmentSnapshot, gel: gelSnapshot }
+  }
+
+  function slideEditKey(slide) {
+    return `${slide.replicateNumber}:${slide.blindCode}`
+  }
+
+  function validateSlideEditSnapshot(snapshot, slide, treatments, target) {
+    if (!isObject(snapshot) || !isObject(snapshot.assignment)) return false
+    const assignment = snapshot.assignment
+    if (assignment.blindCode !== slide.blindCode || assignment.treatmentIndex !== slide.treatmentIndex || assignment.gelNumber !== slide.gelNumber) return false
+    if (!['counted', 'absent'].includes(assignment.status)) return false
+    if (assignment.recordedAt !== undefined && !validIsoDate(assignment.recordedAt)) return false
+    if (assignment.status === 'absent') {
+      if (snapshot.gel !== null || !validateReason(assignment.absenceReason, ABSENCE_REASONS, true)) return false
+    } else {
+      if (!isObject(snapshot.gel)) return false
+      const gel = snapshot.gel
+      const counts = [gel.class0, gel.class1, gel.class2, gel.class3, gel.class4]
+      if (gel.blindCode !== slide.blindCode || gel.treatmentIndex !== slide.treatmentIndex || gel.gelNumber !== slide.gelNumber || gel.treatment !== treatments[slide.treatmentIndex]) return false
+      if (!counts.every(value => Number.isInteger(value) && value >= 0)) return false
+      if (!Number.isInteger(gel.total) || gel.total !== counts.reduce((sum, value) => sum + value, 0)) return false
+      if (gel.status !== 'counted' || gel.completion !== (gel.total === target ? 'complete' : 'incomplete')) return false
+      if (gel.recordedAt !== undefined && !validIsoDate(gel.recordedAt)) return false
+      if (gel.completion === 'incomplete' && !validateReason(gel.incompleteReason, INCOMPLETE_REASONS, true)) return false
+    }
+    return stableEqual(snapshot, createSlideEditSnapshot(assignment, snapshot.gel))
+  }
+
+  function validateSlideEditHistory(experiment) {
+    const errors = []
+    const history = experiment.slideEditHistory
+    if (!Array.isArray(history) || history.length > 10000) return ['invalid-slide-edit-history']
+    const editIds = new Set()
+    const latestBySlide = new Map()
+    history.forEach((event, index) => {
+      const prefix = `slide-edit-${index + 1}`
+      if (!isObject(event)) {
+        errors.push(`${prefix}-invalid`)
+        return
+      }
+      if (event.version !== 1) errors.push(`${prefix}-version`)
+      if (typeof event.editId !== 'string' || !event.editId || event.editId.length > 200 || editIds.has(event.editId)) errors.push(`${prefix}-id`)
+      editIds.add(event.editId)
+      if (!validIsoDate(event.editedAt)) errors.push(`${prefix}-date`)
+      if (typeof event.editedBy !== 'string' || !cleanText(event.editedBy) || cleanText(event.editedBy) !== event.editedBy) errors.push(`${prefix}-editor`)
+      if (typeof event.reason !== 'string' || !cleanText(event.reason, LIMITS.detail) || cleanText(event.reason, LIMITS.detail) !== event.reason) errors.push(`${prefix}-reason`)
+      const slide = event.slide
+      const validSlide = isObject(slide) && Number.isInteger(slide.replicateNumber) && slide.replicateNumber > 0 &&
+        Boolean(parseBlindCode(slide.blindCode)) && Number.isInteger(slide.treatmentIndex) && slide.treatmentIndex >= 0 && slide.treatmentIndex < experiment.treatments.length &&
+        Number.isInteger(slide.gelNumber) && slide.gelNumber >= 1 && slide.gelNumber <= experiment.slidesPerTreatment
+      if (!validSlide) {
+        errors.push(`${prefix}-slide`)
+        return
+      }
+      if (!validateSlideEditSnapshot(event.before, slide, experiment.treatments, experiment.nucleoidsPerGel)) errors.push(`${prefix}-before`)
+      if (!validateSlideEditSnapshot(event.after, slide, experiment.treatments, experiment.nucleoidsPerGel)) errors.push(`${prefix}-after`)
+      if (stableEqual(event.before, event.after)) errors.push(`${prefix}-no-change`)
+      const key = slideEditKey(slide)
+      if (latestBySlide.has(key) && !stableEqual(latestBySlide.get(key), event.before)) errors.push(`${prefix}-chain`)
+      latestBySlide.set(key, event.after)
+    })
+
+    latestBySlide.forEach((snapshot, key) => {
+      const separator = key.indexOf(':')
+      const replicateNumber = Number(key.slice(0, separator))
+      const blindCode = key.slice(separator + 1)
+      const replicate = experiment.replicates.find(item => item.replicateNumber === replicateNumber)
+      const assignment = replicate?.assignments?.find(item => item.blindCode === blindCode)
+      const gel = replicate?.gels?.find(item => item.blindCode === blindCode) || null
+      if (!assignment || !stableEqual(snapshot, createSlideEditSnapshot(assignment, gel))) errors.push(`slide-edit-current-state-${key}`)
+    })
+    return errors
+  }
+
   function validateExperiment(raw, options = {}) {
     const errors = []
     const sourceVersion = raw && raw.schemaVersion === undefined ? 1 : Number(raw?.schemaVersion)
@@ -323,6 +429,7 @@
     push(new Set(normalizedTreatments).size === normalizedTreatments.length, 'duplicate-treatment')
     validateTreatmentMetadata(experiment.treatmentMetadata, treatments).forEach(error => errors.push(error))
     validateStudyDesign(experiment.studyDesign, experiment.treatmentMetadata, treatments).forEach(error => errors.push(error))
+    validateSlideEditHistory(experiment).forEach(error => errors.push(error))
     push(Array.isArray(experiment.replicates) && experiment.replicates.length <= 1000, 'invalid-replicates')
 
     const replicateNumbers = new Set()
@@ -424,6 +531,51 @@
     return { valid: errors.length === 0, errors, experiment }
   }
 
+  function terminalSlideSnapshots(experiment) {
+    const snapshots = new Map()
+    experiment.replicates.forEach(replicate => {
+      ;(replicate.assignments || []).forEach(assignment => {
+        if (!['counted', 'absent'].includes(assignment.status)) return
+        const gel = replicate.gels.find(item => item.blindCode === assignment.blindCode) || null
+        snapshots.set(`${replicate.replicateNumber}:${assignment.blindCode}`, createSlideEditSnapshot(assignment, gel))
+      })
+    })
+    return snapshots
+  }
+
+  function validateExperimentTransition(previousRaw, candidateRaw) {
+    const previousResult = validateExperiment(previousRaw, { source: 'local' })
+    const candidateResult = validateExperiment(candidateRaw, { source: 'local' })
+    if (!previousResult.valid || !candidateResult.valid) return { valid: false, errors: ['invalid-transition-document'] }
+    const previous = previousResult.experiment
+    const candidate = candidateResult.experiment
+    const errors = []
+    const oldHistory = previous.slideEditHistory
+    const newHistory = candidate.slideEditHistory
+    if (newHistory.length < oldHistory.length || !oldHistory.every((event, index) => stableEqual(event, newHistory[index]))) {
+      return { valid: false, errors: ['slide-edit-history-not-append-only'] }
+    }
+
+    const oldSnapshots = terminalSlideSnapshots(previous)
+    const newSnapshots = terminalSlideSnapshots(candidate)
+    const changed = []
+    oldSnapshots.forEach((before, key) => {
+      const after = newSnapshots.get(key)
+      if (!after) errors.push(`terminal-slide-removed:${key}`)
+      else if (!stableEqual(before, after)) changed.push({ key, before, after })
+    })
+    const appended = newHistory.slice(oldHistory.length)
+    if (appended.length !== changed.length) errors.push('slide-edit-event-count')
+    changed.forEach(change => {
+      const event = appended.find(item => slideEditKey(item.slide) === change.key)
+      if (!event || !stableEqual(event.before, change.before) || !stableEqual(event.after, change.after)) errors.push(`slide-edit-event-mismatch:${change.key}`)
+    })
+    appended.forEach(event => {
+      if (!changed.some(change => change.key === slideEditKey(event.slide))) errors.push(`slide-edit-event-without-change:${slideEditKey(event.slide)}`)
+    })
+    return { valid: errors.length === 0, errors }
+  }
+
   function validateSetup(input = {}, options = {}) {
     const errors = []
     const requiredText = ['agent', 'cells']
@@ -507,7 +659,17 @@
   }
 
   function stableEqual(a, b) {
-    return JSON.stringify(a) === JSON.stringify(b)
+    if (a === b) return true
+    if (Array.isArray(a) || Array.isArray(b)) {
+      return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, index) => stableEqual(value, b[index]))
+    }
+    if (isObject(a) || isObject(b)) {
+      if (!isObject(a) || !isObject(b)) return false
+      const aKeys = Object.keys(a).sort()
+      const bKeys = Object.keys(b).sort()
+      return aKeys.length === bKeys.length && aKeys.every((key, index) => key === bKeys[index] && stableEqual(a[key], b[key]))
+    }
+    return false
   }
 
   function analyticalContract(experiment) {
@@ -567,12 +729,36 @@
       stableEqual(analyticalContract(item), analyticalContract(reference)))) throw new Error('incompatible-experiments')
     if (experiments.some(item => item.progress || item.replicates.some(rep => rep.assignments?.some(assignment => assignment.status === 'counting')))) throw new Error('partial-progress-conflict')
 
-    const result = clone(reference)
+    const longestHistory = experiments.map(item => item.slideEditHistory).sort((a, b) => b.length - a.length)[0]
+    if (!experiments.every(item => item.slideEditHistory.every((event, index) => stableEqual(event, longestHistory[index])))) throw new Error('slide-edit-history-conflict')
+    const historySource = experiments.find(item => item.slideEditHistory.length === longestHistory.length)
+    const orderedExperiments = [historySource, ...experiments.filter(item => item !== historySource)]
+    const currentHistorySnapshots = terminalSlideSnapshots(historySource)
+    const supersededKeys = new Map()
+    experiments.forEach(experiment => {
+      if (experiment.slideEditHistory.length === longestHistory.length) {
+        supersededKeys.set(experiment, new Set())
+        return
+      }
+      const expected = new Map(currentHistorySnapshots)
+      for (let index = longestHistory.length - 1; index >= experiment.slideEditHistory.length; index--) {
+        const event = longestHistory[index]
+        expected.set(slideEditKey(event.slide), event.before)
+      }
+      const actual = terminalSlideSnapshots(experiment)
+      actual.forEach((snapshot, key) => {
+        if (expected.has(key) && !stableEqual(snapshot, expected.get(key))) throw new Error(`slide-edit-ancestor-conflict:${key}`)
+      })
+      supersededKeys.set(experiment, new Set(Array.from(expected, ([key, snapshot]) =>
+        !stableEqual(snapshot, currentHistorySnapshots.get(key)) ? key : null).filter(Boolean)))
+    })
+    const result = clone(historySource)
+    result.slideEditHistory = clone(longestHistory)
     result.id = createId()
     result.progress = null
     result.replicates = []
     const replicateMap = new Map()
-    experiments.forEach(experiment => experiment.replicates.forEach(rep => {
+    orderedExperiments.forEach(experiment => experiment.replicates.forEach(rep => {
       let merged = replicateMap.get(rep.replicateNumber)
       if (!merged) {
         merged = clone(rep)
@@ -582,6 +768,7 @@
       const gels = new Map(merged.gels.map(gel => [gelIdentity(rep.replicateNumber, gel), gel]))
       rep.gels.forEach(gel => {
         const key = gelIdentity(rep.replicateNumber, gel)
+        if (supersededKeys.get(experiment).has(key)) return
         if (gels.has(key) && !sameGelData(gels.get(key), gel)) throw new Error(`gel-conflict:${key}`)
         if (!gels.has(key)) merged.gels.push(clone(gel))
       })
@@ -589,6 +776,7 @@
         merged.assignments = merged.assignments || []
         const assignments = new Map(merged.assignments.map(item => [item.blindCode, item]))
         rep.assignments.forEach(item => {
+          if (supersededKeys.get(experiment).has(`${rep.replicateNumber}:${item.blindCode}`)) return
           if (assignments.has(item.blindCode)) {
             const mergedItem = mergeAssignment(assignments.get(item.blindCode), item)
             const index = merged.assignments.findIndex(value => value.blindCode === item.blindCode)
@@ -615,6 +803,7 @@
   return {
     SCHEMA_VERSION, STUDY_DESIGN_VERSION, MAX_FILE_SIZE, LIMITS, ABSENCE_REASONS, INCOMPLETE_REASONS,
     cleanText, parseBlindCode, availableBlindCodeBases, calculateVisualScore, isIncludedGel, migrateExperiment, validateExperiment,
+    createSlideEditSnapshot, validateExperimentTransition,
     validateSetup, hasPendingSlides, aggregateReplicateScores, mergeExperiments
   }
 })

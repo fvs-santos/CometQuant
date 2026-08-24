@@ -100,6 +100,58 @@
     return serializeCsv(AGGREGATE_COLUMNS, rows)
   }
 
+  function snapshotEditFields(prefix, snapshot) {
+    const gel = snapshot?.gel
+    return {
+      [`${prefix}_status`]: snapshot?.assignment?.status || '',
+      [`${prefix}_absence_reason`]: reasonText(snapshot?.assignment?.absenceReason),
+      [`${prefix}_class0`]: gel?.class0 ?? '',
+      [`${prefix}_class1`]: gel?.class1 ?? '',
+      [`${prefix}_class2`]: gel?.class2 ?? '',
+      [`${prefix}_class3`]: gel?.class3 ?? '',
+      [`${prefix}_class4`]: gel?.class4 ?? '',
+      [`${prefix}_total`]: gel?.total ?? '',
+      [`${prefix}_completion`]: gel?.completion || '',
+      [`${prefix}_incomplete_reason`]: reasonText(gel?.incompleteReason),
+      [`${prefix}_assignment_recorded_at`]: snapshot?.assignment?.recordedAt || '',
+      [`${prefix}_gel_recorded_at`]: gel?.recordedAt || '',
+      [`${prefix}_visual_score`]: gel && core.calculateVisualScore(gel) !== null ? core.calculateVisualScore(gel).toFixed(4) : ''
+    }
+  }
+
+  function buildSlideEditRows(experiment) {
+    return (experiment.slideEditHistory || []).map(event => ({
+      edit_id: event.editId,
+      edited_at: event.editedAt,
+      edited_by: event.editedBy,
+      reason: event.reason,
+      replicate_number: event.slide.replicateNumber,
+      blind_code: event.slide.blindCode,
+      treatment_index: event.slide.treatmentIndex,
+      treatment: experiment.treatments[event.slide.treatmentIndex] || '',
+      gel_number: event.slide.gelNumber,
+      ...snapshotEditFields('before', event.before),
+      ...snapshotEditFields('after', event.after)
+    }))
+  }
+
+  const SLIDE_EDIT_COLUMNS = [
+    'edit_id', 'edited_at', 'edited_by', 'reason', 'replicate_number', 'blind_code', 'treatment_index', 'treatment', 'gel_number',
+    'before_status', 'after_status', 'before_absence_reason', 'after_absence_reason',
+    'before_class0', 'before_class1', 'before_class2', 'before_class3', 'before_class4', 'before_total', 'before_completion', 'before_incomplete_reason', 'before_assignment_recorded_at', 'before_gel_recorded_at', 'before_visual_score',
+    'after_class0', 'after_class1', 'after_class2', 'after_class3', 'after_class4', 'after_total', 'after_completion', 'after_incomplete_reason', 'after_assignment_recorded_at', 'after_gel_recorded_at', 'after_visual_score'
+  ].map(key => ({ key }))
+
+  function buildSlideEditCsv(experiment) {
+    return serializeCsv(SLIDE_EDIT_COLUMNS, buildSlideEditRows(experiment))
+  }
+
+  function slideEditSnapshotText(prefix, row) {
+    if (row[`${prefix}_status`] === 'absent') return `absent; ${row[`${prefix}_absence_reason`] || '-'}; assignment_recorded_at=${row[`${prefix}_assignment_recorded_at`] || '-'}`
+    const counts = [0, 1, 2, 3, 4].map(classIndex => row[`${prefix}_class${classIndex}`]).join('/')
+    return `${row[`${prefix}_status`]}; ${counts}; total=${row[`${prefix}_total`]}; score=${row[`${prefix}_visual_score`] || '-'}; completion=${row[`${prefix}_completion`] || '-'}; incomplete_reason=${row[`${prefix}_incomplete_reason`] || '-'}; assignment_recorded_at=${row[`${prefix}_assignment_recorded_at`] || '-'}; gel_recorded_at=${row[`${prefix}_gel_recorded_at`] || '-'}`
+  }
+
   function unavailableRow(result) {
     return {
       performed: 'false',
@@ -443,7 +495,8 @@
       control: 'Resposta de controle', trend: 'Tendência de dose ajustada por bloco', slope: 'Inclinação', blocks: 'Blocos', observations: 'Observações', notPerformed: 'Não realizado',
       charts: 'Gráficos técnicos', chartScores: 'Scores por bloco', chartDifferences: 'Diferenças com IC 95%', chartClasses: 'Distribuição por classes',
       nonParametric: 'Sensibilidade não-paramétrica', friedman: 'Friedman (p exato)', page: 'Page L (tendência ordenada)', statistic: 'Estatística', exactP: 'p exato', exactPOpposite: 'p oposto', arrangements: 'Arranjos', transformed: 'Sensibilidade transformada (arcsine-sqrt)',
-      r2partial: 'R2 parcial', dispersion: 'Dispersão por tratamento', mean: 'Média', sd: 'DP', cv: 'CV (%)', technicalDetails: 'Detalhamento técnico', simpleReading: 'Leitura simples', caution: 'Ponto de atenção', glossary: 'Glossário de bancada', generated: 'Gerado por'
+      r2partial: 'R2 parcial', dispersion: 'Dispersão por tratamento', mean: 'Média', sd: 'DP', cv: 'CV (%)', technicalDetails: 'Detalhamento técnico', simpleReading: 'Leitura simples', caution: 'Ponto de atenção', glossary: 'Glossário de bancada', generated: 'Gerado por',
+      editHistory: 'Histórico de correções das lâminas', editHistoryReading: 'As correções abaixo registram quem alterou cada lâmina, quando, por quê e os valores anteriores e posteriores.', editedAt: 'Editado em', editedBy: 'Responsável', before: 'Antes', after: 'Depois', blindCode: 'Código cego'
     } : {
       researcher: 'Researcher', agent: 'Agent', cells: 'Cell type', target: 'Nucleoid target', slides: 'Slides per treatment',
       exclusion: 'Counted slides outside the target use their effective total and remain in analysis; only absent slides or slides without a valid count are excluded.',
@@ -458,7 +511,8 @@
       control: 'Control response', trend: 'Block-adjusted dose trend', slope: 'Slope', blocks: 'Blocks', observations: 'Observations', notPerformed: 'Not performed',
       charts: 'Technical charts', chartScores: 'Scores by block', chartDifferences: 'Differences with 95% CI', chartClasses: 'Class distribution',
       nonParametric: 'Non-parametric sensitivity', friedman: 'Friedman (exact p)', page: 'Page L (ordered trend)', statistic: 'Statistic', exactP: 'Exact p', exactPOpposite: 'Opposite p', arrangements: 'Arrangements', transformed: 'Transformed sensitivity (arcsine-sqrt)',
-      r2partial: 'Partial R2', dispersion: 'Per-treatment dispersion', mean: 'Mean', sd: 'SD', cv: 'CV (%)', technicalDetails: 'Technical detail', simpleReading: 'Plain-language reading', caution: 'Point of attention', glossary: 'Bench glossary', generated: 'Generated by'
+      r2partial: 'Partial R2', dispersion: 'Per-treatment dispersion', mean: 'Mean', sd: 'SD', cv: 'CV (%)', technicalDetails: 'Technical detail', simpleReading: 'Plain-language reading', caution: 'Point of attention', glossary: 'Bench glossary', generated: 'Generated by',
+      editHistory: 'Slide correction history', editHistoryReading: 'The corrections below record who changed each slide, when, why, and the values before and after.', editedAt: 'Edited at', editedBy: 'Responsible person', before: 'Before', after: 'After', blindCode: 'Blind code'
     }
   }
 
@@ -662,7 +716,7 @@
       [labels.negativeControl, 'The basal condition used as the reference for background damage.'],
       ['CV', 'Variation among experiments relative to the mean. The report displays it but does not invent a universal high-CV cutoff.']
     ]
-    return `<section class="glossary"><h2>${escapeHtml(labels.glossary)}</h2><dl>${entries.map(([term, definition]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(definition)}</dd>`).join('')}</dl></section>`
+    return `${labels.slideEditHistoryHtml || ''}<section class="glossary"><h2>${escapeHtml(labels.glossary)}</h2><dl>${entries.map(([term, definition]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(definition)}</dd>`).join('')}</dl></section>`
   }
 
   function reportStyles() {
@@ -756,6 +810,16 @@
     const chartsReading = pt ? 'Os gráficos originais do motor permanecem disponíveis para inspeção técnica de blocos, intervalos e classes.' : "The engine's original charts remain available for technical inspection of blocks, intervals, and classes."
     const scoreReading = pt ? `${aggregate.length} célula(s) experimento x tratamento resumem as réplicas técnicas antes da inferência.` : `${aggregate.length} experiment-by-treatment cell(s) summarize technical replicates before inference.`
     const rawReading = pt ? `${raw.length} registro(s) de lâmina são preservados para auditoria; valores fora da meta não são convertidos em zero.` : `${raw.length} slide record(s) are preserved for audit; off-target values are not converted to zero.`
+    const slideEditRows = buildSlideEditRows(experiment)
+    if (slideEditRows.length) {
+      const rows = slideEditRows.map(row => [
+        row.replicate_number, row.blind_code, row.treatment, row.gel_number, row.edited_at, row.edited_by, row.reason,
+        slideEditSnapshotText('before', row),
+        slideEditSnapshotText('after', row)
+      ])
+      labels.slideEditHistoryHtml = reportSection('slide-edit-history', labels.editHistory, labels.editHistoryReading,
+        htmlTable([labels.replicate, labels.blindCode, labels.treatment, labels.slide, labels.editedAt, labels.editedBy, labels.reason, labels.before, labels.after], rows), labels)
+    }
     const signalTitle = interpretation.antigenotoxic ? labels.antigenotoxicSignal : labels.genotoxicSignal
     const nonParametricDetails = `<div class="technical-group"><h3>${escapeHtml(labels.friedman)}</h3><p class="simple-reading"><span>${escapeHtml(labels.simpleReading)}:</span> ${escapeHtml(friedmanReading)}</p>${htmlTable([labels.statistic, labels.term, labels.exactP, labels.arrangements], friedmanRows)}</div><div class="technical-group"><h3>${escapeHtml(labels.page)}</h3><p class="simple-reading"><span>${escapeHtml(labels.simpleReading)}:</span> ${escapeHtml(pageReading)}</p>${htmlTable([labels.direction, labels.statistic, labels.exactP, labels.exactPOpposite, labels.arrangements], pageRows)}</div>`
     const transformedDetails = `<h3>${escapeHtml(labels.comparisons)}</h3><p class="simple-reading"><span>${escapeHtml(labels.simpleReading)}:</span> ${escapeHtml(transformedComparisonReading)}</p>${htmlTable([labels.reference, labels.treatment, labels.difference, labels.rawP, labels.holmP, labels.decision], transformedComparisonRows)}<h3>${escapeHtml(labels.trend)}</h3><p class="simple-reading"><span>${escapeHtml(labels.simpleReading)}:</span> ${escapeHtml(transformedTrendReading)}</p>${htmlTable([labels.slope, labels.rawP, labels.r2partial, labels.decision], transformedTrendRows)}`
@@ -768,7 +832,7 @@
   }
 
   return {
-    escapeHtml, escapeCsv, serializeCsv, buildRawRows, buildRawCsv, buildAggregateCsv,
+    escapeHtml, escapeCsv, serializeCsv, buildRawRows, buildRawCsv, buildAggregateCsv, buildSlideEditRows, buildSlideEditCsv,
     buildPopulationCsv, buildBlockAnovaCsv, buildComparisonsCsv, buildControlResponseCsv,
     buildDoseTrendCsv, buildNonParametricCsv, buildTransformedAnalysisCsv, buildStudyDesignCsv,
     buildReportHtml, validPngBase64, safeFilename

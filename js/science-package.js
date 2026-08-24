@@ -8,7 +8,7 @@
   const MANIFEST_URL = './science-assets.json'
   const MARKER_FILE = 'cometquant-install.json'
   const SCIENCE_CACHE_PREFIX = 'cometquant-science-'
-  const SHELL_CACHE_NAME = 'cometquant-shell-v15'
+  const SHELL_CACHE_NAME = 'cometquant-shell-v17'
   const SHELL_READY_MARKER = './cometquant-shell-ready'
   let manifestPromise = null
 

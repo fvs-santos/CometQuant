@@ -24,6 +24,8 @@ let hapticFeedbackEnabled = false
 let storageInitialization = { status: 'checking', error: null }
 let lastStorageDiagnostics = null
 let pendingLegacyXlsx = null
+let pendingSlideEdit = null
+let slideEditCommitPending = false
 const revealedLegacyMappings = new Set()
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -348,6 +350,7 @@ async function handleCreateExperiment() {
     treatments,
     treatmentMetadata: validation.treatmentMetadata,
     studyDesign: validation.studyDesign,
+    slideEditHistory: [],
     replicates: [],
     progress: null
   }
@@ -475,6 +478,7 @@ function showBlindCodes(replicate) {
 }
 
 function initExperimentScreens() {
+  document.getElementById('btn-export-blind-json').addEventListener('click', () => exportExperimentData(currentExperiment))
   document.getElementById('btn-close-blind-codes').addEventListener('click', () => {
     renderReplicatesScreen()
     showScreen('screen-replicates')
@@ -492,6 +496,7 @@ function initExperimentScreens() {
   })
   document.getElementById('btn-generate-replicate').addEventListener('click', handleAddReplicate)
   document.getElementById('btn-open-summary').addEventListener('click', showSummary)
+  document.getElementById('btn-export-replicate-json').addEventListener('click', () => exportExperimentData(currentExperiment))
   document.getElementById('input-slide-absent').addEventListener('change', updateCodeEntryAction)
   document.getElementById('input-absence-reason').addEventListener('change', updateReasonDetails)
   document.getElementById('btn-submit-code').addEventListener('click', handleBlindCode)
@@ -601,6 +606,14 @@ function renderReplicatesScreen() {
   detail.className = 'muted-text'
   detail.textContent = [currentExperiment.cells, currentExperiment.researcher].filter(Boolean).join(' · ')
   meta.append(heading, detail)
+
+  const hasCompletedReplicate = currentExperiment.replicates.some(replicate => {
+    const assignments = replicate.assignments || []
+    return assignments.length
+      ? assignments.every(item => item.status === 'counted' || item.status === 'absent')
+      : replicate.gels.length > 0
+  })
+  document.getElementById('replicate-backup-reminder').hidden = !hasCompletedReplicate
 
   const container = document.getElementById('replicates-list')
   container.replaceChildren()
@@ -988,6 +1001,16 @@ function setSaveStatus(message, failed) {
 function initSummary() {
   document.getElementById('btn-export-experiment').addEventListener('click', () => exportExperimentData(currentExperiment))
   document.getElementById('btn-add-replicate').addEventListener('click', handleAddReplicate)
+  document.getElementById('slide-edit-form').addEventListener('submit', commitSlideEdit)
+  document.getElementById('slide-edit-cancel').addEventListener('click', closeSlideEdit)
+  document.getElementById('slide-edit-status').addEventListener('change', updateSlideEditForm)
+  ;[0, 1, 2, 3, 4].forEach(classIndex => document.getElementById(`slide-edit-class${classIndex}`).addEventListener('input', updateSlideEditForm))
+  document.getElementById('slide-edit-incomplete-reason').addEventListener('change', updateSlideEditForm)
+  document.getElementById('slide-edit-absence-reason').addEventListener('change', updateSlideEditForm)
+  document.getElementById('slide-edit-dialog').addEventListener('cancel', event => {
+    event.preventDefault()
+    closeSlideEdit()
+  })
   initAnalysis()
 }
 
@@ -1202,31 +1225,238 @@ function renderSummaryTable() {
     wrapper.className = 'table-scroll'
     const table = document.createElement('table')
     const header = document.createElement('tr')
-    ;[t('summary.treatment'), t('summary.gel'), t('summary.status'), t('summary.reason'), t('summary.class0'), t('summary.class1'),
-      t('summary.class2'), t('summary.class3'), t('summary.class4'), t('summary.total'), t('summary.score')]
+    ;[t('summary.treatment'), t('slideEdit.blindCode'), t('summary.gel'), t('summary.status'), t('summary.reason'), t('summary.class0'), t('summary.class1'),
+      t('summary.class2'), t('summary.class3'), t('summary.class4'), t('summary.total'), t('summary.score'), t('slideEdit.edits'), t('slideEdit.action')]
       .forEach(text => appendCell(header, 'th', text))
     const thead = document.createElement('thead')
     thead.appendChild(header)
     const tbody = document.createElement('tbody')
-    replicate.gels.forEach(gel => {
+    const summaryAssignments = replicate.assignments?.length
+      ? replicate.assignments
+      : replicate.gels.map(gel => ({ blindCode: gel.blindCode || '', treatmentIndex: gel.treatmentIndex, gelNumber: gel.gelNumber, status: 'counted', gel }))
+    summaryAssignments.forEach(assignment => {
       const row = document.createElement('tr')
-      const incomplete = gel.completion === 'incomplete'
-      const score = CometQuantCore.isIncludedGel(gel) ? calculateScore(gel) : null
-      ;[gel.treatment, gel.gelNumber, incomplete ? t('summary.offTargetIncluded') : t('replicates.counted'), formatReason(gel.incompleteReason), gel.class0, gel.class1, gel.class2, gel.class3,
-        gel.class4, gel.total, score === null ? t('summary.excluded') : score.toFixed(2)].forEach(value => appendCell(row, 'td', value))
-      tbody.appendChild(row)
-    })
-    ;(replicate.assignments || []).filter(item => item.status === 'absent').forEach(item => {
-      const row = document.createElement('tr')
-      row.className = 'absent-row'
-      const treatment = currentExperiment.treatments[item.treatmentIndex]
-      ;[treatment, item.gelNumber, t('summary.absent'), formatReason(item.absenceReason), '-', '-', '-', '-', '-', '-', '-'].forEach(value => appendCell(row, 'td', value))
+      const gel = assignment.gel || replicate.gels.find(item => item.blindCode === assignment.blindCode)
+      const treatment = currentExperiment.treatments[assignment.treatmentIndex]
+      const editCount = (currentExperiment.slideEditHistory || []).filter(event => event.slide.replicateNumber === replicate.replicateNumber && event.slide.blindCode === assignment.blindCode).length
+      if (assignment.status === 'absent') {
+        row.className = 'absent-row'
+        ;[treatment, assignment.blindCode, assignment.gelNumber, t('summary.absent'), formatReason(assignment.absenceReason), '-', '-', '-', '-', '-', '-', '-', editCount || '-']
+          .forEach(value => appendCell(row, 'td', value))
+      } else if (gel) {
+        const incomplete = gel.completion === 'incomplete'
+        const score = CometQuantCore.isIncludedGel(gel) ? calculateScore(gel) : null
+        ;[treatment, assignment.blindCode, assignment.gelNumber, incomplete ? t('summary.offTargetIncluded') : t('replicates.counted'), formatReason(gel.incompleteReason), gel.class0, gel.class1, gel.class2, gel.class3,
+          gel.class4, gel.total, score === null ? t('summary.excluded') : score.toFixed(2), editCount || '-'].forEach(value => appendCell(row, 'td', value))
+      }
+      const action = document.createElement('td')
+      if (replicate.assignments?.includes(assignment)) {
+        const button = actionButton(t('slideEdit.edit'), 'btn-secondary btn-compact', () => openSlideEdit(replicate.replicateNumber, assignment.blindCode))
+        button.setAttribute('aria-label', `${t('slideEdit.edit')}: ${assignment.blindCode}, ${t('blind.replicate')} ${replicate.replicateNumber}`)
+        action.appendChild(button)
+      }
+      else action.textContent = '-'
+      row.appendChild(action)
       tbody.appendChild(row)
     })
     table.append(thead, tbody)
     wrapper.appendChild(table)
     container.appendChild(wrapper)
   })
+  renderSlideEditHistory(container)
+}
+
+function renderSlideEditHistory(container) {
+  const history = currentExperiment?.slideEditHistory || []
+  if (!history.length) return
+  const section = document.createElement('section')
+  section.id = 'summary-slide-edit-history'
+  section.className = 'notice-card slide-edit-history'
+  const title = document.createElement('h3')
+  title.textContent = t('slideEdit.history')
+  section.appendChild(title)
+  ;[...history].reverse().forEach(event => {
+    const details = document.createElement('details')
+    const summary = document.createElement('summary')
+    const treatment = currentExperiment.treatments[event.slide.treatmentIndex]
+    summary.textContent = `${t('blind.replicate')} ${event.slide.replicateNumber} · ${event.slide.blindCode} · ${treatment} · ${formatDate(event.editedAt)}`
+    const metadata = document.createElement('p')
+    metadata.textContent = `${t('slideEdit.editedBy')}: ${event.editedBy}. ${t('slideEdit.reason')}: ${event.reason}`
+    const change = document.createElement('p')
+    change.textContent = `${t('slideEdit.before')}: ${formatSlideEditSnapshot(event.before)} | ${t('slideEdit.after')}: ${formatSlideEditSnapshot(event.after)}`
+    details.append(summary, metadata, change)
+    section.appendChild(details)
+  })
+  container.appendChild(section)
+}
+
+function formatSlideEditSnapshot(snapshot) {
+  const assignmentRecordedAt = `${t('slideEdit.assignmentRecordedAt')}: ${formatDate(snapshot.assignment.recordedAt)}`
+  if (snapshot.assignment.status === 'absent') return `${t('summary.absent')} (${formatReason(snapshot.assignment.absenceReason)}); ${assignmentRecordedAt}`
+  const gel = snapshot.gel
+  const completion = gel.completion === 'incomplete' ? `${t('summary.offTargetIncluded')} (${formatReason(gel.incompleteReason)})` : t('replicates.counted')
+  return `${gel.class0}/${gel.class1}/${gel.class2}/${gel.class3}/${gel.class4}; ${t('summary.total')}: ${gel.total}; ${t('summary.score')}: ${calculateScore(gel)?.toFixed(2) ?? '-'}; ${completion}; ${assignmentRecordedAt}; ${t('slideEdit.gelRecordedAt')}: ${formatDate(gel.recordedAt)}`
+}
+
+function openSlideEdit(replicateNumber, blindCode) {
+  if (!currentExperiment || currentExperiment.progress || hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  const replicate = findReplicate(replicateNumber)
+  const assignment = replicate?.assignments?.find(item => item.blindCode === blindCode)
+  if (!assignment || !['counted', 'absent'].includes(assignment.status)) return
+  const gel = replicate.gels.find(item => item.blindCode === blindCode) || null
+  pendingSlideEdit = { experimentId: currentExperiment.id, revision: currentExperimentRevision, replicateNumber, blindCode }
+  document.getElementById('slide-edit-identity').textContent = `${t('blind.replicate')} ${replicateNumber} · ${blindCode} · ${currentExperiment.treatments[assignment.treatmentIndex]} · ${t('summary.gel')} ${assignment.gelNumber}`
+  document.getElementById('slide-edit-previous').textContent = formatSlideEditSnapshot(CometQuantCore.createSlideEditSnapshot(assignment, gel))
+  document.getElementById('slide-edit-status').value = assignment.status
+  ;[0, 1, 2, 3, 4].forEach(classIndex => {
+    document.getElementById(`slide-edit-class${classIndex}`).value = gel ? String(gel[`class${classIndex}`]) : '0'
+  })
+  document.getElementById('slide-edit-incomplete-reason').value = gel?.incompleteReason?.code === 'legacy-unjustified' ? '' : gel?.incompleteReason?.code || ''
+  document.getElementById('slide-edit-incomplete-detail').value = gel?.incompleteReason?.detail || ''
+  document.getElementById('slide-edit-absence-reason').value = assignment.absenceReason?.code === 'legacy-unjustified' ? '' : assignment.absenceReason?.code || ''
+  document.getElementById('slide-edit-absence-detail').value = assignment.absenceReason?.detail || ''
+  document.getElementById('slide-edit-by').value = currentExperiment.researcher || ''
+  document.getElementById('slide-edit-reason').value = ''
+  document.getElementById('slide-edit-error').textContent = ''
+  updateSlideEditForm()
+  const dialog = document.getElementById('slide-edit-dialog')
+  if (typeof dialog.showModal === 'function') dialog.showModal()
+  else dialog.setAttribute('open', '')
+  setTimeout(() => document.getElementById('slide-edit-status').focus(), 0)
+}
+
+function updateSlideEditForm() {
+  const counted = document.getElementById('slide-edit-status').value === 'counted'
+  document.getElementById('slide-edit-counts-panel').hidden = !counted
+  document.getElementById('slide-edit-absence-panel').hidden = counted
+  const counts = [0, 1, 2, 3, 4].map(classIndex => Number(document.getElementById(`slide-edit-class${classIndex}`).value) || 0)
+  const total = counts.reduce((sum, value) => sum + value, 0)
+  const gel = { class0: counts[0], class1: counts[1], class2: counts[2], class3: counts[3], class4: counts[4], total }
+  const score = CometQuantCore.calculateVisualScore(gel)
+  document.getElementById('slide-edit-calculated').textContent = `${t('summary.total')}: ${total} · ${t('summary.score')}: ${score === null ? '-' : score.toFixed(2)}`
+  document.getElementById('slide-edit-incomplete-panel').hidden = !counted || total === currentExperiment?.nucleoidsPerGel
+  document.getElementById('slide-edit-incomplete-detail-group').hidden = document.getElementById('slide-edit-incomplete-reason').value !== 'other'
+  document.getElementById('slide-edit-absence-detail-group').hidden = document.getElementById('slide-edit-absence-reason').value !== 'other'
+}
+
+function closeSlideEdit() {
+  pendingSlideEdit = null
+  const dialog = document.getElementById('slide-edit-dialog')
+  if (dialog.open && typeof dialog.close === 'function') dialog.close()
+  else dialog.removeAttribute('open')
+}
+
+function slideEditReason(selectId, detailId) {
+  const code = valueOf(selectId)
+  const detail = CometQuantCore.cleanText(valueOf(detailId), CometQuantCore.LIMITS.detail)
+  if (!code || (code === 'other' && !detail)) return null
+  return { code, detail: code === 'other' ? detail : '' }
+}
+
+async function commitSlideEdit(event) {
+  event.preventDefault()
+  if (slideEditCommitPending || !pendingSlideEdit || !currentExperiment) return
+  const errorOutput = document.getElementById('slide-edit-error')
+  errorOutput.textContent = ''
+  if (pendingSlideEdit.experimentId !== currentExperiment.id || pendingSlideEdit.revision !== currentExperimentRevision || currentExperiment.progress || hasPendingSlides(currentExperiment)) {
+    errorOutput.textContent = t('slideEdit.conflict')
+    return
+  }
+  const editedBy = CometQuantCore.cleanText(valueOf('slide-edit-by'))
+  const reason = CometQuantCore.cleanText(valueOf('slide-edit-reason'), CometQuantCore.LIMITS.detail)
+  if (!editedBy || !reason) {
+    errorOutput.textContent = t('slideEdit.required')
+    return
+  }
+  const candidate = cloneExperiment(currentExperiment)
+  const replicate = findReplicate(pendingSlideEdit.replicateNumber, candidate)
+  const assignment = replicate?.assignments?.find(item => item.blindCode === pendingSlideEdit.blindCode)
+  if (!assignment) return
+  const existingGelIndex = replicate.gels.findIndex(item => item.blindCode === assignment.blindCode)
+  const existingGel = existingGelIndex >= 0 ? replicate.gels[existingGelIndex] : null
+  const before = CometQuantCore.createSlideEditSnapshot(assignment, existingGel)
+  const editedAt = new Date().toISOString()
+  const status = valueOf('slide-edit-status')
+  const previousStatus = assignment.status
+
+  if (status === 'absent') {
+    const absenceReason = slideEditReason('slide-edit-absence-reason', 'slide-edit-absence-detail')
+    if (!absenceReason) {
+      errorOutput.textContent = t('slideEdit.absenceRequired')
+      return
+    }
+    if (existingGelIndex >= 0) replicate.gels.splice(existingGelIndex, 1)
+    assignment.status = 'absent'
+    assignment.absenceReason = absenceReason
+    if (previousStatus !== 'absent') assignment.recordedAt = editedAt
+  } else {
+    const rawCounts = [0, 1, 2, 3, 4].map(classIndex => document.getElementById(`slide-edit-class${classIndex}`).value.trim())
+    const counts = rawCounts.map(Number)
+    if (rawCounts.some(value => value === '') || counts.some(value => !Number.isInteger(value) || value < 0)) {
+      errorOutput.textContent = t('slideEdit.invalidCounts')
+      return
+    }
+    const total = counts.reduce((sum, value) => sum + value, 0)
+    if (total < 1) {
+      errorOutput.textContent = t('slideEdit.positiveTotal')
+      return
+    }
+    const incompleteReason = total === candidate.nucleoidsPerGel ? null : slideEditReason('slide-edit-incomplete-reason', 'slide-edit-incomplete-detail')
+    if (total !== candidate.nucleoidsPerGel && !incompleteReason) {
+      errorOutput.textContent = t('slideEdit.incompleteRequired')
+      return
+    }
+    assignment.status = 'counted'
+    delete assignment.absenceReason
+    if (previousStatus !== 'counted') assignment.recordedAt = editedAt
+    const gel = {
+      blindCode: assignment.blindCode,
+      treatment: candidate.treatments[assignment.treatmentIndex],
+      treatmentIndex: assignment.treatmentIndex,
+      gelNumber: assignment.gelNumber,
+      class0: counts[0], class1: counts[1], class2: counts[2], class3: counts[3], class4: counts[4], total,
+      status: 'counted',
+      completion: total === candidate.nucleoidsPerGel ? 'complete' : 'incomplete',
+      recordedAt: previousStatus === 'counted' ? existingGel?.recordedAt || assignment.recordedAt || editedAt : editedAt,
+      ...(incompleteReason ? { incompleteReason } : {})
+    }
+    if (existingGelIndex >= 0) replicate.gels[existingGelIndex] = gel
+    else replicate.gels.push(gel)
+  }
+
+  const currentGel = replicate.gels.find(item => item.blindCode === assignment.blindCode) || null
+  const after = CometQuantCore.createSlideEditSnapshot(assignment, currentGel)
+  if (JSON.stringify(before) === JSON.stringify(after)) {
+    errorOutput.textContent = t('slideEdit.noChange')
+    return
+  }
+  candidate.slideEditHistory.push({
+    version: 1,
+    editId: createId(),
+    editedAt,
+    editedBy,
+    reason,
+    slide: {
+      replicateNumber: replicate.replicateNumber,
+      blindCode: assignment.blindCode,
+      treatmentIndex: assignment.treatmentIndex,
+      gelNumber: assignment.gelNumber
+    },
+    before,
+    after
+  })
+  replicate.updatedAt = editedAt
+  slideEditCommitPending = true
+  document.getElementById('slide-edit-save').disabled = true
+  const saved = await saveExperiment(candidate, false, false)
+  slideEditCommitPending = false
+  document.getElementById('slide-edit-save').disabled = false
+  if (!saved) {
+    errorOutput.textContent = t('slideEdit.saveFailed')
+    return
+  }
+  closeSlideEdit()
+  renderSummaryTable()
 }
 
 function calculateScore(gel) {
@@ -1571,6 +1801,7 @@ function handleRepositoryEvent(event) {
 }
 
 function handleStorageConflict() {
+  closeSlideEdit()
   currentExperiment = null
   currentExperimentRevision = 0
   invalidateAnalysisResults()

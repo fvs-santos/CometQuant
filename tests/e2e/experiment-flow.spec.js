@@ -1,3 +1,4 @@
+const fs = require('node:fs')
 const { test, expect } = require('@playwright/test')
 
 async function seedLegacyData(page, experiments) {
@@ -58,6 +59,9 @@ test('creates a blinded mobile experiment and blocks revealing summary', async (
   await page.getByRole('button', { name: 'Salvar Experimento e Gerar Códigos' }).click()
   await expect(page.locator('#screen-blind-codes')).toHaveClass(/active/)
   await expect(page.locator('.blind-code-card')).toHaveCount(3)
+  await expect(page.locator('#blind-backup-reminder-title')).toHaveText('Proteja a relação código-tratamento')
+  await expect(page.locator('#screen-blind-codes')).toContainText('restaurar o dispositivo')
+  await expect(page.locator('#screen-blind-codes')).toContainText('texto claro')
   const generatedCodes = await page.locator('.blind-code-card').evaluateAll(cards => cards.map(card => (
     Array.from(card.querySelectorAll('code'), code => code.textContent)
   )))
@@ -67,7 +71,18 @@ test('creates a blinded mobile experiment and blocks revealing summary', async (
     expect(codes[1]).toBe(`${codes[0].slice(0, 2)}2`)
   })
   expect(new Set(generatedCodes.map(codes => codes[0].slice(0, 2))).size).toBe(3)
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.locator('#btn-export-blind-json').click()
+  const download = await downloadPromise
+  const exported = JSON.parse(fs.readFileSync(await download.path(), 'utf8'))
+  expect(download.suggestedFilename()).toMatch(/^CometQuant_Agente_teste_.*\.json$/)
+  expect(exported.treatments).toEqual(['H2O2', 'PBS', '5 µM'])
+  expect(exported.replicates[0].assignments.map(item => item.blindCode).sort())
+    .toEqual(generatedCodes.flat().sort())
+
   await page.getByRole('button', { name: /Identifiquei as lâminas/ }).click()
+  await expect(page.locator('#replicate-backup-reminder')).toBeHidden()
   let replicateMessage = ''
   page.once('dialog', async dialog => {
     replicateMessage = dialog.message()
@@ -123,6 +138,7 @@ test('reveals generated mappings before continuing a partial legacy experiment',
   await seedLegacyData(page, [legacy])
   await page.getByRole('button', { name: 'Resume Experiment' }).click()
   await page.getByRole('button', { name: 'Open' }).click()
+  await expect(page.locator('#replicate-backup-reminder')).toBeHidden()
   await page.getByRole('button', { name: 'Analyze Slides' }).click()
   await expect(page.locator('#screen-blind-codes')).toHaveClass(/active/)
   await expect(page.locator('.blind-code-card')).toHaveCount(2)
@@ -173,6 +189,58 @@ test('does not reuse compact bases across replicates and accepts spaced lowercas
   await page.locator('#input-blind-code').fill(generatedCode.toLowerCase().split('').join(' '))
   await page.getByRole('button', { name: 'Start Counting' }).click()
   await expect(page.locator('#counter-treatment-name')).toHaveText(generatedCode)
+})
+
+test('edits a completed slide with an append-only correction history', async ({ page }) => {
+  await seedLegacyData(page, [completedCompactExperiment('slide-edit-test')])
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.getByRole('button', { name: 'Open' }).click()
+  await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
+
+  await page.getByRole('button', { name: /Edit slide/ }).click()
+  await expect(page.locator('#slide-edit-dialog')).toBeVisible()
+  await expect(page.locator('#slide-edit-previous')).toContainText('1/0/0/0/0')
+  await page.locator('#slide-edit-class0').fill('0')
+  await page.locator('#slide-edit-class4').fill('1')
+  await page.locator('#slide-edit-by').fill('Quality reviewer')
+  await page.locator('#slide-edit-reason').fill('The source worksheet showed class 4.')
+  await page.getByRole('button', { name: 'Save correction' }).click()
+
+  await expect(page.locator('#slide-edit-dialog')).toBeHidden()
+  await expect(page.locator('#summary-slide-edit-history')).toContainText('Quality reviewer')
+  await expect(page.locator('#summary-slide-edit-history')).toContainText('The source worksheet showed class 4.')
+
+  await page.getByRole('button', { name: /Edit slide/ }).click()
+  await page.locator('#slide-edit-status').selectOption('absent')
+  await page.locator('#slide-edit-absence-reason').selectOption('quality')
+  await page.locator('#slide-edit-by').fill('Quality reviewer')
+  await page.locator('#slide-edit-reason').fill('The slide was rejected during review.')
+  await page.getByRole('button', { name: 'Save correction' }).click()
+  await expect(page.locator('#summary-slide-edit-history details')).toHaveCount(2)
+
+  await page.getByRole('button', { name: /Edit slide/ }).click()
+  await page.locator('#slide-edit-status').selectOption('counted')
+  await page.locator('#slide-edit-class2').fill('1')
+  await page.locator('#slide-edit-by').fill('Quality reviewer')
+  await page.locator('#slide-edit-reason').fill('Counts were recovered from the source worksheet.')
+  await page.getByRole('button', { name: 'Save correction' }).click()
+  await expect(page.locator('#summary-slide-edit-history details')).toHaveCount(3)
+
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments')).find(item => item.id === 'slide-edit-test'))
+  expect(stored.replicates[0].assignments[0].status).toBe('counted')
+  expect(stored.replicates[0].gels).toHaveLength(1)
+  expect(stored.slideEditHistory).toHaveLength(3)
+  expect(stored.slideEditHistory[0].before.gel.class0).toBe(1)
+  expect(stored.slideEditHistory[1].after.gel).toBeNull()
+  expect(stored.slideEditHistory[1].after.assignment.recordedAt).toBe(stored.slideEditHistory[1].editedAt)
+  expect(stored.slideEditHistory[2].before.gel).toBeNull()
+  expect(stored.slideEditHistory[2].after.gel.class2).toBe(1)
+  expect(stored.slideEditHistory[2].after.gel.recordedAt).toBe(stored.slideEditHistory[2].editedAt)
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export Data (.json)' }).click()
+  const exported = JSON.parse(fs.readFileSync(await (await downloadPromise).path(), 'utf8'))
+  expect(exported.slideEditHistory).toHaveLength(3)
 })
 
 test('blocks a new replicate when compact bases are exhausted', async ({ page }) => {
@@ -237,6 +305,15 @@ test('keeps the previous state when storage commits fail and allows retry', asyn
   await page.evaluate(() => { window.__failStorageWrites = false })
   await page.getByRole('button', { name: 'Finish Slide' }).click()
   await expect(page.locator('#screen-replicates')).toHaveClass(/active/)
+  await expect(page.locator('#replicate-backup-reminder')).toBeVisible()
+  await expect(page.locator('#replicate-backup-reminder')).toContainText('At least one replicate is complete')
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.locator('#btn-export-replicate-json').click()
+  const download = await downloadPromise
+  const exported = JSON.parse(fs.readFileSync(await download.path(), 'utf8'))
+  expect(exported.replicates[0].assignments[0]).toMatchObject({ blindCode: 'ABCD-01', treatmentIndex: 0, status: 'counted' })
+
   await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
 
   await page.evaluate(() => { window.__failStorageWrites = true })

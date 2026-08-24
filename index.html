@@ -254,6 +254,13 @@
     <div class="notice-card">
       <p data-i18n="blind.instructions">Label the slides using only the codes below. This mapping will not be shown again during counting.</p>
     </div>
+    <aside class="notice-card mt-md" role="note" aria-labelledby="blind-backup-reminder-title">
+      <h3 id="blind-backup-reminder-title" data-i18n="backupReminder.title">Protect the blind-code mapping</h3>
+      <p data-i18n="backupReminder.blindBody">Export an updated JSON now and store it outside this browser and device. Clearing browser data or resetting the device may erase the experiment and its code-to-treatment mapping.</p>
+      <p data-i18n="backupReminder.plainJsonWarning">This JSON contains the code-to-treatment mapping in plain text. Restrict access to preserve blinding.</p>
+      <button class="btn-secondary mt-md" id="btn-export-blind-json"
+              data-i18n="backupReminder.export">Export Experiment JSON</button>
+    </aside>
     <h3 id="blind-replicate-title" class="section-title"></h3>
     <div id="blind-codes-container" class="blind-codes-list"></div>
     <button class="btn-primary mt-md" id="btn-close-blind-codes"
@@ -284,6 +291,14 @@
       <h2 data-i18n="replicates.title">Replicates</h2>
     </div>
     <div id="replicate-experiment-meta" class="experiment-meta"></div>
+    <aside class="notice-card mt-md" id="replicate-backup-reminder" role="note"
+           aria-labelledby="replicate-backup-reminder-title" hidden>
+      <h3 id="replicate-backup-reminder-title" data-i18n="backupReminder.title">Protect the blind-code mapping</h3>
+      <p data-i18n="backupReminder.replicateBody">At least one replicate is complete. Export the updated experiment JSON and store it outside this browser and device to prevent data loss.</p>
+      <p data-i18n="backupReminder.plainJsonWarning">This JSON contains the code-to-treatment mapping in plain text. Restrict access to preserve blinding.</p>
+      <button class="btn-secondary mt-md" id="btn-export-replicate-json"
+              data-i18n="backupReminder.export">Export Experiment JSON</button>
+    </aside>
     <div id="replicates-list" class="experiments-list"></div>
     <button class="btn-secondary mt-md" id="btn-generate-replicate"
             data-i18n="replicates.generate">Generate Codes for Next Replicate</button>
@@ -455,6 +470,82 @@
 
   </div>
 
+<dialog id="slide-edit-dialog" aria-labelledby="slide-edit-title">
+  <form id="slide-edit-form" class="slide-edit-content" method="dialog">
+    <h2 id="slide-edit-title" data-i18n="slideEdit.title">Edit completed slide</h2>
+    <p id="slide-edit-identity" class="muted-text"></p>
+    <div class="notice-card">
+      <strong data-i18n="slideEdit.previous">Previous record</strong>
+      <p id="slide-edit-previous"></p>
+    </div>
+    <div class="form-group">
+      <label for="slide-edit-status" data-i18n="summary.status">Status</label>
+      <select id="slide-edit-status">
+        <option value="counted" data-i18n="replicates.counted">Counted</option>
+        <option value="absent" data-i18n="summary.absent">Absent</option>
+      </select>
+    </div>
+    <div id="slide-edit-counts-panel">
+      <div class="slide-edit-count-grid">
+        <div class="form-group"><label for="slide-edit-class0" data-i18n="summary.class0">Class 0</label><input id="slide-edit-class0" type="number" min="0" step="1" inputmode="numeric"></div>
+        <div class="form-group"><label for="slide-edit-class1" data-i18n="summary.class1">Class 1</label><input id="slide-edit-class1" type="number" min="0" step="1" inputmode="numeric"></div>
+        <div class="form-group"><label for="slide-edit-class2" data-i18n="summary.class2">Class 2</label><input id="slide-edit-class2" type="number" min="0" step="1" inputmode="numeric"></div>
+        <div class="form-group"><label for="slide-edit-class3" data-i18n="summary.class3">Class 3</label><input id="slide-edit-class3" type="number" min="0" step="1" inputmode="numeric"></div>
+        <div class="form-group"><label for="slide-edit-class4" data-i18n="summary.class4">Class 4</label><input id="slide-edit-class4" type="number" min="0" step="1" inputmode="numeric"></div>
+      </div>
+      <p id="slide-edit-calculated" class="muted-text"></p>
+      <div id="slide-edit-incomplete-panel" class="reason-panel" hidden>
+        <div class="form-group">
+          <label for="slide-edit-incomplete-reason" data-i18n="counter.incompleteReason">Reason for off-target count</label>
+          <select id="slide-edit-incomplete-reason">
+            <option value="" data-i18n="reason.select">Select...</option>
+            <option value="insufficient-cells" data-i18n="reason.insufficientCells">Insufficient cells</option>
+            <option value="poor-quality" data-i18n="reason.poorQuality">Inadequate quality</option>
+            <option value="damaged" data-i18n="reason.damaged">Damaged slide</option>
+            <option value="technical-error" data-i18n="reason.technicalError">Technical error</option>
+            <option value="time-limit" data-i18n="reason.timeLimit">Time limit</option>
+            <option value="other" data-i18n="reason.other">Other</option>
+          </select>
+        </div>
+        <div id="slide-edit-incomplete-detail-group" class="form-group" hidden>
+          <label for="slide-edit-incomplete-detail" data-i18n="reason.detail">Details</label>
+          <textarea id="slide-edit-incomplete-detail" maxlength="500"></textarea>
+        </div>
+      </div>
+    </div>
+    <div id="slide-edit-absence-panel" class="reason-panel" hidden>
+      <div class="form-group">
+        <label for="slide-edit-absence-reason" data-i18n="codeEntry.absenceReason">Reason for absence</label>
+        <select id="slide-edit-absence-reason">
+          <option value="" data-i18n="reason.select">Select...</option>
+          <option value="broken" data-i18n="codeEntry.reason.broken">Broken slide</option>
+          <option value="lost" data-i18n="codeEntry.reason.lost">Lost slide</option>
+          <option value="quality" data-i18n="codeEntry.reason.quality">Inadequate quality</option>
+          <option value="insufficient" data-i18n="codeEntry.reason.insufficient">Insufficient material</option>
+          <option value="other" data-i18n="reason.other">Other</option>
+        </select>
+      </div>
+      <div id="slide-edit-absence-detail-group" class="form-group" hidden>
+        <label for="slide-edit-absence-detail" data-i18n="reason.detail">Details</label>
+        <textarea id="slide-edit-absence-detail" maxlength="500"></textarea>
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="slide-edit-by" data-i18n="slideEdit.editedBy">Responsible for correction</label>
+      <input id="slide-edit-by" type="text" maxlength="120" autocomplete="name">
+    </div>
+    <div class="form-group">
+      <label for="slide-edit-reason" data-i18n="slideEdit.reason">Reason for correction</label>
+      <textarea id="slide-edit-reason" maxlength="500" data-i18n-placeholder="slideEdit.reasonPlaceholder"></textarea>
+    </div>
+    <p id="slide-edit-error" class="warning-text" role="alert"></p>
+    <div class="backup-dialog-actions">
+      <button type="button" class="btn-secondary" id="slide-edit-cancel" data-i18n="backup.cancel">Cancel</button>
+      <button type="submit" class="btn-primary" id="slide-edit-save" data-i18n="slideEdit.save">Save correction</button>
+    </div>
+  </form>
+</dialog>
+
 
 <!-- ============================================
   TELA 5: ANÁLISE ESTATÍSTICA
@@ -545,6 +636,10 @@
       <button class="btn-secondary" id="btn-export-csv"
               data-i18n="analysis.exportCsv">
         Export Data (.csv)
+      </button>
+      <button class="btn-secondary" id="btn-export-edit-history" hidden
+              data-i18n="analysis.exportEditHistory">
+        Export Correction History (.csv)
       </button>
       <button class="btn-primary" id="btn-export-zip"
               data-i18n="analysis.exportZip">

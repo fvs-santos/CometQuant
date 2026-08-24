@@ -37,7 +37,7 @@ describe('IndexedDB repository', () => {
     const result = await repository.init()
 
     expect(result).toMatchObject({ mode: 'indexeddb', migrated: true, quarantined: 3 })
-    expect(repository.list()).toEqual([expect.objectContaining({ id: 'valid-record', schemaVersion: 5 })])
+    expect(repository.list()).toEqual([expect.objectContaining({ id: 'valid-record', schemaVersion: 6, slideEditHistory: [] })])
     expect(repository.getRevision('valid-record')).toBe(1)
     expect(await readStore('quarantine')).toHaveLength(3)
     const meta = await readStore('meta')
@@ -69,7 +69,8 @@ describe('IndexedDB repository', () => {
     expect(result.upgraded).toBe(1)
     expect(repository.getRevision(legacy.id)).toBe(8)
     expect(repository.getRecord(legacy.id).data).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
+      slideEditHistory: [],
       studyDesign: expect.objectContaining({ version: 1, status: 'unconfigured', assayType: null }),
       replicates: [{ assignments: [{ blindCode: 'ABCD-01' }], gels: [{ blindCode: 'ABCD-01' }] }]
     })
@@ -114,6 +115,35 @@ describe('IndexedDB repository', () => {
     expect(results.filter(result => result.migrated)).toHaveLength(1)
     expect(firstRepository.list()).toEqual([expect.objectContaining({ id: 'migration-race' })])
     expect(secondRepository.list()).toEqual([expect.objectContaining({ id: 'migration-race' })])
+  })
+
+  it('commits a terminal correction and its audit event atomically', async () => {
+    const original = experiment({ id: 'correction-test' })
+    localStorage.setItem('cometquant-experiments', JSON.stringify([original]))
+    await repository.init()
+    const corrected = JSON.parse(JSON.stringify(repository.getRecord(original.id).data))
+    const assignment = corrected.replicates[0].assignments[0]
+    const gel = corrected.replicates[0].gels[0]
+    const before = core.createSlideEditSnapshot(assignment, gel)
+    gel.class2 = 90
+    gel.class3 = 10
+    const after = core.createSlideEditSnapshot(assignment, gel)
+    corrected.slideEditHistory.push({
+      version: 1, editId: 'edit-1', editedAt: '2026-01-03T00:00:00.000Z', editedBy: 'Reviewer', reason: 'Checked source record.',
+      slide: { replicateNumber: 1, blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1 }, before, after
+    })
+
+    const committed = await repository.put(corrected, 1)
+    expect(committed.revision).toBe(2)
+    expect(committed.data.replicates[0].gels[0].class3).toBe(10)
+    expect(committed.data.slideEditHistory).toHaveLength(1)
+
+    const silent = JSON.parse(JSON.stringify(committed.data))
+    silent.replicates[0].gels[0].class3 = 20
+    silent.replicates[0].gels[0].class2 = 80
+    await expect(repository.put(silent, 2)).rejects.toThrow(/invalid-experiment/)
+    expect(repository.getRecord(original.id).revision).toBe(2)
+    expect(repository.getRecord(original.id).data.replicates[0].gels[0].class3).toBe(10)
   })
 
   it('deletes only the expected revision', async () => {

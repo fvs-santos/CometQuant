@@ -514,6 +514,21 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         for chart in parsed["charts"].values():
             self.assertTrue(chart.startswith("iVBORw0KGgo"))
 
+    def test_slide_edit_history_is_not_an_additional_scientific_observation(self):
+        without_history = engine.analyze_experiment(self.experiment)
+        with_history = json.loads(json.dumps(self.experiment))
+        with_history["slideEditHistory"] = [
+            {
+                "editId": "edit-1",
+                "editedAt": "2026-01-03T00:00:00.000Z",
+                "editedBy": "Reviewer",
+                "reason": "Administrative audit metadata",
+                "before": {"gel": {"class0": 100}},
+                "after": {"gel": {"class4": 100}},
+            }
+        ]
+        self.assertEqual(engine.analyze_experiment(with_history), without_history)
+
     def test_replicate_number_identity_is_not_replaced_by_position(self):
         experiment = reference_v2_experiment()
         identities = [7, 11, 19]
