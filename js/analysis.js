@@ -51,7 +51,10 @@ function renderAnalysisState() {
   button.disabled = disabledStates.has(analysisState)
   cancel.hidden = !['downloading', 'initializing', 'running'].includes(analysisState)
   const editHistoryButton = document.getElementById('btn-export-edit-history')
-  if (editHistoryButton) editHistoryButton.hidden = !(currentExperiment?.slideEditHistory?.length)
+  const hasEditHistory = Boolean(currentExperiment?.slideEditHistory?.length)
+  if (editHistoryButton) editHistoryButton.hidden = !hasEditHistory
+  const shareEditHistoryButton = document.getElementById('btn-share-edit-history')
+  if (shareEditHistoryButton) shareEditHistoryButton.hidden = !hasEditHistory || typeof navigator.share !== 'function'
   if (analysisState === 'missing') button.textContent = t('analysis.install')
   else if (analysisState === 'error') button.textContent = t('analysis.retry')
   else if (analysisState === 'running') button.textContent = t('analysis.running')
@@ -247,11 +250,20 @@ function initAnalysis() {
   document.getElementById('btn-export-report')
     .addEventListener('click', exportReport)
 
+  document.getElementById('btn-share-report')
+    .addEventListener('click', shareReport)
+
   document.getElementById('btn-export-csv')
     .addEventListener('click', exportCsv)
 
+  document.getElementById('btn-share-csv')
+    .addEventListener('click', shareCsv)
+
   document.getElementById('btn-export-edit-history')
     .addEventListener('click', exportSlideEditHistory)
+
+  document.getElementById('btn-share-edit-history')
+    .addEventListener('click', shareSlideEditHistory)
 
   document.getElementById('btn-export-zip')
     .addEventListener('click', exportZip)
@@ -764,8 +776,23 @@ function appendChart(container, base64, caption, alt) {
 function exportReport() {
   if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
-  const html = CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage)
+  const html = CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage, {
+    generatedAt: new Date().toISOString(),
+    appVersion: CometQuantExport.APP_VERSION
+  })
   downloadFile(html, `${exportBaseName()}_report.html`, 'text/html')
+}
+
+
+function shareReport() {
+  if (!hasCurrentAnalysisResults()) return
+  if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  const html = CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage, {
+    generatedAt: new Date().toISOString(),
+    appVersion: CometQuantExport.APP_VERSION
+  })
+  const file = CometQuantExport.buildShareFile(html, `${exportBaseName()}_report.html`, 'text/html')
+  shareFileWithFallback(file, { title: t('share.reportTitle'), text: t('share.genericText') })
 }
 
 
@@ -776,10 +803,26 @@ function exportCsv() {
 }
 
 
+function shareCsv() {
+  if (!hasCurrentAnalysisResults()) return
+  if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  const file = CometQuantExport.buildShareFile(CometQuantExport.buildRawCsv(currentExperiment), `${exportBaseName()}_raw_slides.csv`, 'text/csv')
+  shareFileWithFallback(file, { title: t('share.title'), text: t('share.genericText') })
+}
+
+
 function exportSlideEditHistory() {
   if (!hasCurrentAnalysisResults() || !currentExperiment?.slideEditHistory?.length) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
   downloadFile(CometQuantExport.buildSlideEditCsv(currentExperiment), `${exportBaseName()}_slide_corrections.csv`, 'text/csv;charset=utf-8')
+}
+
+
+function shareSlideEditHistory() {
+  if (!hasCurrentAnalysisResults() || !currentExperiment?.slideEditHistory?.length) return
+  if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
+  const file = CometQuantExport.buildShareFile(CometQuantExport.buildSlideEditCsv(currentExperiment), `${exportBaseName()}_slide_corrections.csv`, 'text/csv')
+  shareFileWithFallback(file, { title: t('share.title'), text: t('share.genericText') })
 }
 
 
@@ -790,7 +833,10 @@ async function exportZip() {
   try {
     const zip = new JSZip()
     const folder = zip.folder(exportBaseName())
-    folder.file('report.html', CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage))
+    folder.file('report.html', CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage, {
+      generatedAt: new Date().toISOString(),
+      appVersion: CometQuantExport.APP_VERSION
+    }))
     folder.file('README.txt', t('analysis.v2.export.readme'))
     const data = folder.folder('data')
     data.file('experiment.json', JSON.stringify(currentExperiment, null, 2))

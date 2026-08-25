@@ -61,7 +61,7 @@
     <!-- "multiple" permite selecionar mais de um arquivo -->
     <input type="file"
            id="input-load-files"
-           accept=".json"
+           accept=".json,.txt,application/json,text/plain"
            multiple
            style="display: none">
     <input type="file"
@@ -260,6 +260,8 @@
       <p data-i18n="backupReminder.plainJsonWarning">This JSON contains the code-to-treatment mapping in plain text. Restrict access to preserve blinding.</p>
       <button class="btn-secondary mt-md" id="btn-export-blind-json"
               data-i18n="backupReminder.export">Export Experiment JSON</button>
+      <button class="btn-secondary mt-md" id="btn-share-blind-json" data-share-button
+              data-i18n="backupReminder.share">Share Experiment JSON</button>
     </aside>
     <h3 id="blind-replicate-title" class="section-title"></h3>
     <div id="blind-codes-container" class="blind-codes-list"></div>
@@ -298,6 +300,8 @@
       <p data-i18n="backupReminder.plainJsonWarning">This JSON contains the code-to-treatment mapping in plain text. Restrict access to preserve blinding.</p>
       <button class="btn-secondary mt-md" id="btn-export-replicate-json"
               data-i18n="backupReminder.export">Export Experiment JSON</button>
+      <button class="btn-secondary mt-md" id="btn-share-replicate-json" data-share-button
+              data-i18n="backupReminder.share">Share Experiment JSON</button>
     </aside>
     <div id="replicates-list" class="experiments-list"></div>
     <button class="btn-secondary mt-md" id="btn-generate-replicate"
@@ -462,6 +466,8 @@
     <div class="summary-buttons">
       <button class="btn-secondary" id="btn-export-experiment"
               data-i18n="summary.export">Export Data (.json)</button>
+      <button class="btn-secondary" id="btn-share-experiment" data-share-button
+              data-i18n="summary.share">Share Data (.json)</button>
       <button class="btn-secondary" id="btn-add-replicate"
               data-i18n="summary.addReplicate">Add Replicate</button>
       <button class="btn-primary" id="btn-go-to-analysis"
@@ -633,13 +639,25 @@
               data-i18n="analysis.exportReport">
         Export Report (.html)
       </button>
+      <button class="btn-secondary" id="btn-share-report" data-share-button
+              data-i18n="analysis.shareReport">
+        Share Report (.html)
+      </button>
       <button class="btn-secondary" id="btn-export-csv"
               data-i18n="analysis.exportCsv">
         Export Data (.csv)
       </button>
+      <button class="btn-secondary" id="btn-share-csv" data-share-button
+              data-i18n="analysis.shareCsv">
+        Share Data (.csv)
+      </button>
       <button class="btn-secondary" id="btn-export-edit-history" hidden
               data-i18n="analysis.exportEditHistory">
         Export Correction History (.csv)
+      </button>
+      <button class="btn-secondary" id="btn-share-edit-history" data-share-button hidden
+              data-i18n="analysis.shareEditHistory">
+        Share Correction History (.csv)
       </button>
       <button class="btn-primary" id="btn-export-zip"
               data-i18n="analysis.exportZip">

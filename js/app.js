@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyLanguage()
   updateLanguageButtons()
   initHapticFeedback()
+  initShareButtons()
   initStorageDiagnostics()
   try {
     const storage = await CometQuantRepository.init({ storageKey: STORAGE_KEY })
@@ -479,6 +480,7 @@ function showBlindCodes(replicate) {
 
 function initExperimentScreens() {
   document.getElementById('btn-export-blind-json').addEventListener('click', () => exportExperimentData(currentExperiment))
+  document.getElementById('btn-share-blind-json').addEventListener('click', () => shareExperimentData(currentExperiment, { confirmPlaintext: true }))
   document.getElementById('btn-close-blind-codes').addEventListener('click', () => {
     renderReplicatesScreen()
     showScreen('screen-replicates')
@@ -497,6 +499,7 @@ function initExperimentScreens() {
   document.getElementById('btn-generate-replicate').addEventListener('click', handleAddReplicate)
   document.getElementById('btn-open-summary').addEventListener('click', showSummary)
   document.getElementById('btn-export-replicate-json').addEventListener('click', () => exportExperimentData(currentExperiment))
+  document.getElementById('btn-share-replicate-json').addEventListener('click', () => shareExperimentData(currentExperiment, { confirmPlaintext: true }))
   document.getElementById('input-slide-absent').addEventListener('change', updateCodeEntryAction)
   document.getElementById('input-absence-reason').addEventListener('change', updateReasonDetails)
   document.getElementById('btn-submit-code').addEventListener('click', handleBlindCode)
@@ -536,11 +539,13 @@ function renderExperimentsList() {
     const actions = document.createElement('div')
     actions.className = 'card-actions'
     const pending = hasPendingSlides(experiment)
-    actions.append(
+    const cardActions = [
       actionButton(experiment.progress ? t('experiments.continue') : t('experiments.open'), 'btn-primary', () => openExperiment(experiment.id)),
-      actionButton(pending ? t('experiments.encryptedBackup') : t('experiments.export'), 'btn-secondary', () => pending ? exportEncryptedBackup(experiment) : exportExperimentData(experiment)),
-      actionButton(t('experiments.delete'), 'btn-danger', () => deleteExperiment(experiment.id))
-    )
+      actionButton(pending ? t('experiments.encryptedBackup') : t('experiments.export'), 'btn-secondary', () => pending ? exportEncryptedBackup(experiment) : exportExperimentData(experiment))
+    ]
+    if (isShareAvailable()) cardActions.push(actionButton(t('experiments.share'), 'btn-secondary', () => pending ? shareEncryptedBackup(experiment) : shareExperimentData(experiment)))
+    cardActions.push(actionButton(t('experiments.delete'), 'btn-danger', () => deleteExperiment(experiment.id)))
+    actions.append(...cardActions)
     card.append(heading, meta, status, actions)
     container.appendChild(card)
   })
@@ -1000,6 +1005,7 @@ function setSaveStatus(message, failed) {
 
 function initSummary() {
   document.getElementById('btn-export-experiment').addEventListener('click', () => exportExperimentData(currentExperiment))
+  document.getElementById('btn-share-experiment').addEventListener('click', () => shareExperimentData(currentExperiment))
   document.getElementById('btn-add-replicate').addEventListener('click', handleAddReplicate)
   document.getElementById('slide-edit-form').addEventListener('submit', commitSlideEdit)
   document.getElementById('slide-edit-cancel').addEventListener('click', closeSlideEdit)
@@ -1463,10 +1469,40 @@ function calculateScore(gel) {
   return CometQuantCore.calculateVisualScore(gel)
 }
 
+function experimentBaseName(experiment) {
+  const safeAgent = (experiment.agent || 'Experiment').replace(/[^a-z0-9_-]+/gi, '_')
+  return `CometQuant_${safeAgent}_${new Date().toISOString().split('T')[0]}`
+}
+
 function exportExperimentData(experiment) {
   if (!experiment) return
-  const safeAgent = (experiment.agent || 'Experiment').replace(/[^a-z0-9_-]+/gi, '_')
-  downloadJson(experiment, `CometQuant_${safeAgent}_${new Date().toISOString().split('T')[0]}.json`)
+  downloadJson(experiment, `${experimentBaseName(experiment)}.json`)
+}
+
+async function shareFileWithFallback(file, options) {
+  if (!CometQuantExport.canShareFiles([file])) {
+    alert(t('share.unavailable'))
+    return
+  }
+  const result = await CometQuantExport.shareFiles([file], options)
+  if (result.status === 'cancelled' || result.status === 'shared') return
+  alert(result.status === 'denied' ? t('share.notAllowed') : t('share.unavailable'))
+}
+
+function isShareAvailable() {
+  return typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+}
+
+function initShareButtons() {
+  if (isShareAvailable()) return
+  document.querySelectorAll('[data-share-button]').forEach(button => { button.hidden = true })
+}
+
+async function shareExperimentData(experiment, { confirmPlaintext = false } = {}) {
+  if (!experiment) return
+  if (confirmPlaintext && !window.confirm(t('share.confirmPlaintext'))) return
+  const file = CometQuantExport.buildShareTextFile(experiment, `${experimentBaseName(experiment)}.json.txt`)
+  await shareFileWithFallback(file, { title: t('share.title'), text: t('share.text') })
 }
 
 async function exportEncryptedBackup(experiment) {
@@ -1487,6 +1523,29 @@ async function exportEncryptedBackup(experiment) {
     throw new Error('concurrent-update')
   } catch (error) {
     console.error('Encrypted backup error:', error)
+    alert(t('backup.failed'))
+  }
+}
+
+async function shareEncryptedBackup(experiment) {
+  if (!experiment || typeof CometQuantBackup === 'undefined') return alert(t('backup.failed'))
+  const passphrase = await requestBackupPassphrase(true)
+  if (passphrase === null) return
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const latest = await CometQuantRepository.readRecord(experiment.id)
+      if (!latest) throw new Error('experiment-not-found')
+      const encrypted = await CometQuantBackup.encryptExperiment(latest.data, passphrase)
+      const current = await CometQuantRepository.readRecord(experiment.id)
+      if (current && current.revision === latest.revision) {
+        const file = CometQuantExport.buildShareTextFile(encrypted, `CometQuant_blinded_${new Date().toISOString().split('T')[0]}.cqbackup.txt`)
+        await shareFileWithFallback(file, { title: t('share.backupTitle'), text: t('share.backupText') })
+        return
+      }
+    }
+    throw new Error('concurrent-update')
+  } catch (error) {
+    console.error('Encrypted backup share error:', error)
     alert(t('backup.failed'))
   }
 }
@@ -1762,7 +1821,7 @@ function consolidateExperiments(experiments) {
 function readJsonFile(file) {
   return new Promise((resolve, reject) => {
     const encryptedLimit = Math.ceil(CometQuantCore.MAX_FILE_SIZE * 4 / 3) + 8192
-    const maxFileSize = file.name.toLowerCase().endsWith('.cqbackup.json') ? encryptedLimit : CometQuantCore.MAX_FILE_SIZE
+    const maxFileSize = file.name.toLowerCase().includes('cqbackup') ? encryptedLimit : CometQuantCore.MAX_FILE_SIZE
     if (file.size > maxFileSize) return reject(new Error(t('alert.fileTooLarge')))
     const reader = new FileReader()
     reader.onload = async event => {

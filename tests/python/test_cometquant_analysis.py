@@ -1,9 +1,13 @@
+import base64
 import csv
+import io
 import json
 import math
 import sys
 import unittest
 from pathlib import Path
+
+from PIL import Image, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -513,6 +517,10 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         self.assertEqual(set(parsed["nonParametric"]), {"performed", "population", "friedman", "pageTrend"})
         for chart in parsed["charts"].values():
             self.assertTrue(chart.startswith("iVBORw0KGgo"))
+            image = Image.open(io.BytesIO(base64.b64decode(chart))).convert("RGB")
+            average = ImageStat.Stat(image.resize((64, 64))).mean
+            self.assertTrue(all(channel > 190 for channel in average), average)
+            self.assertTrue(all(channel > 245 for channel in image.getpixel((0, 0))))
 
     def test_slide_edit_history_is_not_an_additional_scientific_observation(self):
         without_history = engine.analyze_experiment(self.experiment)

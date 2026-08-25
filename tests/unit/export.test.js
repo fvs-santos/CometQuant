@@ -80,7 +80,7 @@ function reportScenario() {
   const comparison = analysis.primaryComparisons.comparisons[0]
   Object.assign(comparison, {
     referenceTreatmentIndex: 0, referenceTreatment: 'Negative control', treatmentIndex: 2, treatment: 'Compound 1 uM',
-    referenceMean: 10, treatmentMean: 20, pRaw: 0.068, pAdjusted: 0.068, significant: false
+    referenceMean: 10, treatmentMean: 20, pRaw: 0.04, pAdjusted: 0.068, significant: false
   })
   Object.assign(analysis.protocol, {
     primaryReferenceTreatmentIndex: 0, primaryReferenceTreatment: 'Negative control', primaryTreatmentIndices: [2, 3],
@@ -252,6 +252,8 @@ describe('safe exports', () => {
     expect(html).toContain('Non-parametric sensitivity')
     expect(html).toContain('Transformed sensitivity')
     expect(html).toContain('Per-treatment dispersion')
+    expect(html).toContain('Description:')
+    expect(html).not.toContain('Plain-language reading')
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(html).not.toContain('<img src=x onerror=alert(1)>')
   })
@@ -260,21 +262,22 @@ describe('safe exports', () => {
     const { data, analysis } = reportScenario()
     const html = exporter.buildReportHtml(data, analysis, 'pt')
 
-    expect(html).toContain('Conclusão em 30 segundos')
-    expect(html).toContain('Validade do ensaio')
-    expect(html).toContain('Válido')
-    expect(html).toContain('Evidência de efeito')
+    expect(html).toContain('Síntese das evidências')
+    expect(html).toContain('Resposta do controle positivo')
+    expect(html).toContain('Resposta esperada detectada')
+    expect(html).toContain('Efeito na direção esperada detectado')
     expect(html).toContain('1 de 2 concentrações mostraram aumento de dano (Compound 5 uM)')
     expect(html).toContain('Compound 1 uM não mostrou diferença (p Holm=0,068)')
-    expect(html).toContain('Forte')
+    expect(html).toContain('Tendência consistente')
     expect(html).toContain('não classifica automaticamente a substância')
     expect(html).toContain('JSON e CSV preservam a precisão integral')
-    expect(html.indexOf('Conclusão em 30 segundos')).toBeLessThan(html.indexOf('Dados brutos'))
+    expect(html.indexOf('id="evidence-summary"')).toBeLessThan(html.indexOf('id="raw"'))
     expect(html).toContain('<details>')
     expect(html).toContain('Detalhamento técnico')
+    expect(html).toContain('Descrição:')
+    expect(html).not.toContain('Leitura simples')
     expect(html).toContain('<svg viewBox="0 0 900 500"')
-    expect(html).toContain('Controle negativo')
-    expect(html).toContain('Controle positivo')
+    expect(html).toContain('<svg viewBox="0 0 900 520"')
     expect(html).toContain('Experimento independente 1: 8,00')
     expect(html).toContain('Média do motor: 20,00')
     expect(html).toContain('Nenhum limite universal de CV elevado foi aplicado')
@@ -285,9 +288,106 @@ describe('safe exports', () => {
     expect(html).toContain('scope="col"')
     expect(html).toContain('name="viewport"')
     expect(html).toContain('Dados acessíveis do gráfico')
-    expect(html).not.toContain('Controle negativo (0,00 uM)')
+    expect(html).toContain('Coluna = média; haste = DP entre experimentos independentes')
+    expect(html).toContain('* p ajustado por Holm &lt; 0,05')
+    expect(html).not.toContain('Conclusão em 30 segundos')
+    expect(html).not.toContain('Validade do ensaio')
     expect(html).not.toMatch(/<(?:link|script|iframe|object|embed)\b/i)
     expect(html).not.toMatch(/\b(?:src|href)=["'](?:https?:)?\/\//i)
+  })
+
+  it('adds navigable traceability and a Holm-annotated primary column chart', () => {
+    const { data, analysis } = reportScenario()
+    const generatedAt = '2026-08-25T12:34:56.000Z'
+    const html = exporter.buildReportHtml(data, analysis, 'pt', { generatedAt, appVersion: '2.1.0' })
+    const document = new DOMParser().parseFromString(html, 'text/html')
+
+    const links = [...document.querySelectorAll('.report-index a')]
+    expect(links.length).toBeGreaterThan(10)
+    links.forEach(link => expect(document.querySelector(link.getAttribute('href'))).not.toBeNull())
+    expect(new Set(links.map(link => link.getAttribute('href'))).size).toBe(links.length)
+
+    const pointLabels = [...document.querySelectorAll('.dose-chart svg .chart-label')].map(node => node.textContent)
+    expect(pointLabels).toEqual(['Negative control', 'Positive control', 'Compound 1 uM', 'Compound 5 uM'])
+    expect(document.querySelector('.dose-chart svg').textContent).not.toContain('Controle do solvente')
+    const positiveControlAccessibleRow = [...document.querySelectorAll('.dose-chart .sr-only tbody tr')].find(row => row.cells[0].textContent === 'Positive control')
+    expect(positiveControlAccessibleRow.cells[2].textContent).toBe('-')
+
+    const columnChart = document.querySelector('.column-chart')
+    expect(columnChart).not.toBeNull()
+    expect(columnChart.querySelectorAll('.column-bar')).toHaveLength(3)
+    expect(columnChart.querySelectorAll('.holm-marker')).toHaveLength(1)
+    expect(columnChart.textContent).toContain('n=3')
+    expect(columnChart.textContent).toContain('Compound 5 uM')
+    expect(columnChart.querySelector('.column-label').textContent).toBe('Negative control (Referência)')
+    expect(columnChart.querySelector('desc').textContent).toContain('p ajustado por Holm menor que 0,05')
+    expect(columnChart.querySelector('.sr-only').textContent).toContain('NÃO SIGNIFICATIVO')
+    expect(columnChart.querySelector('.sr-only').textContent).toContain('SIGNIFICATIVO')
+
+    const footer = document.querySelector('.report-footer')
+    expect(footer.textContent).toContain('exp-1')
+    expect(footer.textContent).toContain('2.1.0')
+    expect(footer.querySelector(`time[datetime="${generatedAt}"]`)).not.toBeNull()
+    expect(footer.querySelector('time[datetime="2026-01-02T00:00:00.000Z"]')).not.toBeNull()
+    expect(footer.textContent).toContain('UTC')
+    expect(html).toContain('Tipo de ensaio')
+    expect(html).toContain('genotoxicidade')
+    expect(html).toContain('experimento (bloco)')
+  })
+
+  it('preserves the engine threshold and does not present zero SD as estimable with n=1', () => {
+    const { data, analysis } = reportScenario()
+    analysis.primaryComparisons.comparisons[1].pAdjusted = 0.05
+    analysis.primaryComparisons.comparisons[1].significant = false
+    Object.assign(analysis.descriptive.treatments[2], { blockCount: 1, standardDeviation: 0 })
+
+    const html = exporter.buildReportHtml(data, analysis, 'pt')
+    const document = new DOMParser().parseFromString(html, 'text/html')
+    const chart = document.querySelector('.column-chart')
+    expect(chart.querySelectorAll('.holm-marker')).toHaveLength(0)
+    expect(chart.querySelectorAll('.error-bar')).toHaveLength(6)
+    expect(chart.querySelector('.sr-only').textContent).toContain('Não estimável')
+    expect(chart.querySelector('.sr-only').textContent).toContain('0,05')
+    const dispersionRow = [...document.querySelectorAll('#dispersion tbody tr')].find(row => row.cells[0].textContent === 'Compound 5 uM')
+    expect([...dispersionRow.cells].map(cell => cell.textContent)).toEqual(['Compound 5 uM', '30,00', 'Não estimável', 'Não estimável', '1'])
+  })
+
+  it('keeps many primary columns readable with a scrollable dynamic width', () => {
+    const { data, analysis } = reportScenario()
+    const extraIndices = [4, 5, 6, 7]
+    extraIndices.forEach((treatmentIndex, offset) => {
+      data.treatmentMetadata.push({ treatmentIndex, role: 'test-concentration', concentration: 10 + offset * 5 })
+      analysis.descriptive.treatments.push({ treatmentIndex, treatment: `Dose ${treatmentIndex}`, blockCount: 3, mean: 40 + offset, standardDeviation: 2, coefficientOfVariation: 5 })
+      analysis.primaryComparisons.comparisons.push({ treatmentIndex, treatment: `Dose ${treatmentIndex}`, pAdjusted: 0.1, significant: false })
+    })
+    analysis.protocol.primaryTreatmentIndices.push(...extraIndices)
+
+    const html = exporter.buildReportHtml(data, analysis, 'en')
+    const document = new DOMParser().parseFromString(html, 'text/html')
+    const svg = document.querySelector('.column-chart svg')
+    expect(svg.getAttribute('viewBox')).toBe('0 0 1190 520')
+    expect(svg.getAttribute('style')).toContain('min-width:1190px')
+    expect(svg.querySelectorAll('.column-bar')).toHaveLength(7)
+  })
+
+  it('escapes report traceability values', () => {
+    const data = experiment({ id: '<img src=x onerror=alert(1)>', updatedAt: '2026-01-02T00:00:00.000Z' })
+    const html = exporter.buildReportHtml(data, v2Analysis(), 'en', {
+      generatedAt: '2026-08-25T12:34:56.000Z',
+      appVersion: '<script>alert(1)</script>'
+    })
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(html).not.toContain('<script>alert(1)</script>')
+  })
+
+  it('localizes a zero-difference direction in Portuguese', () => {
+    const analysis = v2Analysis()
+    analysis.primaryComparisons.comparisons[0].direction = 'equal'
+    const html = exporter.buildReportHtml(experiment(), analysis, 'pt')
+    const document = new DOMParser().parseFromString(html, 'text/html')
+    expect(document.querySelector('#comparisons').textContent).toContain('igual')
+    expect(document.querySelector('#comparisons').textContent).not.toContain('equal')
   })
 
   it('adapts effect direction and wording for antigenotoxicity', () => {
@@ -313,6 +413,8 @@ describe('safe exports', () => {
     expect(html).toContain('Sinal de antigenotoxicidade')
     expect(html).toContain('redução de dano')
     expect(html).toContain('tendência significativa, ordenada')
+    const document = new DOMParser().parseFromString(html, 'text/html')
+    expect(document.querySelector('.column-chart .reference-bar title').textContent).toContain('Positive control')
   })
 
   it('flags a significant but non-monotonic response as weak and irregular', () => {
@@ -322,7 +424,7 @@ describe('safe exports', () => {
     analysis.primaryComparisons.comparisons[1].pAdjusted = 0.02
 
     const html = exporter.buildReportHtml(data, analysis, 'pt')
-    expect(html).toContain('Fraca/irregular')
+    expect(html).toContain('Tendência parcial ou irregular')
     expect(html).toContain('1 reversão(ões) entre médias de doses sucessivas')
     expect(html).toContain('Uma dose maior apresentou média de dano menos favorável')
   })
@@ -355,5 +457,69 @@ describe('safe exports', () => {
       'data/dose_trend.csv', 'data/non_parametric.csv', 'data/transformed_analysis.csv', 'data/study_design.csv',
       'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
     ]))
+  })
+})
+
+describe('web share helpers', () => {
+  const originalNavigator = globalThis.navigator
+
+  const readFileText = file => new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = reject
+    reader.readAsText(file)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    if (originalNavigator) globalThis.navigator = originalNavigator
+  })
+
+  it('builds a text/plain File from JSON data with the given name', async () => {
+    const file = exporter.buildShareTextFile({ id: 'exp-1', agent: 'Agent' }, 'CometQuant_Agent_2026-08-25.json.txt')
+    expect(file).toBeInstanceOf(File)
+    expect(file.name).toBe('CometQuant_Agent_2026-08-25.json.txt')
+    expect(file.type).toBe('text/plain')
+    await expect(readFileText(file)).resolves.toContain('"agent": "Agent"')
+  })
+
+  it('builds a shareable File for HTML and CSV', async () => {
+    const html = exporter.buildShareFile('<h1>Report</h1>', 'report.html', 'text/html')
+    const csv = exporter.buildShareFile('\uFEFFa,b', 'raw.csv', 'text/csv')
+    expect(html.type).toBe('text/html')
+    expect(csv.type).toBe('text/csv')
+    expect(csv.size).toBe(6)
+    await expect(readFileText(csv)).resolves.toBe('a,b')
+    await expect(readFileText(html)).resolves.toBe('<h1>Report</h1>')
+  })
+
+  it('detects file share support only when share and canShare are present', () => {
+    vi.stubGlobal('navigator', { share: vi.fn(), canShare: vi.fn(() => false) })
+    expect(exporter.canShareFiles([new File(['x'], 'a.txt', { type: 'text/plain' })])).toBe(false)
+
+    vi.stubGlobal('navigator', { share: vi.fn(), canShare: vi.fn(() => true) })
+    expect(exporter.canShareFiles([new File(['x'], 'a.txt', { type: 'text/plain' })])).toBe(true)
+
+    vi.stubGlobal('navigator', { share: vi.fn() })
+    expect(exporter.canShareFiles([new File(['x'], 'a.txt', { type: 'text/plain' })])).toBe(false)
+  })
+
+  it('maps share outcomes by error name', async () => {
+    const file = new File(['x'], 'a.txt', { type: 'text/plain' })
+
+    vi.stubGlobal('navigator', { share: vi.fn(async () => undefined), canShare: vi.fn(() => true) })
+    await expect(exporter.shareFiles([file])).resolves.toEqual({ status: 'shared' })
+
+    vi.stubGlobal('navigator', { share: vi.fn(async () => { throw Object.assign(new Error('x'), { name: 'AbortError' }) }), canShare: vi.fn(() => true) })
+    await expect(exporter.shareFiles([file])).resolves.toEqual({ status: 'cancelled' })
+
+    vi.stubGlobal('navigator', { share: vi.fn(async () => { throw Object.assign(new Error('x'), { name: 'NotAllowedError' }) }), canShare: vi.fn(() => true) })
+    await expect(exporter.shareFiles([file])).resolves.toEqual({ status: 'denied' })
+
+    vi.stubGlobal('navigator', { share: vi.fn(async () => { throw new Error('boom') }), canShare: vi.fn(() => true) })
+    await expect(exporter.shareFiles([file])).resolves.toMatchObject({ status: 'failed' })
+
+    vi.stubGlobal('navigator', { share: undefined, canShare: vi.fn(() => true) })
+    await expect(exporter.shareFiles([file])).resolves.toEqual({ status: 'unavailable' })
   })
 })

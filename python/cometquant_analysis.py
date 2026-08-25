@@ -15,6 +15,25 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
+CHART_BACKGROUND = "#FFFFFF"
+CHART_PLOT_BACKGROUND = "#F7F9FC"
+CHART_TEXT = "#243447"
+CHART_MUTED = "#52606D"
+CHART_GRID = "#D9E2EC"
+CHART_SPINE = "#BCCCDC"
+CHART_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#6A3D9A", "#56B4E9"]
+
+
+def _apply_light_chart_style(figure, axes, grid_axis="y"):
+    figure.patch.set_facecolor(CHART_BACKGROUND)
+    axes.set_facecolor(CHART_PLOT_BACKGROUND)
+    axes.tick_params(colors=CHART_MUTED, labelsize=9)
+    axes.grid(True, axis=grid_axis, color=CHART_GRID, linewidth=0.8, alpha=0.85)
+    axes.set_axisbelow(True)
+    for spine in axes.spines.values():
+        spine.set_edgecolor(CHART_SPINE)
+
+
 def _reason(code, detail):
     return {
         "performed": False,
@@ -307,15 +326,14 @@ def generate_score_chart(scores_by_treatment, tukey_result, experiment, lang):
     )
 
     figure, axes = plt.subplots(figsize=(9, 5))
-    figure.patch.set_facecolor("#161b22")
-    axes.set_facecolor("#161b22")
+    _apply_light_chart_style(figure, axes)
     axes.bar(
         treatments,
         means,
         yerr=standard_deviations,
-        color="#4a9eff",
+        color=CHART_COLORS[0],
         alpha=0.85,
-        error_kw={"ecolor": "#8b949e", "capsize": 4},
+        error_kw={"ecolor": CHART_MUTED, "capsize": 4},
     )
 
     comparisons = tukey_result.get("comparisons", []) if tukey_result else []
@@ -339,34 +357,30 @@ def generate_score_chart(scores_by_treatment, tukey_result, experiment, lang):
                     ha="center",
                     va="bottom",
                     fontsize=13,
-                    color="#f0f6fc",
+                    color=CHART_TEXT,
                     fontweight="bold",
                 )
 
     axes.set_xlabel(
         "Treatments" if lang == "en" else "Tratamentos",
-        color="#8b949e",
+        color=CHART_MUTED,
         fontsize=12,
     )
     axes.set_ylabel(
         "Visual Score (AU)" if lang == "en" else "Score Visual (UA)",
-        color="#8b949e",
+        color=CHART_MUTED,
         fontsize=12,
     )
-    axes.tick_params(colors="#8b949e", labelsize=9)
     axes.tick_params(axis="x", labelrotation=30)
     for label in axes.get_xticklabels():
         label.set_horizontalalignment("right")
-    for spine in axes.spines.values():
-        spine.set_edgecolor("#30363d")
-
     figure.text(
         0.5,
         -0.02,
         f"** p < 0.01; * p < 0.05; Reference: {reference_control}",
         ha="center",
         fontsize=9,
-        color="#8b949e",
+        color=CHART_MUTED,
     )
     plt.tight_layout()
     return _figure_to_base64(figure)
@@ -424,10 +438,8 @@ def generate_classes_chart(experiment, lang):
     summary = calculate_class_summary(experiment)
     x_positions = np.arange(len(class_names))
     width = 0.8 / len(treatments)
-    colors = ["#4a9eff", "#3fb950", "#d29922", "#f85149", "#bc8cff"]
     figure, axes = plt.subplots(figsize=(10, 5))
-    figure.patch.set_facecolor("#161b22")
-    axes.set_facecolor("#161b22")
+    _apply_light_chart_style(figure, axes)
 
     for index, treatment in enumerate(treatments):
         offset = (index - len(treatments) / 2 + 0.5) * width
@@ -437,29 +449,26 @@ def generate_classes_chart(experiment, lang):
             width,
             yerr=summary[treatment]["standard_deviations"],
             label=treatment,
-            color=colors[index % len(colors)],
+            color=CHART_COLORS[index % len(CHART_COLORS)],
             alpha=0.85,
-            error_kw={"ecolor": "#8b949e", "capsize": 3},
+            error_kw={"ecolor": CHART_MUTED, "capsize": 3},
         )
 
     axes.set_xticks(x_positions)
     axes.set_xticklabels(class_names)
     axes.set_ylabel(
         "Mean Nucleoids" if lang == "en" else "Media de Nucleoides",
-        color="#8b949e",
+        color=CHART_MUTED,
         fontsize=12,
     )
     axes.set_xlabel(
         "Comet Class" if lang == "en" else "Classe do Cometa",
-        color="#8b949e",
+        color=CHART_MUTED,
         fontsize=12,
     )
-    axes.tick_params(colors="#8b949e", labelsize=9)
     axes.legend(
-        loc="best", fontsize=8, facecolor="#21262d", labelcolor="#e6edf3"
+        loc="best", fontsize=8, facecolor=CHART_BACKGROUND, edgecolor=CHART_SPINE, labelcolor=CHART_TEXT
     )
-    for spine in axes.spines.values():
-        spine.set_edgecolor("#30363d")
     plt.tight_layout()
     return _figure_to_base64(figure)
 
@@ -471,7 +480,7 @@ def _figure_to_base64(figure):
         format="png",
         dpi=150,
         bbox_inches="tight",
-        facecolor="#161b22",
+        facecolor=CHART_BACKGROUND,
     )
     plt.close(figure)
     return base64.b64encode(buffer.getvalue()).decode("ascii")
@@ -1273,23 +1282,18 @@ def generate_block_score_chart(blocks, treatment_indices, block_numbers, experim
     values = _included_values(blocks, treatment_indices, block_numbers)
     labels = [_treatment_label(experiment, index) for index in treatment_indices]
     figure, axes = plt.subplots(figsize=(9, 5))
-    figure.patch.set_facecolor("#161b22")
-    axes.set_facecolor("#161b22")
+    _apply_light_chart_style(figure, axes)
     x_positions = np.arange(len(labels))
-    colors = ["#4a9eff", "#3fb950", "#d29922", "#bc8cff", "#f85149"]
     for index, (row, block_number) in enumerate(zip(values, block_numbers)):
-        color = colors[index % len(colors)]
+        color = CHART_COLORS[index % len(CHART_COLORS)]
         axes.plot(x_positions, row, color=color, alpha=0.65, linewidth=1.2)
         axes.scatter(x_positions, row, color=color, s=42, label=f"Block {block_number}", zorder=3)
     axes.set_xticks(x_positions)
     axes.set_xticklabels(labels, rotation=30, ha="right")
-    axes.set_ylabel("Visual Score (AU)" if lang == "en" else "Score Visual (UA)", color="#8b949e")
-    axes.set_xlabel("Primary treatments" if lang == "en" else "Tratamentos principais", color="#8b949e")
-    axes.tick_params(colors="#8b949e")
+    axes.set_ylabel("Visual Score (AU)" if lang == "en" else "Score Visual (UA)", color=CHART_MUTED)
+    axes.set_xlabel("Primary treatments" if lang == "en" else "Tratamentos principais", color=CHART_MUTED)
     if len(block_numbers):
-        axes.legend(facecolor="#21262d", labelcolor="#e6edf3", fontsize=8)
-    for spine in axes.spines.values():
-        spine.set_edgecolor("#30363d")
+        axes.legend(facecolor=CHART_BACKGROUND, edgecolor=CHART_SPINE, labelcolor=CHART_TEXT, fontsize=8)
     plt.tight_layout()
     return _figure_to_base64(figure)
 
@@ -1297,26 +1301,22 @@ def generate_block_score_chart(blocks, treatment_indices, block_numbers, experim
 def generate_difference_chart(primary_comparisons, lang):
     comparisons = primary_comparisons.get("comparisons", [])
     figure, axes = plt.subplots(figsize=(8, 4.5))
-    figure.patch.set_facecolor("#161b22")
-    axes.set_facecolor("#161b22")
+    _apply_light_chart_style(figure, axes, grid_axis="x")
     if comparisons:
         differences = np.asarray([item["difference"] for item in comparisons])
         low = differences - np.asarray([item["ciLow"] for item in comparisons])
         high = np.asarray([item["ciHigh"] for item in comparisons]) - differences
         y_positions = np.arange(len(comparisons))
-        colors = ["#3fb950" if item["significant"] else "#8b949e" for item in comparisons]
-        axes.errorbar(differences, y_positions, xerr=np.vstack([low, high]), fmt="none", ecolor="#8b949e", capsize=4)
+        colors = ["#007A5E" if item["significant"] else "#66788A" for item in comparisons]
+        axes.errorbar(differences, y_positions, xerr=np.vstack([low, high]), fmt="none", ecolor=CHART_MUTED, capsize=4)
         axes.scatter(differences, y_positions, color=colors, s=55, zorder=3)
         axes.set_yticks(y_positions)
         axes.set_yticklabels([item["treatment"] for item in comparisons])
     else:
-        axes.text(0.5, 0.5, "Not estimable" if lang == "en" else "Nao estimavel", ha="center", va="center", color="#8b949e", transform=axes.transAxes)
+        axes.text(0.5, 0.5, "Not estimable" if lang == "en" else "Nao estimavel", ha="center", va="center", color=CHART_MUTED, transform=axes.transAxes)
         axes.set_yticks([])
-    axes.axvline(0, color="#f0f6fc", linewidth=1, linestyle="--")
-    axes.set_xlabel("Difference vs reference (95% CI)" if lang == "en" else "Diferenca vs referencia (IC 95%)", color="#8b949e")
-    axes.tick_params(colors="#8b949e")
-    for spine in axes.spines.values():
-        spine.set_edgecolor("#30363d")
+    axes.axvline(0, color=CHART_TEXT, linewidth=1, linestyle="--")
+    axes.set_xlabel("Difference vs reference (95% CI)" if lang == "en" else "Diferenca vs referencia (IC 95%)", color=CHART_MUTED)
     plt.tight_layout()
     return _figure_to_base64(figure)
 

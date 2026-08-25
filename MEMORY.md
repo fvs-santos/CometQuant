@@ -519,7 +519,7 @@ Concluido na continuidade de 21/08/2026 (reformulacao da apresentacao do relator
 3. Reavaliar os rotulos categorizados `Evidencia de efeito`, `Forte`, `Fraca/irregular` e `Ausente`. Em particular, `Ausente` na dose-resposta pode ser confundido com ausencia de efeito, e `Evidencia de efeito` pode ser lido como conclusao biologica ou regulatoria. Os rotulos devem deixar claro o objeto da conclusao e seus limites.
 4. Simplificar os rotulos do eixo x em `Visao da dose-resposta`: mostrar somente o nome do tratamento e sua media. Textos adicionais como `controle do solvente` e `controle positivo` poluem o grafico e devem permanecer, quando necessarios, na legenda, no texto ou no detalhamento tecnico, nao no rotulo principal do eixo.
 5. Incluir no rodape do relatorio o codigo de identificacao do experimento do qual o artefato foi derivado. Avaliar tambem timestamp da analise/geracao e versao publica do CometQuant para melhorar a vinculacao entre HTML, JSON e CSV e a rastreabilidade do arquivo isolado.
-6. Adicionar um grafico de colunas como visualizacao complementar, mesmo que parcialmente redundante com os graficos existentes, por ser uma forma de apresentacao familiar aos pesquisadores. O grafico deve indicar com `*` as comparacoes contra o controle que atendam a `p <= 0,05`.
+6. Adicionar um grafico de colunas como visualizacao complementar, mesmo que parcialmente redundante com os graficos existentes, por ser uma forma de apresentacao familiar aos pesquisadores. O grafico deve indicar com `*` as comparacoes contra o controle que atendam a `p < 0,05`, preservando a regra estrita do motor estatistico.
 7. Antes de implementar o grafico de colunas, definir explicitamente qual controle sera a referencia em cada tipo de ensaio e qual p-valor alimentara o asterisco. A politica ja registrada determina que anotacoes de significancia usem o p-valor ajustado; portanto, a opcao coerente e usar o p ajustado por Holm das comparacoes planejadas, e nao o p bruto, salvo revisao cientifica documentada.
 8. No grafico de colunas, explicitar o que as barras e os elementos de incerteza representam (por exemplo, media dos experimentos independentes e DP ou IC), preservar `n` como numero de experimentos independentes e evitar que laminas ou nucleoides sejam percebidos como replicas biologicas.
 9. Reduzir a mistura entre linguagem amigavel em portugues e nomes internos como `lower`, `treatment`, `block`, `residual`, `antigenotoxicity` e campos do schema. Os nomes tecnicos podem permanecer para auditoria, mas devem receber rotulos localizados ou explicacao.
@@ -559,6 +559,43 @@ Pendencias operacionais que continuam validas em paralelo:
 2. Validar manualmente a sensacao do feedback tatil em Android real.
 3. Definir politica de deploy e submeter o novo protocolo cientifico a revisao externa antes de uso critico.
 
+Concluido na continuidade de 25/08/2026 (revisao do relatorio e grafico de colunas):
+
+- o quadro inicial passou a se chamar **Sintese das evidencias**, com categorias delimitadas para resposta do controle, efeito na direcao esperada e consistencia da tendencia, sem rotular o ensaio como valido ou invalido;
+- nomes internos do protocolo, direcoes e termos da ANOVA receberam apresentacao localizada em portugues e ingles, sem alterar o schema ou os CSVs canonicos;
+- o rotulo de leitura das secoes passou de `Leitura simples`/`Plain-language reading` para `Descricao`/`Description`;
+- o eixo do grafico de pontos passou a mostrar somente tratamento e media, preservando papeis e concentracoes na tabela acessivel;
+- o relatorio ganhou indice interno sem JavaScript e rodape com ID do experimento, ultima atualizacao, geracao do artefato, versao publica e schemas;
+- um grafico SVG complementar mostra media mais ou menos DP entre experimentos independentes somente para a populacao principal; `n` continua sendo o numero de experimentos independentes;
+- os asteriscos usam exclusivamente `primaryComparisons.comparisons[].significant`, isto e, p ajustado por Holm estritamente menor que alfa; controle de validacao e referencia nao recebem essa anotacao;
+- o grafico de diferencas com IC nominal permanece a visualizacao inferencial principal, e o grafico de pontos individuais foi preservado;
+- os graficos tecnicos PNG passaram a usar fundo claro, texto azul-ardosia, grade discreta e uma paleta equilibrada com cores distinguiveis; testes inspecionam a luminosidade real das imagens geradas;
+- o shell offline foi incrementado para `cometquant-shell-v19`.
+
+Validacao desta continuidade:
+
+- `npm run check` passou;
+- `npm test` e `npm run test:coverage` passaram com 103 testes JavaScript e 91,92% de cobertura global;
+- `npm run test:analysis` passou com 27 testes Python e a referencia R v2 validou 92 metricas;
+- o E2E cientifico e os novos asserts do relatorio passaram nos dois motores; a matriz completa teve 41 de 42 cenarios aprovados, e o unico timeout preexistente de retomada apos reload no WebKit passou ao ser repetido isoladamente.
+
+Concluido na continuidade de 25/08/2026 (compartilhamento de arquivos via Web Share API):
+
+- um helper central em `js/export.js` (`buildShareFile`, `buildShareTextFile`, `canShareFiles`, `shareFiles`) constroi `File`, detecta suporte e mapeia os erros (`AbortError`, `NotAllowedError`, indisponibilidade) sem afirmar sucesso de entrega;
+- JSON e backup cifrado passaram a oferecer **Compartilhar** alem do download. Como o Chromium nao aceita `application/json` na Web Share, o compartilhamento serializa o mesmo JSON com extensao `.json.txt` e MIME `text/plain` (ponte de transporte; a reimportacao e por conteudo, nao por extensao);
+- o backup cego e compartilhado somente cifrado (`.cqbackup.txt`); pontos que exportam o mapeamento em texto claro (tela de codigos cegos e lembrete de repeticao) pedem confirmacao antes de compartilhar;
+- relatorio HTML e CSVs de dados brutos e de correcoes ganharam compartilhamento nativo (MIME ja suportado pela Web Share); o ZIP permanece somente download por estar fora da allowlist;
+- os botoes de compartilhar sao ocultados quando `navigator.share` nao existe (ex.: Firefox desktop) e, quando o arquivo nao pode ser compartilhado, o app orienta a salvar e compartilhar pelo gerenciador de arquivos;
+- o input de importacao passou a aceitar `.txt`, e o limite maior do backup cifrado e detectado por `cqbackup` no nome, nao pela extensao;
+- o shell offline foi incrementado para `cometquant-shell-v20`.
+
+Validacao desta continuidade:
+
+- `npm run check` passou;
+- `npm test` e `npm run test:coverage` passaram com 107 testes JavaScript e 92,04% de cobertura global;
+- `npm run test:analysis` passou com 27 testes Python;
+- a matriz E2E passou com 26 cenarios em cada motor (52 no total), incluindo os 5 novos cenarios de compartilhamento; o cenario cientifico do WebKit que falhou apenas por disputa de download do CDN em paralelo passou ao ser repetido isoladamente.
+
 ## Arquivos de referencia
 
 - `README.md`
@@ -592,6 +629,7 @@ Pendencias operacionais que continuam validas em paralelo:
 - `tests/e2e/experiment-flow.spec.js`
 - `tests/e2e/analysis-flow.spec.js`
 - `tests/e2e/backup-flow.spec.js`
+- `tests/e2e/share-flow.spec.js`
 - `tests/e2e/storage-concurrency.spec.js`
 - `tests/e2e/storage-diagnostics.spec.js`
 - `tests/e2e/legacy-xlsx-flow.spec.js`
@@ -606,7 +644,7 @@ Pendencias operacionais que continuam validas em paralelo:
 - Branch: `main`.
 - A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
-- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v17`.
+- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v20`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.
