@@ -2,6 +2,8 @@
 
 const STORAGE_KEY = 'cometquant-experiments'
 const HAPTIC_FEEDBACK_KEY = 'cometquant-haptic-feedback'
+const SOUND_FEEDBACK_KEY = 'cometquant-sound-feedback'
+const HAPTIC_FEEDBACK_DURATION_MS = 30
 const SCHEMA_VERSION = CometQuantCore.SCHEMA_VERSION
 const MAX_IMPORT_FILES = 20
 const MAX_IMPORT_BATCH_SIZE = 25 * 1024 * 1024
@@ -21,6 +23,8 @@ let blindCodeCommitPending = false
 let replicateCommitPending = false
 let legacyConfigurationPending = false
 let hapticFeedbackEnabled = false
+let soundFeedbackEnabled = false
+let countAudioContext = null
 let storageInitialization = { status: 'checking', error: null }
 let lastStorageDiagnostics = null
 let pendingLegacyXlsx = null
@@ -32,6 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyLanguage()
   updateLanguageButtons()
   initHapticFeedback()
+  initSoundFeedback()
   initShareButtons()
   initStorageDiagnostics()
   try {
@@ -598,7 +603,61 @@ function initHapticFeedback() {
 
 function provideHapticFeedback() {
   if (!hapticFeedbackEnabled || typeof navigator.vibrate !== 'function') return
-  try { navigator.vibrate(10) } catch (_) {}
+  try { navigator.vibrate(HAPTIC_FEEDBACK_DURATION_MS) } catch (_) {}
+}
+
+function audioContextConstructor() {
+  return window.AudioContext || window.webkitAudioContext
+}
+
+function initSoundFeedback() {
+  const input = document.getElementById('input-sound-feedback')
+  const supported = typeof audioContextConstructor() === 'function'
+  let storedPreference = null
+  try { storedPreference = localStorage.getItem(SOUND_FEEDBACK_KEY) } catch (_) {}
+  soundFeedbackEnabled = supported && (storedPreference === null || storedPreference === 'true')
+  input.checked = soundFeedbackEnabled
+  input.disabled = !supported
+  input.addEventListener('change', () => {
+    soundFeedbackEnabled = supported && input.checked
+    try { localStorage.setItem(SOUND_FEEDBACK_KEY, String(soundFeedbackEnabled)) } catch (_) {}
+    if (soundFeedbackEnabled) prepareSoundFeedback()
+  })
+}
+
+function prepareSoundFeedback() {
+  if (!soundFeedbackEnabled) return null
+  const AudioContextImpl = audioContextConstructor()
+  if (typeof AudioContextImpl !== 'function') return null
+  try {
+    if (!countAudioContext || countAudioContext.state === 'closed') countAudioContext = new AudioContextImpl()
+    if (countAudioContext.state === 'suspended') {
+      const resume = countAudioContext.resume()
+      if (resume && typeof resume.catch === 'function') resume.catch(() => {})
+    }
+    return countAudioContext
+  } catch (_) {
+    return null
+  }
+}
+
+function provideSoundFeedback() {
+  const context = prepareSoundFeedback()
+  if (!context) return
+  try {
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    const now = context.currentTime
+    oscillator.type = 'square'
+    oscillator.frequency.setValueAtTime(1000, now)
+    oscillator.frequency.exponentialRampToValueAtTime(600, now + 0.018)
+    gain.gain.setValueAtTime(0.025, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025)
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start(now)
+    oscillator.stop(now + 0.025)
+  } catch (_) {}
 }
 
 function renderReplicatesScreen() {
@@ -741,7 +800,10 @@ async function handleBlindCode() {
 
 function initCounter() {
   document.querySelectorAll('.comet-class-card').forEach(card => {
-    card.addEventListener('click', () => registerCount(parseInt(card.dataset.class)))
+    card.addEventListener('click', () => {
+      prepareSoundFeedback()
+      registerCount(parseInt(card.dataset.class))
+    })
     const button = card.querySelector('.btn-count')
     button.setAttribute('aria-label', `${currentLanguage === 'pt' ? 'Classe' : 'Class'} ${card.dataset.class}`)
   })
@@ -780,6 +842,7 @@ function registerCount(cometClass) {
     clickHistory.push(cometClass)
     updateCounterDisplay()
     provideHapticFeedback()
+    provideSoundFeedback()
     if (!await persistProgress()) {
       clickHistory.pop()
       currentCounts[cometClass]--

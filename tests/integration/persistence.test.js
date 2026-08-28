@@ -47,10 +47,12 @@ describe('browser-facing contracts', () => {
     expect(app).toMatch(/function undoLastCount[\s\S]*?persistProgress\(\)/)
   })
 
-  it('keeps haptic feedback separate from count persistence', () => {
+  it('keeps count feedback separate from persistence', () => {
     const app = fs.readFileSync(path.resolve(__dirname, '../../js/app.js'), 'utf8')
-    expect(app).toMatch(/function provideHapticFeedback[\s\S]*?navigator\.vibrate\(10\)/)
-    expect(app).toMatch(/function registerCount[\s\S]*?updateCounterDisplay\(\)[\s\S]*?provideHapticFeedback\(\)[\s\S]*?persistProgress\(\)/)
+    expect(app).toContain('const HAPTIC_FEEDBACK_DURATION_MS = 30')
+    expect(app).toMatch(/function provideHapticFeedback[\s\S]*?navigator\.vibrate\(HAPTIC_FEEDBACK_DURATION_MS\)/)
+    expect(app).toMatch(/function provideSoundFeedback[\s\S]*?context\.createOscillator\(\)/)
+    expect(app).toMatch(/function registerCount[\s\S]*?updateCounterDisplay\(\)[\s\S]*?provideHapticFeedback\(\)[\s\S]*?provideSoundFeedback\(\)[\s\S]*?persistProgress\(\)/)
     expect(app).not.toMatch(/function persistProgress[\s\S]*?navigator\.vibrate/)
   })
 

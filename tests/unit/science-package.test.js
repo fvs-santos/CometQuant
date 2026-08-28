@@ -68,9 +68,9 @@ describe('storage diagnostics', () => {
     vi.stubGlobal('isSecureContext', true)
     vi.stubGlobal('indexedDB', {})
     vi.stubGlobal('caches', {
-      keys: vi.fn(async () => ['cometquant-shell-v20']),
+      keys: vi.fn(async () => ['cometquant-shell-v21']),
       open: vi.fn(async () => ({
-        match: vi.fn(async () => ({ text: async () => 'cometquant-shell-v20' }))
+        match: vi.fn(async () => ({ text: async () => 'cometquant-shell-v21' }))
       }))
     })
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => manifest })))
@@ -93,7 +93,7 @@ describe('storage diagnostics', () => {
         error: null
       },
       persistence: { supported: true, requestSupported: true, persisted: false, error: null },
-      caches: { shell: ['cometquant-shell-v20'], shellReady: true, science: [], error: null },
+      caches: { shell: ['cometquant-shell-v21'], shellReady: true, science: [], error: null },
       sciencePackage: { version: 'test-runtime', expectedBytes: 104399681, downloadBytes: 35683806, installed: false, error: null }
     })
     expect(persist).not.toHaveBeenCalled()

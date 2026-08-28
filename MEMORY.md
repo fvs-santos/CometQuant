@@ -279,13 +279,13 @@ As referencias automatizadas com SciPy, R e Pyodide reduzem risco de regressao, 
 
 `teste_icones.png` e `teste_icones_azul.png` sao apenas montagens de comparacao e nao devem integrar o produto.
 
-### Feedback tatil implementado
+### Feedback tatil e sonoro implementado
 
-Um pulso curto com `navigator.vibrate(10)` ocorre em Android/Chromium somente quando um clique de contagem e aceito, nunca para cliques ignorados, durante o fechamento da lamina ou depois de atingir a meta. A indisponibilidade ou falha da API nao bloqueia nem altera a persistencia da contagem.
+Um pulso curto com `navigator.vibrate(30)` ocorre em Android/Chromium somente quando um clique de contagem e aceito, nunca para cliques ignorados, durante o fechamento da lamina ou depois de atingir a meta. A indisponibilidade ou falha da API nao bloqueia nem altera a persistencia da contagem.
 
-A preferencia local **Feedback tatil** e habilitada por padrao apenas quando `navigator.vibrate` existe e pode ser desativada. A chamada permanece separada do commit IndexedDB. Safari/iOS usa fallback silencioso.
+A preferencia local **Feedback tatil** e habilitada por padrao apenas quando `navigator.vibrate` existe e pode ser desativada. A preferencia independente **Feedback sonoro** tambem e habilitada por padrao quando Web Audio esta disponivel. O clique de 25 ms e sintetizado em baixa intensidade, sem asset externo, e o contexto de audio e preparado no gesto do usuario para compatibilidade movel. Safari/iOS sem vibracao pode usar o feedback sonoro.
 
-Os testes automatizados injetam um mock de `navigator.vibrate`, confirmam um pulso de 10 ms por contagem aceita e ausencia de chamadas em operacoes rejeitadas. A sensacao, intensidade e comportamento com configuracoes do sistema ainda precisam de verificacao manual em um dispositivo Android real; Playwright nao valida o motor fisico.
+As chamadas de vibracao e audio permanecem separadas do commit IndexedDB. Os testes automatizados injetam mocks de `navigator.vibrate` e `AudioContext`, confirmam um pulso de 30 ms e um clique por contagem aceita, ausencia de feedback em operacoes rejeitadas e autosave normal quando as APIs falham. A sensacao, intensidade, volume e comportamento com configuracoes do sistema ainda precisam de verificacao manual em dispositivos reais; Playwright nao valida o motor fisico nem a saida audivel.
 
 ## Proximos passos recomendados
 
@@ -323,7 +323,7 @@ Concluido na continuidade posterior de 14/08/2026:
 Concluido na continuidade de 17/08/2026:
 
 - os cinco assets de classe foram otimizados para PNG RGBA 512 x 512, integrados a interface e ao precache;
-- feedback tatil opcional foi implementado com pulso de 10 ms apenas para contagens aceitas e fallback silencioso;
+- feedback tatil opcional foi inicialmente implementado com pulso de 10 ms apenas para contagens aceitas e fallback silencioso; posteriormente o pulso foi elevado para 30 ms e ganhou feedback sonoro independente;
 - codigos cegos novos passaram ao formato compacto de duas letras e numero sem hifen ou zero a esquerda, com 676 bases sem reposicao no experimento;
 - schema 4 preserva codigos antigos, valida sufixo e `gelNumber`, rejeita reutilizacao de bases e migra registros autoritativos do IndexedDB de forma transacional;
 - a tela **Diagnostico de Armazenamento** informa suporte, quota/uso estimados, persistencia, IndexedDB, caches, service worker, shell e pacote cientifico;
@@ -556,7 +556,7 @@ Concluido na continuidade de 24/08/2026 (correcao auditavel de laminas finalizad
 Pendencias operacionais que continuam validas em paralelo:
 
 1. Executar a checklist em Safari macOS, iPhone e iPad reais, incluindo PWA instalada, baixa disponibilidade de espaco e Pyodide offline.
-2. Validar manualmente a sensacao do feedback tatil em Android real.
+2. Validar manualmente a sensacao do feedback tatil e o volume do clique em dispositivos Android e Apple reais.
 3. Definir politica de deploy e submeter o novo protocolo cientifico a revisao externa antes de uso critico.
 
 Concluido na continuidade de 25/08/2026 (revisao do relatorio e grafico de colunas):
@@ -596,6 +596,22 @@ Validacao desta continuidade:
 - `npm run test:analysis` passou com 27 testes Python;
 - a matriz E2E passou com 26 cenarios em cada motor (52 no total), incluindo os 5 novos cenarios de compartilhamento; o cenario cientifico do WebKit que falhou apenas por disputa de download do CDN em paralelo passou ao ser repetido isoladamente.
 
+Concluido na continuidade de 28/08/2026 (feedback de contagem):
+
+- o pulso de cada contagem aceita passou de 10 ms para 30 ms;
+- um clique de 25 ms gerado por Web Audio passou a complementar a confirmacao visual e tatil, sem asset externo e com inicializacao no gesto do usuario;
+- **Feedback sonoro** ganhou preferencia independente, habilitada por padrao quando suportada e persistida localmente;
+- falhas ou indisponibilidade de vibracao e audio continuam sem interferir no autosave, e contagens rejeitadas nao produzem feedback;
+- o shell offline foi incrementado para `cometquant-shell-v21`.
+
+Validacao desta continuidade:
+
+- `npm run check` passou;
+- `npm test` passou com 107 testes JavaScript;
+- os 16 cenarios direcionados de feedback passaram em Chromium/Pixel 7 e WebKit/iPhone;
+- a matriz E2E completa passou com 29 cenarios em cada motor (58 no total), incluindo o motor cientifico real no Pyodide;
+- a sensacao da vibracao e o volume real do clique permanecem pendentes de validacao manual em dispositivos fisicos.
+
 ## Arquivos de referencia
 
 - `README.md`
@@ -629,6 +645,7 @@ Validacao desta continuidade:
 - `tests/e2e/experiment-flow.spec.js`
 - `tests/e2e/analysis-flow.spec.js`
 - `tests/e2e/backup-flow.spec.js`
+- `tests/e2e/counter-feedback.spec.js`
 - `tests/e2e/share-flow.spec.js`
 - `tests/e2e/storage-concurrency.spec.js`
 - `tests/e2e/storage-diagnostics.spec.js`
@@ -644,7 +661,8 @@ Validacao desta continuidade:
 - Branch: `main`.
 - A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
-- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v20`.
+- Contagens aceitas usam pulso tatil de 30 ms e clique sonoro opcional de 25 ms; as preferencias sao independentes e falhas dessas APIs nao interferem no autosave.
+- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v21`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

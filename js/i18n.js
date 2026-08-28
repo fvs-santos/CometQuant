@@ -18,6 +18,7 @@ const translations = {
     'home.newExperiment': 'Novo Experimento',
     'home.resumeExperiment': 'Retomar Experimento',
     'home.hapticFeedback': 'Feedback tátil',
+    'home.soundFeedback': 'Feedback sonoro',
 
     'diagnostics.open': 'Diagnóstico de Armazenamento',
     'diagnostics.title': 'Diagnóstico de Armazenamento',
@@ -496,6 +497,7 @@ const translations = {
     'home.newExperiment': 'New Experiment',
     'home.resumeExperiment': 'Resume Experiment',
     'home.hapticFeedback': 'Haptic feedback',
+    'home.soundFeedback': 'Sound feedback',
 
     'diagnostics.open': 'Storage Diagnostics',
     'diagnostics.title': 'Storage Diagnostics',
