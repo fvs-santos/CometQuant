@@ -1442,7 +1442,7 @@ def generate_block_score_chart(blocks, treatment_indices, block_numbers, experim
     for index, (row, block_number) in enumerate(zip(values, block_numbers)):
         color = CHART_COLORS[index % len(CHART_COLORS)]
         axes.plot(x_positions, row, color=color, alpha=0.65, linewidth=1.2)
-        axes.scatter(x_positions, row, color=color, s=42, label=f"Block {block_number}", zorder=3)
+        axes.scatter(x_positions, row, color=color, s=42, label=f"Rep. {block_number}", zorder=3)
     axes.set_xticks(x_positions)
     axes.set_xticklabels(labels, rotation=30, ha="right")
     axes.set_ylabel("Visual Score (AU)" if lang == "en" else "Score Visual (UA)", color=CHART_MUTED)
