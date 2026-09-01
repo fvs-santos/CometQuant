@@ -16,9 +16,9 @@ describe('browser-facing contracts', () => {
     expect(analysis).toContain('CometQuantExport.buildStudyDesignCsv')
   })
 
-  it('enforces and renders only the scientific analysis v2 contract', () => {
+  it('enforces and renders only the scientific analysis v3 contract', () => {
     const analysis = fs.readFileSync(path.resolve(__dirname, '../../js/analysis.js'), 'utf8')
-    expect(analysis).toMatch(/const ANALYSIS_SCHEMA_VERSION = 2/)
+    expect(analysis).toMatch(/const ANALYSIS_SCHEMA_VERSION = 3/)
     expect(analysis).toMatch(/function validateAnalysisResult[\s\S]*?result\.analysisSchemaVersion !== ANALYSIS_SCHEMA_VERSION/)
     expect(analysis).toContain('analysis-plan-population')
     expect(analysis).toContain('analysis-block-scores')
@@ -31,7 +31,7 @@ describe('browser-facing contracts', () => {
     expect(analysis).not.toMatch(/results\.(?:shapiro|anova|tukey|regression)/)
   })
 
-  it('packages the v2 CSVs, analysis JSON and all three charts', () => {
+  it('packages the scientific CSVs, analysis JSON and all three charts', () => {
     const analysis = fs.readFileSync(path.resolve(__dirname, '../../js/analysis.js'), 'utf8')
     for (const filename of ['raw_slides.csv', 'replicate_scores.csv', 'population.csv', 'block_anova.csv', 'primary_comparisons.csv', 'control_response.csv', 'dose_trend.csv', 'study_design.csv', 'analysis.json']) {
       expect(analysis).toContain(`'${filename}'`)
@@ -86,6 +86,7 @@ describe('browser-facing contracts', () => {
     const analysis = fs.readFileSync(path.resolve(__dirname, '../../js/analysis.js'), 'utf8')
     const app = fs.readFileSync(path.resolve(__dirname, '../../js/app.js'), 'utf8')
     expect(analysis).toContain('analysisResultsContext')
+    expect(analysis).toContain('analysisResultsContext.selectionKey === analysisSelectionKey(currentAnalysisSelection)')
     expect(analysis).toMatch(/function hasCurrentAnalysisResults[\s\S]*?analysisResultsContext\.id === currentExperiment\.id/)
     expect(analysis).toMatch(/function exportReport[\s\S]*?hasCurrentAnalysisResults\(\)/)
     expect(analysis).toMatch(/function exportZip[\s\S]*?hasCurrentAnalysisResults\(\)/)

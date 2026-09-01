@@ -42,8 +42,9 @@ self.addEventListener('message', async event => {
     if (message.type === 'analyze') {
       if (!pyodideRuntime) throw new Error('analysis-runtime-not-ready')
       pyodideRuntime.globals.set('experiment_json', message.experimentJson)
+      pyodideRuntime.globals.set('analysis_options_json', message.analysisOptionsJson)
       pyodideRuntime.globals.set('lang', message.lang)
-      const resultJson = await pyodideRuntime.runPythonAsync('run_all_analyses(experiment_json, lang)')
+      const resultJson = await pyodideRuntime.runPythonAsync('run_all_analyses(experiment_json, analysis_options_json, lang)')
       self.postMessage({ type: 'result', requestId: message.requestId, context: message.context, resultJson })
     }
   } catch (error) {

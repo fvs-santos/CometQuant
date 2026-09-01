@@ -745,6 +745,131 @@ button:focus-visible {
   margin-bottom: var(--space-lg);
 }
 
+.analysis-selection-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-md);
+  align-items: center;
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid var(--color-bg-card-hover);
+  border-radius: var(--border-radius-md);
+  background: var(--color-bg-card);
+}
+
+.analysis-selection-summary h3,
+.analysis-selection-summary p {
+  margin: 0;
+}
+
+#analysis-selection-dialog {
+  width: min(94vw, 680px);
+  max-height: 92vh;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--color-bg-card-hover);
+  border-radius: var(--border-radius-lg);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+#analysis-selection-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.analysis-selection-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-height: 92vh;
+  padding: var(--space-lg);
+  overflow-y: auto;
+}
+
+.analysis-selection-content h2,
+.analysis-selection-content p {
+  margin: 0;
+}
+
+.analysis-selection-toolbar {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+#analysis-selection-count {
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+.analysis-selection-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-bg-card-hover);
+  border-radius: var(--border-radius-md);
+}
+
+.analysis-selection-fieldset legend {
+  padding: 0 var(--space-xs);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.analysis-selection-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-height: min(44vh, 420px);
+  overflow-y: auto;
+}
+
+.analysis-replicate-option {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: center;
+  min-height: 56px;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-bg-card-hover);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-bg-card);
+  cursor: pointer;
+}
+
+.analysis-replicate-option input {
+  width: 24px;
+  height: 24px;
+  accent-color: var(--color-accent);
+}
+
+.analysis-replicate-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.analysis-replicate-option small {
+  color: var(--color-text-secondary);
+}
+
+#analysis-selection-reason {
+  width: 100%;
+  min-height: 96px;
+}
+
+@media (max-width: 600px) {
+  .analysis-selection-summary,
+  .analysis-selection-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  #analysis-selection-count {
+    text-align: left;
+  }
+}
+
 
 /* =============================================
    BOTÕES — SISTEMA GLOBAL

@@ -158,6 +158,8 @@ test('requires and persists a one-time analytical plan for a completed legacy ex
   await page.locator('#legacy-input-assay-type').selectOption('antigenotoxicity')
   await page.locator('#legacy-input-basal-reference').selectOption('1')
   await page.locator('#btn-save-legacy-study-design').click()
+  await expect(page.getByRole('dialog', { name: 'Select repetitions' })).toBeVisible()
+  await page.getByRole('button', { name: 'Continue to analysis' }).click()
   await expect(page.locator('#screen-analysis')).toHaveClass(/active/)
 
   const storedDesign = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments'))

@@ -84,7 +84,10 @@ window.setLanguage = function (lang) {
   if (document.getElementById('screen-replicates').classList.contains('active')) renderReplicatesScreen()
   if (document.getElementById('screen-code-entry').classList.contains('active')) renderCodeEntry()
   if (document.getElementById('screen-summary').classList.contains('active')) renderSummaryTable()
-  if (document.getElementById('screen-analysis').classList.contains('active')) renderAnalysisState()
+  if (document.getElementById('screen-analysis').classList.contains('active')) {
+    renderAnalysisState()
+    renderAnalysisSelectionSummary()
+  }
   if (document.getElementById('screen-storage-diagnostics').classList.contains('active') && lastStorageDiagnostics) renderStorageDiagnostics(lastStorageDiagnostics)
 }
 
@@ -228,6 +231,9 @@ function initNavigation() {
   document.getElementById('btn-back-analysis').addEventListener('click', () => showScreen('screen-summary'))
   document.getElementById('btn-go-to-analysis').addEventListener('click', async () => {
     if (!await ensureStudyDesignBeforeAnalysis()) return
+    const selection = await requestAnalysisSelection(currentExperiment)
+    if (!selection) return
+    setAnalysisSelection(selection)
     showScreen('screen-analysis')
     enterAnalysisScreen()
   })
@@ -1146,6 +1152,137 @@ async function ensureStudyDesignBeforeAnalysis() {
   } finally {
     legacyConfigurationPending = false
   }
+}
+
+function requestAnalysisSelection(experiment, initialSelection = null) {
+  const replicates = [...(experiment?.replicates || [])].sort((left, right) => left.replicateNumber - right.replicateNumber)
+  if (!replicates.length) return Promise.resolve(null)
+  const availableReplicateNumbers = replicates.map(replicate => replicate.replicateNumber)
+  const restoreSelection = JSON.stringify(initialSelection?.availableReplicateNumbers) === JSON.stringify(availableReplicateNumbers)
+  const initiallySelected = new Set(restoreSelection ? initialSelection.selectedReplicateNumbers : availableReplicateNumbers)
+
+  const dialog = document.getElementById('analysis-selection-dialog')
+  const form = document.getElementById('analysis-selection-form')
+  const list = document.getElementById('analysis-selection-list')
+  const fieldset = dialog.querySelector('.analysis-selection-fieldset')
+  const reasonGroup = document.getElementById('analysis-selection-reason-group')
+  const reasonInput = document.getElementById('analysis-selection-reason')
+  const countOutput = document.getElementById('analysis-selection-count')
+  const warning = document.getElementById('analysis-selection-warning')
+  const error = document.getElementById('analysis-selection-error')
+  const selectAllButton = document.getElementById('btn-analysis-select-all')
+  const selectNoneButton = document.getElementById('btn-analysis-select-none')
+  const cancelButton = document.getElementById('btn-analysis-selection-cancel')
+
+  list.replaceChildren()
+  reasonInput.value = restoreSelection ? initialSelection.exclusionReason || '' : ''
+  reasonInput.removeAttribute('aria-invalid')
+  fieldset?.removeAttribute('aria-invalid')
+  error.textContent = ''
+  replicates.forEach(replicate => {
+    const option = document.createElement('label')
+    option.className = 'analysis-replicate-option'
+    const checkbox = document.createElement('input')
+    checkbox.type = 'checkbox'
+    checkbox.checked = initiallySelected.has(replicate.replicateNumber)
+    checkbox.value = String(replicate.replicateNumber)
+    checkbox.dataset.replicateNumber = String(replicate.replicateNumber)
+    const text = document.createElement('span')
+    const title = document.createElement('strong')
+    title.textContent = `${t('blind.replicate')} ${replicate.replicateNumber}`
+    const detail = document.createElement('small')
+    const counted = (replicate.assignments || []).filter(item => item.status === 'counted').length
+    const absent = (replicate.assignments || []).filter(item => item.status === 'absent').length
+    detail.textContent = t('analysis.selection.replicateDetail')
+      .replace('{date}', replicate.date || t('legacyXlsx.unknownDate'))
+      .replace('{counted}', String(counted))
+      .replace('{absent}', String(absent))
+    text.append(title, detail)
+    option.append(checkbox, text)
+    list.appendChild(option)
+  })
+
+  const checkboxes = () => Array.from(list.querySelectorAll('input[type="checkbox"]'))
+  const update = () => {
+    const selectedCount = checkboxes().filter(input => input.checked).length
+    const total = replicates.length
+    countOutput.textContent = t('analysis.selection.count')
+      .replace('{selected}', String(selectedCount))
+      .replace('{total}', String(total))
+    reasonGroup.hidden = selectedCount === total
+    warning.hidden = selectedCount !== 1
+    warning.textContent = selectedCount === 1 ? t('analysis.selection.singleWarning') : ''
+    error.textContent = ''
+    reasonInput.removeAttribute('aria-invalid')
+    fieldset?.removeAttribute('aria-invalid')
+  }
+  checkboxes().forEach(input => input.addEventListener('change', update))
+  update()
+
+  return new Promise(resolve => {
+    let settled = false
+    const cleanup = () => {
+      form.removeEventListener('submit', submit)
+      selectAllButton.removeEventListener('click', selectAll)
+      selectNoneButton.removeEventListener('click', selectNone)
+      cancelButton.removeEventListener('click', cancel)
+      dialog.removeEventListener('cancel', cancel)
+    }
+    const finish = value => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (dialog.open) dialog.close()
+      resolve(value)
+    }
+    const setAll = checked => {
+      checkboxes().forEach(input => { input.checked = checked })
+      update()
+    }
+    const selectAll = () => setAll(true)
+    const selectNone = () => setAll(false)
+    const cancel = event => {
+      event?.preventDefault()
+      finish(null)
+    }
+    const submit = event => {
+      event.preventDefault()
+      const selectedReplicateNumbers = checkboxes()
+        .filter(input => input.checked)
+        .map(input => Number(input.dataset.replicateNumber))
+      if (!selectedReplicateNumbers.length) {
+        error.textContent = t('analysis.selection.errorEmpty')
+        fieldset?.setAttribute('aria-invalid', 'true')
+        checkboxes()[0]?.focus()
+        return
+      }
+      const excludedReplicateNumbers = availableReplicateNumbers.filter(number => !selectedReplicateNumbers.includes(number))
+      const exclusionReason = reasonInput.value.trim()
+      if (excludedReplicateNumbers.length && !exclusionReason) {
+        error.textContent = t('analysis.selection.errorReason')
+        reasonInput.setAttribute('aria-invalid', 'true')
+        reasonInput.focus()
+        return
+      }
+      finish({
+        selectionSchemaVersion: 1,
+        mode: 'explicit',
+        availableReplicateNumbers,
+        selectedReplicateNumbers,
+        excludedReplicateNumbers,
+        exclusionReason: excludedReplicateNumbers.length ? exclusionReason : null,
+        selectedAt: new Date().toISOString()
+      })
+    }
+
+    form.addEventListener('submit', submit)
+    selectAllButton.addEventListener('click', selectAll)
+    selectNoneButton.addEventListener('click', selectNone)
+    cancelButton.addEventListener('click', cancel)
+    dialog.addEventListener('cancel', cancel)
+    dialog.showModal()
+    checkboxes()[0]?.focus()
+  })
 }
 
 function requestLegacyStudyDesign(experiment) {

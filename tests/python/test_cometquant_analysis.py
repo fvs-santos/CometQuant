@@ -131,6 +131,28 @@ def reference_v2_experiment():
     }
 
 
+def selection_options(experiment, selected=None, reason=None):
+    available = sorted(replicate["replicateNumber"] for replicate in experiment["replicates"])
+    selected = available if selected is None else selected
+    return {
+        "selectionSchemaVersion": 1,
+        "mode": "explicit",
+        "availableReplicateNumbers": available,
+        "selectedReplicateNumbers": selected,
+        "excludedReplicateNumbers": sorted(set(available) - set(selected)),
+        "exclusionReason": reason,
+        "selectedAt": "2026-09-01T12:00:00.000Z",
+    }
+
+
+def analyze(experiment, selected=None, reason=None, lang="en"):
+    return engine.analyze_experiment(
+        experiment,
+        lang=lang,
+        analysis_options=selection_options(experiment, selected, reason),
+    )
+
+
 class ReferenceResultsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -267,11 +289,11 @@ class EdgeCaseTests(unittest.TestCase):
         experiment = {
             "treatments": ["A"],
             "replicates": [
-                {"gels": [
+                {"replicateNumber": 1, "gels": [
                     {"treatment": "A", "status": "counted", "completion": "complete", "class0": 0, "class1": 0, "class2": 0, "class3": 0, "class4": 100},
                     {"treatment": "A", "status": "counted", "completion": "complete", "class0": 100, "class1": 0, "class2": 0, "class3": 0, "class4": 0},
                 ]},
-                {"gels": [
+                {"replicateNumber": 2, "gels": [
                     {"treatment": "A", "status": "counted", "completion": "complete", "class0": 100, "class1": 0, "class2": 0, "class3": 0, "class4": 0},
                 ]},
             ],
@@ -279,9 +301,14 @@ class EdgeCaseTests(unittest.TestCase):
         summary = engine.calculate_class_summary(experiment)["A"]
         self.assertEqual(summary["means"][0], 75.0)
         self.assertEqual(summary["standard_deviations"][0], 25.0)
+        selected_summary = engine.calculate_class_summary(experiment, [1])["A"]
+        self.assertEqual(selected_summary["means"][0], 50.0)
+        self.assertEqual(selected_summary["standard_deviations"][0], 0.0)
+        chart = engine.generate_classes_chart(experiment, "en", [1])
+        self.assertTrue(chart.startswith("iVBORw0KGgo"))
 
 
-class BlockAnalysisV2Tests(unittest.TestCase):
+class BlockAnalysisV3Tests(unittest.TestCase):
     @staticmethod
     def _remove_counts(gel):
         for index in range(5):
@@ -295,7 +322,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         cls.expected = json.loads(
             (REFERENCE_V2 / "expected.json").read_text(encoding="utf-8")
         )
-        cls.result = engine.analyze_experiment(cls.experiment)
+        cls.result = analyze(cls.experiment)
 
     def assert_close(self, actual, expected, tolerance=1e-7):
         self.assertTrue(
@@ -320,7 +347,11 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         block = self.result["population"]["blocks"][2]
         cell = block["cells"][4]
         self.assertEqual(block["replicateNumber"], 3)
+        self.assertTrue(block["selected"])
+        self.assertTrue(block["primaryEligible"])
         self.assertTrue(block["primaryIncluded"])
+        self.assertTrue(block["validationEligible"])
+        self.assertTrue(block["validationIncluded"])
         self.assertEqual(cell["expectedSlides"], 2)
         self.assertEqual(cell["validSlides"], 1)
         self.assertEqual(cell["invalidSlides"], 1)
@@ -421,7 +452,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
     def test_page_direction_derives_from_assay_type(self):
         antigenotoxic = reference_v2_experiment()
         antigenotoxic["studyDesign"]["assayType"] = "antigenotoxicity"
-        result = engine.analyze_experiment(antigenotoxic)
+        result = analyze(antigenotoxic)
         page = result["nonParametric"]["pageTrend"]
         self.assertEqual(page["direction"], "decreasing")
         self.assertEqual(page["directionSource"], "assay_type")
@@ -467,7 +498,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
             replicate["assignments"] = [
                 item for item in replicate["assignments"] if item["treatmentIndex"] not in (3, 4)
             ]
-        result = engine.analyze_experiment(experiment)
+        result = analyze(experiment)
         non_parametric = result["nonParametric"]
         self.assertFalse(non_parametric["performed"])
         self.assertEqual(non_parametric["reason"]["code"], "insufficient_treatments")
@@ -478,7 +509,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
             for gel in replicate["gels"]:
                 if gel["treatmentIndex"] == 0:
                     self._remove_counts(gel)
-        result = engine.analyze_experiment(experiment)
+        result = analyze(experiment)
         non_parametric = result["nonParametric"]
         self.assertFalse(non_parametric["performed"])
         self.assertEqual(non_parametric["reason"]["code"], "no_complete_primary_blocks")
@@ -486,13 +517,16 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         self.assertFalse(transformed["performed"])
         self.assertEqual(transformed["reason"]["code"], "no_complete_primary_blocks")
 
-    def test_contract_is_strict_v2_json_without_retired_analyses(self):
-        serialized = engine.run_all_analyses(json.dumps(self.experiment), "en")
+    def test_contract_is_strict_v3_json_without_retired_analyses(self):
+        serialized = engine.run_all_analyses(
+            json.dumps(self.experiment), json.dumps(selection_options(self.experiment)), "en"
+        )
         parsed = json.loads(serialized, parse_constant=lambda value: self.fail(value))
         self.assertEqual(
             set(parsed),
             {
                 "analysisSchemaVersion",
+                "selection",
                 "protocol",
                 "population",
                 "descriptive",
@@ -506,7 +540,20 @@ class BlockAnalysisV2Tests(unittest.TestCase):
                 "charts",
             },
         )
-        self.assertEqual(parsed["analysisSchemaVersion"], 2)
+        self.assertEqual(parsed["analysisSchemaVersion"], 3)
+        self.assertEqual(
+            set(parsed["selection"]),
+            {
+                "performed",
+                "selectionSchemaVersion",
+                "mode",
+                "availableBlockNumbers",
+                "selectedBlockNumbers",
+                "excludedBlockNumbers",
+                "exclusionReason",
+                "selectedAt",
+            },
+        )
         self.assertEqual(
             parsed["protocol"]["visualScoreDenominator"],
             "effective_counted_nucleoids",
@@ -523,7 +570,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
             self.assertTrue(all(channel > 245 for channel in image.getpixel((0, 0))))
 
     def test_slide_edit_history_is_not_an_additional_scientific_observation(self):
-        without_history = engine.analyze_experiment(self.experiment)
+        without_history = analyze(self.experiment)
         with_history = json.loads(json.dumps(self.experiment))
         with_history["slideEditHistory"] = [
             {
@@ -535,14 +582,14 @@ class BlockAnalysisV2Tests(unittest.TestCase):
                 "after": {"gel": {"class4": 100}},
             }
         ]
-        self.assertEqual(engine.analyze_experiment(with_history), without_history)
+        self.assertEqual(analyze(with_history), without_history)
 
     def test_replicate_number_identity_is_not_replaced_by_position(self):
         experiment = reference_v2_experiment()
         identities = [7, 11, 19]
         for replicate, identity in zip(experiment["replicates"], identities):
             replicate["replicateNumber"] = identity
-        result = engine.analyze_experiment(experiment)
+        result = analyze(experiment)
         self.assertEqual(result["population"]["primary"]["includedBlockNumbers"], identities)
         self.assertEqual(
             sorted({row["replicateNumber"] for row in result["scores"]["cells"]}),
@@ -554,7 +601,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         for gel in experiment["replicates"][1]["gels"]:
             if gel["treatmentIndex"] == 3:
                 self._remove_counts(gel)
-        result = engine.analyze_experiment(experiment)
+        result = analyze(experiment)
         primary = result["population"]["primary"]
         self.assertEqual(primary["includedBlockNumbers"], [1, 3])
         self.assertEqual(primary["excludedBlocks"][0]["replicateNumber"], 2)
@@ -563,13 +610,147 @@ class BlockAnalysisV2Tests(unittest.TestCase):
         self.assertEqual(reason["treatmentIndex"], 3)
         self.assertEqual(result["blockAnova"]["blockCount"], 2)
 
+    def test_explicit_subset_is_canonical_and_keeps_all_blocks_for_audit(self):
+        options = selection_options(self.experiment, [1, 3], "  Prespecified quality review  ")
+        options["availableReplicateNumbers"] = [3, 1, 2]
+        options["selectedReplicateNumbers"] = [3, 1]
+        result = engine.analyze_experiment(
+            self.experiment, analysis_options=options
+        )
+
+        self.assertEqual(
+            result["selection"],
+            {
+                "performed": True,
+                "selectionSchemaVersion": 1,
+                "mode": "explicit",
+                "availableBlockNumbers": [1, 2, 3],
+                "selectedBlockNumbers": [1, 3],
+                "excludedBlockNumbers": [2],
+                "exclusionReason": "Prespecified quality review",
+                "selectedAt": "2026-09-01T12:00:00.000Z",
+            },
+        )
+        population = result["population"]
+        self.assertEqual([block["replicateNumber"] for block in population["blocks"]], [1, 2, 3])
+        self.assertEqual([block["selected"] for block in population["blocks"]], [True, False, True])
+        self.assertEqual(population["primary"]["eligibleBlockNumbers"], [1, 2, 3])
+        self.assertEqual(population["primary"]["includedBlockNumbers"], [1, 3])
+        self.assertEqual(population["primary"]["excludedBlocks"], [])
+        self.assertEqual(population["validation"]["eligibleBlockNumbers"], [1, 2, 3])
+        self.assertEqual(population["validation"]["includedBlockNumbers"], [1, 3])
+        self.assertEqual(population["validation"]["excludedBlocks"], [])
+        self.assertEqual(
+            sorted({cell["replicateNumber"] for cell in result["scores"]["cells"]}),
+            [1, 3],
+        )
+        self.assertEqual(result["blockAnova"]["blockCount"], 2)
+        self.assertEqual(result["controlResponse"]["blockNumbers"], [1, 3])
+
+    def test_unselected_ineligible_blocks_remain_auditable_but_not_excluded(self):
+        experiment = reference_v2_experiment()
+        for replicate in experiment["replicates"][1:]:
+            for gel in replicate["gels"]:
+                if gel["treatmentIndex"] == 1:
+                    self._remove_counts(gel)
+        result = analyze(experiment, [1, 3], "Validation cells excluded")
+        blocks = result["population"]["blocks"]
+
+        self.assertEqual(
+            [(block["selected"], block["validationEligible"], block["validationIncluded"]) for block in blocks],
+            [(True, True, True), (False, False, False), (True, False, False)],
+        )
+        validation = result["population"]["validation"]
+        self.assertEqual(validation["eligibleBlockNumbers"], [1])
+        self.assertEqual(validation["includedBlockNumbers"], [1])
+        self.assertEqual(
+            [block["replicateNumber"] for block in validation["excludedBlocks"]], [3]
+        )
+
+    def test_no_exclusions_normalizes_reason_to_null(self):
+        options = selection_options(self.experiment)
+        options["exclusionReason"] = "ignored because every block is selected"
+        result = engine.analyze_experiment(self.experiment, analysis_options=options)
+        self.assertIsNone(result["selection"]["exclusionReason"])
+
+    def test_invalid_selection_returns_the_full_structured_unavailable_contract(self):
+        cases = []
+
+        empty = selection_options(self.experiment)
+        empty["selectedReplicateNumbers"] = []
+        empty["excludedReplicateNumbers"] = [1, 2, 3]
+        empty["exclusionReason"] = "No replicate retained"
+        cases.append(("empty", empty, "empty_selected_replicate_numbers"))
+
+        nonexistent = selection_options(self.experiment, [1, 3], "Review")
+        nonexistent["selectedReplicateNumbers"] = [1, 4]
+        cases.append(
+            ("nonexistent", nonexistent, "selected_replicate_numbers_not_available")
+        )
+
+        duplicate = selection_options(self.experiment, [1, 3], "Review")
+        duplicate["selectedReplicateNumbers"] = [1, 1]
+        cases.append(("duplicate", duplicate, "duplicate_selected_replicate_numbers"))
+
+        available = selection_options(self.experiment)
+        available["availableReplicateNumbers"] = [1, 2]
+        cases.append(("available", available, "available_replicate_numbers_mismatch"))
+
+        excluded = selection_options(self.experiment, [1, 3], "Review")
+        excluded["excludedReplicateNumbers"] = []
+        cases.append(("excluded", excluded, "excluded_replicate_numbers_mismatch"))
+
+        reason = selection_options(self.experiment, [1, 3])
+        cases.append(("reason", reason, "exclusion_reason_required"))
+
+        for label, options, code in cases:
+            with self.subTest(label=label):
+                result = engine.analyze_experiment(
+                    self.experiment, analysis_options=options
+                )
+                self.assertEqual(result["analysisSchemaVersion"], 3)
+                unavailable = set(result) - {"analysisSchemaVersion"}
+                self.assertTrue(all(not result[key]["performed"] for key in unavailable))
+                self.assertTrue(
+                    all(result[key]["reason"]["code"] == code for key in unavailable)
+                )
+
+    def test_selection_validates_schema_values_reason_length_and_timestamp(self):
+        mutations = [
+            ("not_object", None, "invalid_selection_options"),
+            ("schema", {"selectionSchemaVersion": 2}, "invalid_selection_schema_version"),
+            ("mode", {"mode": "all"}, "invalid_selection_mode"),
+            (
+                "number",
+                {"availableReplicateNumbers": [1, -2, 3]},
+                "invalid_available_replicate_numbers",
+            ),
+            (
+                "long_reason",
+                {"exclusionReason": "x" * 501},
+                "invalid_exclusion_reason",
+            ),
+            ("timestamp", {"selectedAt": "   "}, "invalid_selected_at"),
+        ]
+        for label, mutation, code in mutations:
+            with self.subTest(label=label):
+                if mutation is None:
+                    options = None
+                else:
+                    options = selection_options(self.experiment, [1, 3], "Review")
+                    options.update(mutation)
+                result = engine.analyze_experiment(
+                    self.experiment, analysis_options=options
+                )
+                self.assertEqual(result["selection"]["reason"]["code"], code)
+
     def test_trend_uses_metadata_instead_of_parsing_labels(self):
         experiment = reference_v2_experiment()
         experiment["treatments"][2:] = ["low", "middle", "high"]
         for replicate in experiment["replicates"]:
             for gel in replicate["gels"]:
                 gel["treatment"] = experiment["treatments"][gel["treatmentIndex"]]
-        result = engine.analyze_experiment(experiment)
+        result = analyze(experiment)
         self.assertTrue(result["doseTrend"]["performed"])
         self.assert_close(result["doseTrend"]["slope"], self.expected["doseTrend"]["slope"])
 
@@ -579,7 +760,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
             for gel in replicate["gels"]:
                 if gel["treatmentIndex"] == 0:
                     self._remove_counts(gel)
-        missing_result = engine.analyze_experiment(missing_reference)
+        missing_result = analyze(missing_reference)
         self.assertEqual(
             missing_result["blockAnova"]["reason"]["code"],
             "no_complete_primary_blocks",
@@ -593,7 +774,7 @@ class BlockAnalysisV2Tests(unittest.TestCase):
                 if gel["treatmentIndex"] in (0, 2, 3, 4):
                     score = 5 + block_index + 2 * doses[gel["treatmentIndex"]]
                     gel.update(class0=100 - score, class4=score, completion="complete")
-        additive_result = engine.analyze_experiment(additive)
+        additive_result = analyze(additive)
         self.assertEqual(
             additive_result["blockAnova"]["reason"]["code"],
             "zero_residual_variance",
@@ -610,10 +791,12 @@ class BlockAnalysisV2Tests(unittest.TestCase):
     def test_unconfigured_study_design_returns_the_full_unavailable_contract(self):
         experiment = reference_v2_experiment()
         del experiment["studyDesign"]
-        result = engine.analyze_experiment(experiment)
-        self.assertEqual(result["analysisSchemaVersion"], 2)
+        result = analyze(experiment)
+        self.assertEqual(result["analysisSchemaVersion"], 3)
+        self.assertTrue(result["selection"]["performed"])
         self.assertEqual(result["protocol"]["reason"]["code"], "study_design_unconfigured")
-        self.assertTrue(all(not result[key]["performed"] for key in result if key != "analysisSchemaVersion"))
+        unavailable = set(result) - {"analysisSchemaVersion", "selection"}
+        self.assertTrue(all(not result[key]["performed"] for key in unavailable))
 
 
 if __name__ == "__main__":

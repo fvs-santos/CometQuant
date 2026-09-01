@@ -139,8 +139,9 @@ O score visual e calculado por:
 
 A meta `nucleoidsPerGel` continua limitando a coleta interativa e serve para relatar aderencia, mas nao e mais o denominador cientifico. O contrato v2 registra `visualScoreDenominator: effective_counted_nucleoids` e `offTargetSlidesIncluded: true`.
 
-Analises atualmente implementadas no contrato `analysisSchemaVersion: 2`:
+Analises atualmente implementadas no contrato `analysisSchemaVersion: 3`:
 
+- selecao explicita e transitoria das repeticoes que formam a populacao candidata de cada execucao, com justificativa geral obrigatoria quando alguma repeticao e retirada;
 - ANOVA em blocos completos pelo modelo `score ~ tratamento + experimento`;
 - comparacoes bilaterais planejadas de cada concentracao contra a referencia, sem gate omnibus e com ajuste Holm;
 - diferenca estimada, erro-padrao, IC nominal de 95%, p bruto, p ajustado e direcao;
@@ -612,6 +613,26 @@ Validacao desta continuidade:
 - a matriz E2E completa passou com 29 cenarios em cada motor (58 no total), incluindo o motor cientifico real no Pyodide;
 - a sensacao da vibracao e o volume real do clique permanecem pendentes de validacao manual em dispositivos fisicos.
 
+Concluido na continuidade de 01/09/2026 (selecao de repeticoes para analise):
+
+- ao entrar em **Analise Estatistica**, o usuario confirma quais experimentos independentes formarao a populacao candidata; todas as repeticoes iniciam selecionadas;
+- retirar uma ou mais repeticoes exige uma justificativa geral de ate 500 caracteres; selecionar somente uma repeticao e permitido com aviso de que parte da inferencia pode ficar indisponivel;
+- a selecao e transitoria e nao altera o documento do experimento nem seu schema 6; ela fica vinculada ao contexto exato da execucao e qualquer mudanca invalida os resultados em memoria;
+- o contrato cientifico passou a `analysisSchemaVersion: 3` e registra repeticoes disponiveis, selecionadas e nao selecionadas, justificativa e timestamp;
+- o motor distingue selecao explicita, elegibilidade tecnica e inclusao efetiva, preserva todos os blocos na populacao auditavel e aplica o mesmo subconjunto a analise principal, controles, sensibilidades e graficos;
+- dados brutos e scores agregados continuam preservando todas as repeticoes, mas os CSVs agora indicam selecao, elegibilidade e inclusao; o relatorio HTML e `population.csv` registram a justificativa sem remover dados coletados;
+- a interface ganhou dialogo responsivo e acessivel, resumo da selecao ativa e opcao de alterar o subconjunto antes de nova execucao;
+- a versao publica passou a `2.2.0` e o shell offline a `cometquant-shell-v22`.
+
+Validacao desta continuidade:
+
+- `npm run check` passou;
+- `npm run test:coverage` passou com 115 testes JavaScript e 91,94% de cobertura global;
+- `npm run test:analysis` passou com 32 testes Python;
+- a referencia R v2 preservada validou as mesmas 92 metricas numericas;
+- os 4 cenarios E2E direcionados de selecao/legado e os 4 cenarios do fluxo cientifico completo passaram em Chromium e WebKit;
+- a matriz E2E completa aprovou 59 de 60 cenarios; o unico encerramento de contexto Chromium ocorreu no importador XLSX preexistente e o mesmo cenario passou ao ser repetido isoladamente.
+
 ## Arquivos de referencia
 
 - `README.md`
@@ -659,10 +680,10 @@ Validacao desta continuidade:
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v2 e exportacoes detalhadas.
+- A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, selecao transitoria de repeticoes, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v3 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
 - Contagens aceitas usam pulso tatil de 30 ms e clique sonoro opcional de 25 ms; as preferencias sao independentes e falhas dessas APIs nao interferem no autosave.
-- A aplicacao esta na versao `2.1.0` e o shell offline usa `cometquant-shell-v21`.
+- A aplicacao esta na versao `2.2.0` e o shell offline usa `cometquant-shell-v22`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

@@ -2,7 +2,7 @@ const JSZip = require('jszip')
 const exporter = require('../../js/export.js')
 const { experiment } = require('../fixtures/experiment.js')
 
-function v2Analysis(overrides = {}) {
+function v3Analysis(overrides = {}) {
   const comparison = {
     referenceTreatmentIndex: 0, referenceTreatment: 'Control', treatmentIndex: 1, treatment: '1 uM', blockCount: 3,
     referenceMean: 10, treatmentMean: 20, difference: 10, standardError: 1.5, t: 6.6667, DF: 4,
@@ -17,7 +17,11 @@ function v2Analysis(overrides = {}) {
     ]
   }
   return {
-    analysisSchemaVersion: 2,
+    analysisSchemaVersion: 3,
+    selection: {
+      performed: true, selectionSchemaVersion: 1, mode: 'explicit', availableBlockNumbers: [1, 2, 3],
+      selectedBlockNumbers: [1, 3], excludedBlockNumbers: [2], exclusionReason: 'texto', selectedAt: '2026-08-31T12:00:00.000Z'
+    },
     protocol: {
       studyDesignVersion: 1, assayType: 'genotoxicity', primaryReferenceTreatmentIndex: 0, primaryReferenceTreatment: 'Control',
       primaryTreatmentIndices: [1], validationComparison: { referenceTreatmentIndex: 0, treatmentIndex: 1 }, alpha: 0.05,
@@ -25,12 +29,18 @@ function v2Analysis(overrides = {}) {
     },
     population: {
       unit: 'independent_experiment', technicalSlidesAveragedWithinCell: true,
-      blocks: [{
-        replicateNumber: 1, primaryIncluded: true, primaryExclusionReasons: [],
+      blocks: [1, 2, 3].map(replicateNumber => ({
+        replicateNumber,
+        selected: replicateNumber !== 2,
+        primaryEligible: true,
+        primaryIncluded: replicateNumber !== 2,
+        primaryExclusionReasons: [],
+        validationEligible: true,
+        validationIncluded: replicateNumber !== 2,
         cells: [{ treatmentIndex: 0, treatment: 'Control', expectedSlides: 2, validSlides: 2, invalidSlides: 0, absentSlides: 0, score: 10, technicalReplicationComplete: true }]
-      }],
-      primary: { includedBlockNumbers: [1], includedBlockCount: 1, excludedBlocks: [] },
-      validation: { includedBlockNumbers: [1], includedBlockCount: 1, excludedBlocks: [] }
+      })),
+      primary: { eligibleBlockNumbers: [1, 2, 3], includedBlockNumbers: [1, 3], includedBlockCount: 2, excludedBlocks: [] },
+      validation: { eligibleBlockNumbers: [1, 2, 3], includedBlockNumbers: [1, 3], includedBlockCount: 2, excludedBlocks: [] }
     },
     scores: { performed: true, population: 'primary_complete_blocks', cells: [] },
     blockAnova,
@@ -76,7 +86,7 @@ function reportScenario() {
     ],
     concUnit: 'uM'
   })
-  const analysis = v2Analysis()
+  const analysis = v3Analysis()
   const comparison = analysis.primaryComparisons.comparisons[0]
   Object.assign(comparison, {
     referenceTreatmentIndex: 0, referenceTreatment: 'Negative control', treatmentIndex: 2, treatment: 'Compound 1 uM',
@@ -107,8 +117,12 @@ function reportScenario() {
   analysis.descriptive.heterogeneityFlag = { performed: true, flagged: true, maximumStandardDeviation: 6.4, minimumStandardDeviation: 2, ratio: 3.2, code: 'heterogeneous_variance' }
   analysis.population.blocks = [1, 2, 3].map((replicateNumber, index) => ({
     replicateNumber,
-    primaryIncluded: true,
+    selected: replicateNumber !== 2,
+    primaryEligible: true,
+    primaryIncluded: replicateNumber !== 2,
     primaryExclusionReasons: [],
+    validationEligible: true,
+    validationIncluded: replicateNumber !== 2,
     cells: [
       { treatmentIndex: 0, treatment: 'Negative control', score: [8, 10, 12][index] },
       { treatmentIndex: 1, treatment: 'Positive control', score: [45, 48, 51][index] },
@@ -116,12 +130,125 @@ function reportScenario() {
       { treatmentIndex: 3, treatment: 'Compound 5 uM', score: [26, 30, 34][index] }
     ]
   }))
-  analysis.population.primary = { includedBlockNumbers: [1, 2, 3], includedBlockCount: 3, excludedBlocks: [] }
-  analysis.population.validation = { includedBlockNumbers: [1, 2, 3], includedBlockCount: 3, excludedBlocks: [] }
+  analysis.population.primary = { eligibleBlockNumbers: [1, 2, 3], includedBlockNumbers: [1, 3], includedBlockCount: 2, excludedBlocks: [] }
+  analysis.population.validation = { eligibleBlockNumbers: [1, 2, 3], includedBlockNumbers: [1, 3], includedBlockCount: 2, excludedBlocks: [] }
   return { data, analysis }
 }
 
+function experimentWithThreeReplicates() {
+  const data = experiment()
+  const template = data.replicates[0]
+  data.replicates = [1, 2, 3].map(replicateNumber => {
+    const replicate = JSON.parse(JSON.stringify(template))
+    replicate.replicateNumber = replicateNumber
+    replicate.date = `2026-01-0${replicateNumber}`
+    replicate.assignments[0].blindCode = `AA${replicateNumber}`
+    replicate.gels[0].blindCode = `AA${replicateNumber}`
+    return replicate
+  })
+  return data
+}
+
+function parseCsv(csv) {
+  const parseLine = line => {
+    const values = []
+    const pattern = /"((?:[^"]|"")*)"(?:,|$)/g
+    let match
+    while ((match = pattern.exec(line))) values.push(match[1].replace(/""/g, '"'))
+    return values
+  }
+  const [header, ...lines] = csv.replace(/^\uFEFF/, '').trimEnd().split('\r\n')
+  const columns = parseLine(header)
+  return lines.map(line => Object.fromEntries(columns.map((column, index) => [column, parseLine(line)[index]])))
+}
+
 describe('safe exports', () => {
+  it('uses the v3 transient explicit-selection schema in the analysis fixture', () => {
+    const analysis = v3Analysis()
+
+    expect(analysis.analysisSchemaVersion).toBe(3)
+    expect(analysis.selection).toEqual({
+      performed: true,
+      selectionSchemaVersion: 1,
+      mode: 'explicit',
+      availableBlockNumbers: [1, 2, 3],
+      selectedBlockNumbers: [1, 3],
+      excludedBlockNumbers: [2],
+      exclusionReason: 'texto',
+      selectedAt: '2026-08-31T12:00:00.000Z'
+    })
+    expect(analysis.population.blocks.map(block => block.replicateNumber)).toEqual([1, 2, 3])
+    expect(analysis.population.blocks[1]).toMatchObject({
+      selected: false, primaryEligible: true, primaryIncluded: false, validationEligible: true, validationIncluded: false
+    })
+    expect(analysis.population.primary).toMatchObject({ eligibleBlockNumbers: [1, 2, 3], includedBlockNumbers: [1, 3], excludedBlocks: [] })
+  })
+
+  it('exports every population block with coherent selection and technical flags', () => {
+    const analysis = v3Analysis()
+    analysis.selection.exclusionReason = '=SUM(1,2)'
+    const csv = exporter.buildPopulationCsv(analysis)
+    const rows = parseCsv(csv)
+
+    expect(rows).toHaveLength(3)
+    expect(rows.map(row => row.replicate_number)).toEqual(['1', '2', '3'])
+    expect(rows[1]).toMatchObject({
+      selected_for_analysis: 'false', selection_exclusion_reason: "'=SUM(1,2)",
+      primary_eligible: 'true', primary_included: 'false', validation_eligible: 'true', validation_included: 'false', score: '10'
+    })
+    expect(rows[0]).toMatchObject({ selected_for_analysis: 'true', selection_exclusion_reason: '', primary_included: 'true', validation_included: 'true' })
+    expect(csv).toContain('"\'=SUM(1,2)"')
+  })
+
+  it('preserves all raw and aggregate replicates and annotates selection without changing technical validity', () => {
+    const data = experimentWithThreeReplicates()
+    const analysis = v3Analysis()
+    analysis.selection.exclusionReason = '=DROP()'
+    const rawRows = parseCsv(exporter.buildRawCsv(data, analysis))
+    const aggregateRows = parseCsv(exporter.buildAggregateCsv(data, analysis))
+
+    expect(rawRows.map(row => row.replicate_number)).toEqual(['1', '2', '3'])
+    expect(aggregateRows.map(row => row.replicate_number)).toEqual(['1', '2', '3'])
+    expect(rawRows[1]).toMatchObject({
+      selected_for_analysis: 'false', selection_exclusion_reason: "'=DROP()", primary_eligible: 'true', primary_included: 'false',
+      validation_eligible: 'true', validation_included: 'false', included_in_analysis: 'true', total_counted: '100'
+    })
+    expect(aggregateRows[1]).toMatchObject({
+      selected_for_analysis: 'false', selection_exclusion_reason: "'=DROP()", primary_eligible: 'true', primary_included: 'false',
+      validation_eligible: 'true', validation_included: 'false', counted_slides: '1'
+    })
+    expect(rawRows[0].selection_exclusion_reason).toBe('')
+    expect(aggregateRows[2].selection_exclusion_reason).toBe('')
+  })
+
+  it('leaves transient-analysis flags blank when raw and aggregate exports have no analysis', () => {
+    const data = experimentWithThreeReplicates()
+    const [raw] = parseCsv(exporter.buildRawCsv(data))
+    const [aggregate] = parseCsv(exporter.buildAggregateCsv(data))
+
+    ;['selected_for_analysis', 'selection_exclusion_reason', 'primary_eligible', 'primary_included', 'validation_eligible', 'validation_included'].forEach(column => {
+      expect(raw[column]).toBe('')
+      expect(aggregate[column]).toBe('')
+    })
+    expect(raw.included_in_analysis).toBe('true')
+  })
+
+  it('shows and escapes transient selection before effective and technical population exclusions', () => {
+    const analysis = v3Analysis()
+    analysis.selection.exclusionReason = '<img src=x onerror=alert(1)>'
+    const html = exporter.buildReportHtml(experiment(), analysis, 'en')
+
+    expect(html).toContain('Available replicates')
+    expect(html).toContain('Selected replicates')
+    expect(html).toContain('Unselected replicates')
+    expect(html).toContain('2026-08-31T12:00:00.000Z')
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(html).not.toContain('<img src=x onerror=alert(1)>')
+    expect(html.indexOf('Available replicates')).toBeLessThan(html.indexOf('Included primary blocks'))
+    expect(html.indexOf('Selection rationale')).toBeLessThan(html.indexOf('Excluded primary blocks'))
+    expect(exporter.APP_VERSION).toBe('2.2.0')
+  })
+
   it('escapes HTML payloads in reports', () => {
     const data = experiment({ agent: '<img src=x onerror=alert(1)>', treatments: ['<script>alert(1)</script>'] })
     data.replicates[0].gels[0].treatment = data.treatments[0]
@@ -161,7 +288,7 @@ describe('safe exports', () => {
     expect(csv).toContain('"before_gel_recorded_at"')
     expect(exporter.buildRawRows(data)).toHaveLength(1)
 
-    const html = exporter.buildReportHtml(data, v2Analysis(), 'en')
+    const html = exporter.buildReportHtml(data, v3Analysis(), 'en')
     expect(html).toContain('Slide correction history')
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(html).not.toContain('<img src=x onerror=alert(1)>')
@@ -179,7 +306,7 @@ describe('safe exports', () => {
       version: 1, editId: 'edit-reason', editedAt: '2026-01-03T00:00:00.000Z', editedBy: 'Reviewer', reason: 'Reason corrected.',
       slide: { replicateNumber: 1, blindCode: 'AA1', treatmentIndex: 0, gelNumber: 1 }, before, after
     })
-    const html = exporter.buildReportHtml(data, v2Analysis(), 'en')
+    const html = exporter.buildReportHtml(data, v3Analysis(), 'en')
     expect(html).toContain('incomplete_reason=poor-quality')
     expect(html).toContain('incomplete_reason=technical-error')
   })
@@ -198,7 +325,7 @@ describe('safe exports', () => {
     expect(exporter.buildReportHtml(data, null, 'en')).toContain('34.0909')
   })
 
-  it('builds safe CSVs for every analysis v2 result', () => {
+  it('builds safe CSVs for every analysis v3 result', () => {
     const data = experiment({
       treatments: ['Control', '=DANGEROUS()'],
       treatmentMetadata: [
@@ -206,7 +333,7 @@ describe('safe exports', () => {
         { treatmentIndex: 1, role: 'test', concentration: 1 }
       ]
     })
-    const analysis = v2Analysis()
+    const analysis = v3Analysis()
     analysis.primaryComparisons.comparisons[0].treatment = '=DANGEROUS()'
     const outputs = {
       population: exporter.buildPopulationCsv(analysis),
@@ -238,9 +365,9 @@ describe('safe exports', () => {
     expect(outputs.design).toContain('"\'=DANGEROUS()"')
   })
 
-  it('renders the human v2 report and escapes statistical labels', () => {
+  it('renders the human v3 report and escapes statistical labels', () => {
     const data = experiment()
-    const analysis = v2Analysis()
+    const analysis = v3Analysis()
     analysis.primaryComparisons.comparisons[0].treatment = '<img src=x onerror=alert(1)>'
     const html = exporter.buildReportHtml(data, analysis, 'en')
     expect(html).toContain('Scientific protocol')
@@ -299,7 +426,7 @@ describe('safe exports', () => {
   it('adds navigable traceability and a Holm-annotated primary column chart', () => {
     const { data, analysis } = reportScenario()
     const generatedAt = '2026-08-25T12:34:56.000Z'
-    const html = exporter.buildReportHtml(data, analysis, 'pt', { generatedAt, appVersion: '2.1.0' })
+    const html = exporter.buildReportHtml(data, analysis, 'pt', { generatedAt, appVersion: '2.2.0' })
     const document = new DOMParser().parseFromString(html, 'text/html')
 
     const links = [...document.querySelectorAll('.report-index a')]
@@ -326,7 +453,7 @@ describe('safe exports', () => {
 
     const footer = document.querySelector('.report-footer')
     expect(footer.textContent).toContain('exp-1')
-    expect(footer.textContent).toContain('2.1.0')
+    expect(footer.textContent).toContain('2.2.0')
     expect(footer.querySelector(`time[datetime="${generatedAt}"]`)).not.toBeNull()
     expect(footer.querySelector('time[datetime="2026-01-02T00:00:00.000Z"]')).not.toBeNull()
     expect(footer.textContent).toContain('UTC')
@@ -372,7 +499,7 @@ describe('safe exports', () => {
 
   it('escapes report traceability values', () => {
     const data = experiment({ id: '<img src=x onerror=alert(1)>', updatedAt: '2026-01-02T00:00:00.000Z' })
-    const html = exporter.buildReportHtml(data, v2Analysis(), 'en', {
+    const html = exporter.buildReportHtml(data, v3Analysis(), 'en', {
       generatedAt: '2026-08-25T12:34:56.000Z',
       appVersion: '<script>alert(1)</script>'
     })
@@ -382,7 +509,7 @@ describe('safe exports', () => {
   })
 
   it('localizes a zero-difference direction in Portuguese', () => {
-    const analysis = v2Analysis()
+    const analysis = v3Analysis()
     analysis.primaryComparisons.comparisons[0].direction = 'equal'
     const html = exporter.buildReportHtml(experiment(), analysis, 'pt')
     const document = new DOMParser().parseFromString(html, 'text/html')
@@ -431,13 +558,13 @@ describe('safe exports', () => {
 
   it('provides content suitable for the complete ZIP', async () => {
     const data = experiment()
-    const analysis = v2Analysis()
+    const analysis = v3Analysis()
     const zip = new JSZip()
     zip.file('report.html', exporter.buildReportHtml(data, analysis, 'en'))
     zip.file('data/experiment.json', JSON.stringify(data))
     zip.file('data/analysis.json', JSON.stringify(analysis))
-    zip.file('data/raw_slides.csv', exporter.buildRawCsv(data))
-    zip.file('data/replicate_scores.csv', exporter.buildAggregateCsv(data))
+    zip.file('data/raw_slides.csv', exporter.buildRawCsv(data, analysis))
+    zip.file('data/replicate_scores.csv', exporter.buildAggregateCsv(data, analysis))
     zip.file('data/population.csv', exporter.buildPopulationCsv(analysis))
     zip.file('data/block_anova.csv', exporter.buildBlockAnovaCsv(analysis))
     zip.file('data/primary_comparisons.csv', exporter.buildComparisonsCsv(analysis))

@@ -6,7 +6,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
   'use strict'
 
-  const APP_VERSION = '2.1.0'
+  const APP_VERSION = '2.2.0'
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
@@ -33,23 +33,53 @@
     return [reason.code, reason.detail].filter(Boolean).join(': ')
   }
 
-  function buildRawRows(experiment) {
+  function flagText(value) {
+    return typeof value === 'boolean' ? String(value) : ''
+  }
+
+  function replicateAnalysisFlags(analysis, replicateNumber) {
+    if (!analysis) {
+      return {
+        selected_for_analysis: '', selection_exclusion_reason: '', primary_eligible: '', primary_included: '',
+        validation_eligible: '', validation_included: ''
+      }
+    }
+    const population = analysis.population
+    const selection = analysis.selection
+    const block = (population?.blocks || []).find(item => item.replicateNumber === replicateNumber)
+    const fromNumbers = (value, numbers) => typeof value === 'boolean' ? value : (Array.isArray(numbers) ? numbers.includes(replicateNumber) : undefined)
+    const selected = fromNumbers(block?.selected, selection?.performed ? selection.selectedBlockNumbers : undefined)
+    const primaryEligible = fromNumbers(block?.primaryEligible, population?.primary?.eligibleBlockNumbers)
+    const primaryIncluded = fromNumbers(block?.primaryIncluded, population?.primary?.includedBlockNumbers)
+    const validationEligible = fromNumbers(block?.validationEligible, population?.validation?.eligibleBlockNumbers)
+    const validationIncluded = fromNumbers(block?.validationIncluded, population?.validation?.includedBlockNumbers)
+    return {
+      selected_for_analysis: flagText(selected),
+      selection_exclusion_reason: selected === false ? (selection?.exclusionReason || '') : '',
+      primary_eligible: flagText(primaryEligible),
+      primary_included: flagText(primaryIncluded),
+      validation_eligible: flagText(validationEligible),
+      validation_included: flagText(validationIncluded)
+    }
+  }
+
+  function buildRawRows(experiment, analysis) {
     const rows = []
     experiment.replicates.forEach(replicate => {
       const assignments = replicate.assignments || []
       if (!assignments.length) {
-        replicate.gels.forEach(gel => rows.push(rawRow(experiment, replicate, null, gel)))
+        replicate.gels.forEach(gel => rows.push(rawRow(experiment, replicate, null, gel, analysis)))
         return
       }
       assignments.forEach(assignment => {
         const gel = replicate.gels.find(item => item.blindCode === assignment.blindCode)
-        rows.push(rawRow(experiment, replicate, assignment, gel))
+        rows.push(rawRow(experiment, replicate, assignment, gel, analysis))
       })
     })
     return rows.sort((a, b) => a.replicate_number - b.replicate_number || a.treatment_index - b.treatment_index || a.gel_number - b.gel_number)
   }
 
-  function rawRow(experiment, replicate, assignment, gel) {
+  function rawRow(experiment, replicate, assignment, gel, analysis) {
     const treatmentIndex = assignment?.treatmentIndex ?? gel?.treatmentIndex ?? experiment.treatments.indexOf(gel?.treatment)
     const included = core.isIncludedGel(gel)
     const score = gel ? core.calculateVisualScore(gel) : null
@@ -69,6 +99,7 @@
       slides_per_treatment: experiment.slidesPerTreatment,
       replicate_number: replicate.replicateNumber,
       replicate_date: replicate.date,
+      ...replicateAnalysisFlags(analysis, replicate.replicateNumber),
       blind_code: assignment?.blindCode || gel?.blindCode || '',
       treatment_index: treatmentIndex,
       treatment: experiment.treatments[treatmentIndex] || gel?.treatment || '',
@@ -85,16 +116,17 @@
     }
   }
 
-  const RAW_COLUMNS = ['schema_version', 'experiment_id', 'created_at', 'updated_at', 'researcher', 'agent', 'cells', 'negative_control', 'positive_control', 'solvent_control', 'concentration_unit', 'target_nucleoids', 'slides_per_treatment', 'replicate_number', 'replicate_date', 'blind_code', 'treatment_index', 'treatment', 'gel_number', 'status', 'absence_reason', 'incomplete_reason', 'recorded_at', 'class0', 'class1', 'class2', 'class3', 'class4', 'total_counted', 'completion', 'included_in_analysis', 'visual_score'].map(key => ({ key }))
-  const AGGREGATE_COLUMNS = ['treatment_index', 'treatment', 'replicate_number', 'expected_slides', 'counted_slides', 'analyzed_slides', 'complete_slides', 'incomplete_slides', 'absent_slides', 'replicate_score_mean'].map(key => ({ key }))
+  const RAW_COLUMNS = ['schema_version', 'experiment_id', 'created_at', 'updated_at', 'researcher', 'agent', 'cells', 'negative_control', 'positive_control', 'solvent_control', 'concentration_unit', 'target_nucleoids', 'slides_per_treatment', 'replicate_number', 'replicate_date', 'selected_for_analysis', 'selection_exclusion_reason', 'primary_eligible', 'primary_included', 'validation_eligible', 'validation_included', 'blind_code', 'treatment_index', 'treatment', 'gel_number', 'status', 'absence_reason', 'incomplete_reason', 'recorded_at', 'class0', 'class1', 'class2', 'class3', 'class4', 'total_counted', 'completion', 'included_in_analysis', 'visual_score'].map(key => ({ key }))
+  const AGGREGATE_COLUMNS = ['treatment_index', 'treatment', 'replicate_number', 'selected_for_analysis', 'selection_exclusion_reason', 'primary_eligible', 'primary_included', 'validation_eligible', 'validation_included', 'expected_slides', 'counted_slides', 'analyzed_slides', 'complete_slides', 'incomplete_slides', 'absent_slides', 'replicate_score_mean'].map(key => ({ key }))
 
-  function buildRawCsv(experiment) {
-    return serializeCsv(RAW_COLUMNS, buildRawRows(experiment))
+  function buildRawCsv(experiment, analysis) {
+    return serializeCsv(RAW_COLUMNS, buildRawRows(experiment, analysis))
   }
 
-  function buildAggregateCsv(experiment) {
+  function buildAggregateCsv(experiment, analysis) {
     const rows = core.aggregateReplicateScores(experiment).map(row => ({
       treatment_index: row.treatmentIndex, treatment: row.treatment, replicate_number: row.replicateNumber,
+      ...replicateAnalysisFlags(analysis, row.replicateNumber),
       expected_slides: row.expectedSlides, counted_slides: row.countedSlides, analyzed_slides: row.analyzedSlides, complete_slides: row.completeSlides,
       incomplete_slides: row.incompleteSlides, absent_slides: row.absentSlides,
       replicate_score_mean: row.score === null ? '' : row.score.toFixed(4)
@@ -171,7 +203,7 @@
     }).join('; ')
   }
 
-  const POPULATION_COLUMNS = ['replicate_number', 'primary_included', 'primary_exclusion_reasons', 'validation_included', 'validation_exclusion_reasons', 'treatment_index', 'treatment', 'expected_slides', 'valid_slides', 'invalid_slides', 'absent_slides', 'score', 'technical_replication_complete'].map(key => ({ key }))
+  const POPULATION_COLUMNS = ['replicate_number', 'selected_for_analysis', 'selection_exclusion_reason', 'primary_eligible', 'primary_included', 'primary_exclusion_reasons', 'validation_eligible', 'validation_included', 'validation_exclusion_reasons', 'treatment_index', 'treatment', 'expected_slides', 'valid_slides', 'invalid_slides', 'absent_slides', 'score', 'technical_replication_complete'].map(key => ({ key }))
   const BLOCK_ANOVA_COLUMNS = ['performed', 'reason_code', 'reason_context', 'model', 'block_count', 'treatment_indices', 'residual_df', 'MSE', 'term', 'SS', 'DF', 'MS', 'F', 'p'].map(key => ({ key }))
   const COMPARISON_COLUMNS = ['performed', 'reason_code', 'reason_context', 'family', 'family_size', 'adjustment', 'confidence_level', 'reference_treatment_index', 'reference_treatment', 'treatment_index', 'treatment', 'block_count', 'reference_mean', 'treatment_mean', 'difference', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p_raw', 'p_holm', 'significant', 'direction'].map(key => ({ key }))
   const CONTROL_RESPONSE_COLUMNS = ['performed', 'reason_code', 'reason_context', 'purpose', 'block_numbers', 'reference_treatment_index', 'reference_treatment', 'treatment_index', 'treatment', 'block_count', 'reference_mean', 'treatment_mean', 'difference', 'standard_error', 't', 'DF', 'ci_low', 'ci_high', 'p_raw', 'significant', 'direction'].map(key => ({ key }))
@@ -185,17 +217,16 @@
     if (!population || population.performed === false) {
       return serializeCsv(POPULATION_COLUMNS, [])
     }
-    const validationIncluded = new Set(population.validation?.includedBlockNumbers || [])
     const validationExcluded = new Map((population.validation?.excludedBlocks || []).map(block => [block.replicateNumber, joinedReasons(block.reasons)]))
     const rows = []
     ;(population.blocks || []).forEach(block => {
       const primaryReasons = joinedReasons(block.primaryExclusionReasons)
+      const flags = replicateAnalysisFlags(analysis, block.replicateNumber)
       ;(block.cells || []).forEach(cell => rows.push({
         replicate_number: block.replicateNumber,
-        primary_included: String(Boolean(block.primaryIncluded)),
+        ...flags,
         primary_exclusion_reasons: primaryReasons,
-        validation_included: String(validationIncluded.has(block.replicateNumber)),
-        validation_exclusion_reasons: validationExcluded.get(block.replicateNumber) || '',
+        validation_exclusion_reasons: joinedReasons(block.validationExclusionReasons) || validationExcluded.get(block.replicateNumber) || '',
         treatment_index: cell.treatmentIndex,
         treatment: cell.treatment,
         expected_slides: cell.expectedSlides,
@@ -494,7 +525,7 @@
       columnChart: 'Médias da análise principal', columnChartReading: 'As colunas mostram a média dos experimentos independentes e as hastes mostram o desvio-padrão entre esses experimentos. Os asteriscos identificam somente comparações planejadas com p ajustado por Holm menor que 0,05.', columnMeaning: 'Coluna = média; haste = DP entre experimentos independentes', holmLegend: '* p ajustado por Holm < 0,05', biologicalN: 'n (experimentos independentes)', notEstimable: 'Não estimável',
       contents: 'Neste relatório', summary: 'Síntese', visualizations: 'Visualizações', analysisDetails: 'Evidências e detalhes', audit: 'Dados e auditoria',
       raw: 'Dados brutos', scores: 'Scores por repetição', replicate: 'Repetição', treatment: 'Tratamento', slide: 'Lâmina', completion: 'Completude', reason: 'Motivo', complete: 'Na meta', incomplete: 'Fora da meta', absent: 'Ausentes',
-      protocol: 'Protocolo científico', population: 'População de análise', item: 'Item', value: 'Valor', primaryIncluded: 'Blocos primários incluídos', primaryExcluded: 'Blocos primários excluídos', validationIncluded: 'Blocos de validação incluídos',
+      protocol: 'Protocolo científico', population: 'População de análise', item: 'Item', value: 'Valor', availableBlocks: 'Repetições disponíveis', selectedBlocks: 'Repetições selecionadas', unselectedBlocks: 'Repetições não selecionadas', selectionReason: 'Justificativa da seleção', selectedAt: 'Seleção registrada em', primaryIncluded: 'Blocos primários incluídos', primaryExcluded: 'Blocos primários excluídos', validationIncluded: 'Blocos de validação incluídos',
       rcbd: 'ANOVA em blocos casualizados', term: 'Termo', comparisons: 'Comparações primárias planejadas', reference: 'Referência', difference: 'Diferença', ci: 'IC 95% nominal', rawP: 'p bruto', holmP: 'p Holm', decision: 'Resultado estatístico', direction: 'Direção', significant: 'SIGNIFICATIVO', notSignificant: 'NÃO SIGNIFICATIVO',
       control: 'Resposta de controle', trend: 'Tendência de dose ajustada por bloco', slope: 'Inclinação', blocks: 'Blocos', observations: 'Observações', notPerformed: 'Não realizado',
       charts: 'Gráficos técnicos', chartScores: 'Scores por bloco', chartDifferences: 'Diferenças com IC 95%', chartClasses: 'Distribuição por classes',
@@ -512,7 +543,7 @@
       columnChart: 'Primary analysis means', columnChartReading: 'Columns show the mean of independent experiments and error bars show the standard deviation among those experiments. Asterisks identify planned comparisons with a Holm-adjusted p-value below 0.05 only.', columnMeaning: 'Column = mean; error bar = SD among independent experiments', holmLegend: '* Holm-adjusted p < 0.05', biologicalN: 'n (independent experiments)', notEstimable: 'Not estimable',
       contents: 'In this report', summary: 'Summary', visualizations: 'Visualizations', analysisDetails: 'Evidence and details', audit: 'Data and audit',
       raw: 'Raw data', scores: 'Scores by replicate', replicate: 'Replicate', treatment: 'Treatment', slide: 'Slide', completion: 'Completion', reason: 'Reason', complete: 'On target', incomplete: 'Off target', absent: 'Absent',
-      protocol: 'Scientific protocol', population: 'Analysis population', item: 'Item', value: 'Value', primaryIncluded: 'Included primary blocks', primaryExcluded: 'Excluded primary blocks', validationIncluded: 'Included validation blocks',
+      protocol: 'Scientific protocol', population: 'Analysis population', item: 'Item', value: 'Value', availableBlocks: 'Available replicates', selectedBlocks: 'Selected replicates', unselectedBlocks: 'Unselected replicates', selectionReason: 'Selection rationale', selectedAt: 'Selection recorded at', primaryIncluded: 'Included primary blocks', primaryExcluded: 'Excluded primary blocks', validationIncluded: 'Included validation blocks',
       rcbd: 'Randomized complete block ANOVA', term: 'Term', comparisons: 'Planned primary comparisons', reference: 'Reference', difference: 'Difference', ci: 'Nominal 95% CI', rawP: 'Raw p', holmP: 'Holm p', decision: 'Statistical result', direction: 'Direction', significant: 'SIGNIFICANT', notSignificant: 'NOT SIGNIFICANT',
       control: 'Control response', trend: 'Block-adjusted dose trend', slope: 'Slope', blocks: 'Blocks', observations: 'Observations', notPerformed: 'Not performed',
       charts: 'Technical charts', chartScores: 'Scores by block', chartDifferences: 'Differences with 95% CI', chartClasses: 'Class distribution',
@@ -856,7 +887,16 @@
       [protocolLabel('alpha', pt), protocol.alpha], [protocolLabel('alternative', pt), localizedScientificValue(protocol.alternative, pt)], [protocolLabel('multiplicityAdjustment', pt), localizedScientificValue(protocol.multiplicityAdjustment, pt)], [protocolLabel('confidenceLevel', pt), protocol.confidenceLevel],
       [protocolLabel('includePrimaryReferenceAsZero', pt), localizedScientificValue(protocol.includePrimaryReferenceAsZero, pt)], [protocolLabel('visualScoreDenominator', pt), localizedScientificValue(protocol.visualScoreDenominator, pt)], [protocolLabel('offTargetSlidesIncluded', pt), localizedScientificValue(protocol.offTargetSlidesIncluded, pt)]
     ] : [[labels.notPerformed, reasonText(analysis?.protocol?.reason)]]
+    const selection = analysis?.selection?.performed ? analysis.selection : null
+    const selectionRows = selection ? [
+      [labels.availableBlocks, (selection.availableBlockNumbers || []).join(', ') || '-'],
+      [labels.selectedBlocks, (selection.selectedBlockNumbers || []).join(', ') || '-'],
+      [labels.unselectedBlocks, (selection.excludedBlockNumbers || []).join(', ') || '-'],
+      [labels.selectionReason, selection.exclusionReason || '-'],
+      [labels.selectedAt, selection.selectedAt || '-']
+    ] : []
     const populationRows = population ? [
+      ...selectionRows,
       [labels.primaryIncluded, (population.primary?.includedBlockNumbers || []).join(', ') || '-'],
       [labels.primaryExcluded, (population.primary?.excludedBlocks || []).map(block => `${block.replicateNumber}: ${joinedReasons(block.reasons)}`).join('; ') || '-'],
       [labels.validationIncluded, (population.validation?.includedBlockNumbers || []).join(', ') || '-']

@@ -386,8 +386,9 @@ def generate_score_chart(scores_by_treatment, tukey_result, experiment, lang):
     return _figure_to_base64(figure)
 
 
-def calculate_class_summary(experiment):
+def calculate_class_summary(experiment, block_numbers=None):
     treatments = experiment["treatments"]
+    selected_blocks = set(block_numbers) if block_numbers is not None else None
     class_keys = ["class0", "class1", "class2", "class3", "class4"]
     counts = {
         treatment: {class_key: [] for class_key in class_keys}
@@ -395,6 +396,11 @@ def calculate_class_summary(experiment):
     }
 
     for replicate in experiment["replicates"]:
+        if (
+            selected_blocks is not None
+            and replicate.get("replicateNumber") not in selected_blocks
+        ):
+            continue
         replicate_counts = {
             treatment: {class_key: [] for class_key in class_keys}
             for treatment in treatments
@@ -432,10 +438,10 @@ def calculate_class_summary(experiment):
     }
 
 
-def generate_classes_chart(experiment, lang):
+def generate_classes_chart(experiment, lang, block_numbers=None):
     treatments = experiment["treatments"]
     class_names = ["Class 0", "Class 1", "Class 2", "Class 3", "Class 4"]
-    summary = calculate_class_summary(experiment)
+    summary = calculate_class_summary(experiment, block_numbers)
     x_positions = np.arange(len(class_names))
     width = 0.8 / len(treatments)
     figure, axes = plt.subplots(figsize=(10, 5))
@@ -493,6 +499,139 @@ class AnalysisInputError(ValueError):
         self.detail = detail
 
 
+SELECTION_OPTION_KEYS = {
+    "selectionSchemaVersion",
+    "mode",
+    "availableReplicateNumbers",
+    "selectedReplicateNumbers",
+    "excludedReplicateNumbers",
+    "exclusionReason",
+    "selectedAt",
+}
+
+
+def _replicate_numbers(value, field, empty_allowed=True):
+    if not isinstance(value, list):
+        raise AnalysisInputError(
+            f"invalid_{field}",
+            f"{field} must be an array of positive integer replicate numbers.",
+        )
+    numbers = []
+    for number in value:
+        valid = not isinstance(number, bool) and isinstance(number, (int, float))
+        if valid:
+            try:
+                numeric = float(number)
+            except OverflowError:
+                valid = False
+            else:
+                valid = np.isfinite(numeric) and numeric.is_integer() and numeric > 0
+        if not valid:
+            raise AnalysisInputError(
+                f"invalid_{field}",
+                f"{field} must contain only positive integer replicate numbers.",
+            )
+        numbers.append(int(number))
+    if not empty_allowed and not numbers:
+        raise AnalysisInputError(
+            f"empty_{field}", f"{field} must contain at least one replicate number."
+        )
+    if len(set(numbers)) != len(numbers):
+        raise AnalysisInputError(
+            f"duplicate_{field}", f"{field} must not contain duplicate replicate numbers."
+        )
+    return sorted(numbers)
+
+
+def _experiment_block_numbers(experiment):
+    if not isinstance(experiment, dict):
+        raise AnalysisInputError("invalid_experiment", "Experiment must be an object.")
+    replicates = experiment.get("replicates")
+    if not isinstance(replicates, list) or not replicates:
+        raise AnalysisInputError("no_blocks", "At least one independent experiment is required.")
+    numbers = [
+        replicate.get("replicateNumber") if isinstance(replicate, dict) else None
+        for replicate in replicates
+    ]
+    return _replicate_numbers(
+        numbers, "experiment_replicate_numbers", empty_allowed=False
+    )
+
+
+def _validate_selection(experiment, analysis_options):
+    if not isinstance(analysis_options, dict) or set(analysis_options) != SELECTION_OPTION_KEYS:
+        raise AnalysisInputError(
+            "invalid_selection_options",
+            "analysis_options must be an object containing exactly the selection schema fields.",
+        )
+    version = analysis_options["selectionSchemaVersion"]
+    if isinstance(version, bool) or version != 1:
+        raise AnalysisInputError(
+            "invalid_selection_schema_version", "selectionSchemaVersion must be 1."
+        )
+    if analysis_options["mode"] != "explicit":
+        raise AnalysisInputError("invalid_selection_mode", "Selection mode must be explicit.")
+
+    available = _replicate_numbers(
+        analysis_options["availableReplicateNumbers"], "available_replicate_numbers"
+    )
+    selected = _replicate_numbers(
+        analysis_options["selectedReplicateNumbers"],
+        "selected_replicate_numbers",
+        empty_allowed=False,
+    )
+    excluded = _replicate_numbers(
+        analysis_options["excludedReplicateNumbers"], "excluded_replicate_numbers"
+    )
+    experiment_numbers = _experiment_block_numbers(experiment)
+    if available != experiment_numbers:
+        raise AnalysisInputError(
+            "available_replicate_numbers_mismatch",
+            "availableReplicateNumbers must exactly match the experiment replicate numbers.",
+        )
+    if not set(selected).issubset(available):
+        raise AnalysisInputError(
+            "selected_replicate_numbers_not_available",
+            "selectedReplicateNumbers must be a subset of availableReplicateNumbers.",
+        )
+    expected_excluded = sorted(set(available) - set(selected))
+    if excluded != expected_excluded:
+        raise AnalysisInputError(
+            "excluded_replicate_numbers_mismatch",
+            "excludedReplicateNumbers must be the exact complement of selectedReplicateNumbers.",
+        )
+
+    reason = analysis_options["exclusionReason"]
+    if excluded:
+        if not isinstance(reason, str) or not reason.strip():
+            raise AnalysisInputError(
+                "exclusion_reason_required",
+                "A non-empty exclusionReason is required when replicates are excluded.",
+            )
+        reason = reason.strip()
+        if len(reason) > 500:
+            raise AnalysisInputError(
+                "invalid_exclusion_reason", "exclusionReason must contain at most 500 characters."
+            )
+    else:
+        reason = None
+
+    selected_at = analysis_options["selectedAt"]
+    if not isinstance(selected_at, str) or not selected_at.strip():
+        raise AnalysisInputError("invalid_selected_at", "selectedAt must be a non-empty string.")
+
+    return {
+        "performed": True,
+        "selectionSchemaVersion": 1,
+        "mode": "explicit",
+        "availableBlockNumbers": available,
+        "selectedBlockNumbers": selected,
+        "excludedBlockNumbers": excluded,
+        "exclusionReason": reason,
+        "selectedAt": selected_at,
+    }
+
+
 def _treatment_label(experiment, treatment_index):
     return experiment["treatments"][treatment_index]
 
@@ -504,7 +643,7 @@ def _parse_protocol(experiment):
     if not isinstance(design, dict):
         raise AnalysisInputError(
             "study_design_unconfigured",
-            "A versioned studyDesign is required for analysis schema version 2.",
+            "A versioned studyDesign is required for analysis schema version 3.",
         )
     if design.get("status") != "configured":
         raise AnalysisInputError(
@@ -579,7 +718,7 @@ def _parse_protocol(experiment):
     if alpha != 0.05 or alternative != "two-sided" or adjustment != "holm":
         raise AnalysisInputError(
             "unsupported_analysis_protocol",
-            "Analysis schema version 2 requires alpha 0.05, two-sided tests, and Holm adjustment.",
+            "Analysis schema version 3 requires alpha 0.05, two-sided tests, and Holm adjustment.",
         )
     if reference_as_zero is not True:
         raise AnalysisInputError(
@@ -671,7 +810,7 @@ def _valid_slide_score(gel, target=None):
     return _finite(score)
 
 
-def build_block_matrix(experiment, protocol):
+def build_block_matrix(experiment, protocol, selected_block_numbers):
     treatments = experiment["treatments"]
     try:
         target = float(experiment["nucleoidsPerGel"])
@@ -689,6 +828,7 @@ def build_block_matrix(experiment, protocol):
 
     primary_indices = [protocol["primaryReferenceTreatmentIndex"]] + protocol["primaryTreatmentIndices"]
     blocks = []
+    selected_numbers = set(selected_block_numbers)
     seen_numbers = set()
     for replicate in replicates:
         replicate_number = replicate.get("replicateNumber")
@@ -763,10 +903,13 @@ def build_block_matrix(experiment, protocol):
 
         cell_by_index = {cell["treatmentIndex"]: cell for cell in cells}
         missing = [index for index in primary_indices if cell_by_index[index]["score"] is None]
+        primary_eligible = not missing
         blocks.append(
             {
                 "replicateNumber": replicate_number,
-                "primaryIncluded": not missing,
+                "selected": replicate_number in selected_numbers,
+                "primaryEligible": primary_eligible,
+                "primaryIncluded": replicate_number in selected_numbers and primary_eligible,
                 "primaryExclusionReasons": [
                     {
                         "code": "no_valid_slides",
@@ -779,10 +922,11 @@ def build_block_matrix(experiment, protocol):
                 "cells": cells,
             }
         )
-    return blocks
+    return sorted(blocks, key=lambda block: block["replicateNumber"])
 
 
 def _population(blocks, protocol):
+    eligible = [block["replicateNumber"] for block in blocks if block["primaryEligible"]]
     included = [block["replicateNumber"] for block in blocks if block["primaryIncluded"]]
     excluded = [
         {
@@ -790,7 +934,7 @@ def _population(blocks, protocol):
             "reasons": block["primaryExclusionReasons"],
         }
         for block in blocks
-        if not block["primaryIncluded"]
+        if block["selected"] and not block["primaryEligible"]
     ]
     validation = protocol["validationComparison"]
     validation_included = []
@@ -800,7 +944,9 @@ def _population(blocks, protocol):
         for block in blocks:
             cells = {cell["treatmentIndex"]: cell for cell in block["cells"]}
             missing = [index for index in indices if cells[index]["score"] is None]
-            if missing:
+            block["validationEligible"] = not missing
+            block["validationIncluded"] = block["selected"] and not missing
+            if block["selected"] and missing:
                 validation_excluded.append(
                     {
                         "replicateNumber": block["replicateNumber"],
@@ -815,18 +961,27 @@ def _population(blocks, protocol):
                         ],
                     }
                 )
-            else:
+            elif block["selected"]:
                 validation_included.append(block["replicateNumber"])
+    else:
+        for block in blocks:
+            block["validationEligible"] = False
+            block["validationIncluded"] = False
+    validation_eligible = [
+        block["replicateNumber"] for block in blocks if block["validationEligible"]
+    ]
     return {
         "unit": "independent_experiment",
         "technicalSlidesAveragedWithinCell": True,
         "blocks": blocks,
         "primary": {
+            "eligibleBlockNumbers": eligible,
             "includedBlockNumbers": included,
             "includedBlockCount": len(included),
             "excludedBlocks": excluded,
         },
         "validation": {
+            "eligibleBlockNumbers": validation_eligible,
             "includedBlockNumbers": validation_included,
             "includedBlockCount": len(validation_included),
             "excludedBlocks": validation_excluded,
@@ -1364,26 +1519,36 @@ def _calculate_transformed_analysis(values, treatment_indices, metadata_by_index
     }
 
 
-def analyze_experiment(experiment, lang="en"):
+def _unavailable_analysis(reason, selection=None):
+    return {
+        "analysisSchemaVersion": 3,
+        "selection": selection if selection is not None else reason,
+        "protocol": reason,
+        "population": reason,
+        "descriptive": reason,
+        "scores": reason,
+        "blockAnova": reason,
+        "primaryComparisons": reason,
+        "controlResponse": reason,
+        "doseTrend": reason,
+        "nonParametric": reason,
+        "transformedAnalysis": reason,
+        "charts": reason,
+    }
+
+
+def analyze_experiment(experiment, lang="en", analysis_options=None):
+    try:
+        selection = _validate_selection(experiment, analysis_options)
+    except AnalysisInputError as error:
+        return _unavailable_analysis(_reason(error.code, error.detail))
+
     try:
         protocol, metadata_by_index = _parse_protocol(experiment)
-        blocks = build_block_matrix(experiment, protocol)
+        blocks = build_block_matrix(experiment, protocol, selection["selectedBlockNumbers"])
     except AnalysisInputError as error:
         unavailable = _reason(error.code, error.detail)
-        return {
-            "analysisSchemaVersion": 2,
-            "protocol": unavailable,
-            "population": unavailable,
-            "descriptive": unavailable,
-            "scores": unavailable,
-            "blockAnova": unavailable,
-            "primaryComparisons": unavailable,
-            "controlResponse": unavailable,
-            "doseTrend": unavailable,
-            "nonParametric": unavailable,
-            "transformedAnalysis": unavailable,
-            "charts": unavailable,
-        }
+        return _unavailable_analysis(unavailable, selection)
 
     population = _population(blocks, protocol)
     treatment_indices = [protocol["primaryReferenceTreatmentIndex"]] + protocol["primaryTreatmentIndices"]
@@ -1415,7 +1580,8 @@ def analyze_experiment(experiment, lang="en"):
     scores, descriptive = _scores_and_descriptive(blocks, treatment_indices, included_blocks)
     heterogeneity_flag = _heterogeneity_flag(descriptive)
     return {
-        "analysisSchemaVersion": 2,
+        "analysisSchemaVersion": 3,
+        "selection": selection,
         "protocol": protocol,
         "population": population,
         "descriptive": {
@@ -1440,14 +1606,20 @@ def analyze_experiment(experiment, lang="en"):
                 blocks, treatment_indices, included_blocks, experiment, lang
             ),
             "differences": generate_difference_chart(primary_comparisons, lang),
-            "classes": generate_classes_chart(experiment, lang),
+            "classes": generate_classes_chart(
+                experiment, lang, selection["selectedBlockNumbers"]
+            ),
         },
     }
 
 
-def run_all_analyses(experiment_json, lang):
+def run_all_analyses(experiment_json, analysis_options_json, lang):
     experiment = json.loads(experiment_json)
-    result = analyze_experiment(experiment, lang)
+    try:
+        analysis_options = json.loads(analysis_options_json)
+    except (json.JSONDecodeError, TypeError):
+        analysis_options = None
+    result = analyze_experiment(experiment, lang, analysis_options)
     return json.dumps(result, allow_nan=False, separators=(",", ":"))
 
 

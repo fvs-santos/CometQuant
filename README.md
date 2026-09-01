@@ -110,7 +110,15 @@ the technical loss is reported. If no valid slide exists for the primary referen
 concentration, that complete block is explicitly excluded from primary
 inference.
 
-The version 2 analysis contract provides:
+Before each run, the user explicitly selects the independent experiments that
+form the candidate analysis population. All repetitions start selected. Removing
+one or more repetitions requires a general reason, which is recorded with the
+transient selection in the result, report and CSV exports without changing the
+stored experiment. The same selection applies to primary inference, control
+response, sensitivity analyses and charts; technical eligibility is evaluated
+separately after that selection.
+
+The version 3 analysis contract provides:
 
 - randomized complete block ANOVA using `score ~ treatment + experiment`;
 - visual scores divided by the effective positive class-count total for each slide, with off-target slides retained and flagged;
@@ -125,7 +133,7 @@ The version 2 analysis contract provides:
 - an arcsine-sqrt transformed sensitivity re-run of the block ANOVA, comparisons and dose trend.
 
 Shapiro-Wilk no longer selects the method. One-way ANOVA, Tukey HSD, pooled
-Pearson correlation and the former power calculation are not part of the v2
+Pearson correlation and the former power calculation are not part of the v3
 runtime contract. The non-parametric and transformed blocks are robustness
 checks that confirm consistency; they are not a second attempt at significance.
 The planned comparisons remain parametric because exact paired inference (e.g.
@@ -149,7 +157,7 @@ transformed analysis. `tests/reference/v1/` remains immutable historical
 evidence for the retired protocol. R is never loaded by the browser application.
 
 Playwright also runs the extracted Python engine inside real Pyodide and checks
-the rendered v2 reference results and three generated charts.
+the rendered v3 reference results, explicit repetition selection and three generated charts.
 
 ## Deployment And Offline Behavior
 

@@ -4,7 +4,7 @@
 // =============================================
 
 const ANALYSIS_ENGINE_URL = './python/cometquant_analysis.py'
-const ANALYSIS_SCHEMA_VERSION = 2
+const ANALYSIS_SCHEMA_VERSION = 3
 let analysisState = 'idle'
 let analysisManifest = null
 let analysisWorker = null
@@ -17,6 +17,7 @@ let activeAnalysisRequest = null
 let analysisRuntimeVersions = null
 let analysisStatusKey = 'analysis.packageMissing'
 let analysisStatusPercent = 0
+let currentAnalysisSelection = null
 
 function updatePyodideStatus(messageText, pct, icon = '...') {
   const status = document.getElementById('pyodide-status')
@@ -55,6 +56,8 @@ function renderAnalysisState() {
   if (editHistoryButton) editHistoryButton.hidden = !hasEditHistory
   const shareEditHistoryButton = document.getElementById('btn-share-edit-history')
   if (shareEditHistoryButton) shareEditHistoryButton.hidden = !hasEditHistory || typeof navigator.share !== 'function'
+  const changeSelectionButton = document.getElementById('btn-change-analysis-selection')
+  if (changeSelectionButton) changeSelectionButton.disabled = analysisState === 'running'
   if (analysisState === 'missing') button.textContent = t('analysis.install')
   else if (analysisState === 'error') button.textContent = t('analysis.retry')
   else if (analysisState === 'running') button.textContent = t('analysis.running')
@@ -247,6 +250,15 @@ function initAnalysis() {
   document.getElementById('btn-cancel-analysis')
     .addEventListener('click', cancelAnalysis)
 
+  document.getElementById('btn-change-analysis-selection')
+    .addEventListener('click', async () => {
+      if (!currentExperiment || analysisState === 'running') return
+      const selection = await requestAnalysisSelection(currentExperiment, currentAnalysisSelection)
+      if (!selection) return
+      setAnalysisSelection(selection)
+      document.getElementById('analysis-error').textContent = t('analysis.selection.changed')
+    })
+
   document.getElementById('btn-export-report')
     .addEventListener('click', exportReport)
 
@@ -271,6 +283,62 @@ function initAnalysis() {
   setAnalysisState('idle', 'analysis.packageMissing', 0)
 }
 
+function analysisSelectionKey(selection) {
+  if (!selection) return ''
+  return JSON.stringify({
+    selectionSchemaVersion: selection.selectionSchemaVersion,
+    mode: selection.mode,
+    availableReplicateNumbers: selection.availableReplicateNumbers,
+    selectedReplicateNumbers: selection.selectedReplicateNumbers,
+    excludedReplicateNumbers: selection.excludedReplicateNumbers,
+    exclusionReason: selection.exclusionReason,
+    selectedAt: selection.selectedAt
+  })
+}
+
+function selectionMatchesExperiment(selection, experiment) {
+  if (!selection || !experiment) return false
+  const available = [...(experiment.replicates || [])]
+    .map(replicate => replicate.replicateNumber)
+    .sort((left, right) => left - right)
+  const selected = selection.selectedReplicateNumbers
+  const excluded = selection.excludedReplicateNumbers
+  if (selection.selectionSchemaVersion !== 1 || selection.mode !== 'explicit' || !Array.isArray(selected) || !selected.length || !Array.isArray(excluded)) return false
+  if (JSON.stringify(selection.availableReplicateNumbers) !== JSON.stringify(available)) return false
+  if (new Set(selected).size !== selected.length || selected.some(number => !available.includes(number))) return false
+  const expectedExcluded = available.filter(number => !selected.includes(number))
+  if (JSON.stringify(excluded) !== JSON.stringify(expectedExcluded)) return false
+  if (excluded.length && (typeof selection.exclusionReason !== 'string' || !selection.exclusionReason.trim())) return false
+  return typeof selection.selectedAt === 'string' && Boolean(selection.selectedAt)
+}
+
+function setAnalysisSelection(selection) {
+  currentAnalysisSelection = selection ? JSON.parse(JSON.stringify(selection)) : null
+  invalidateAnalysisResults()
+  renderAnalysisSelectionSummary()
+}
+
+function renderAnalysisSelectionSummary() {
+  const summary = document.getElementById('analysis-selection-summary-text')
+  const reason = document.getElementById('analysis-selection-summary-reason')
+  if (!summary || !reason) return
+  if (!currentAnalysisSelection) {
+    summary.textContent = t('analysis.selection.invalid')
+    reason.hidden = true
+    reason.textContent = ''
+    return
+  }
+  const selected = currentAnalysisSelection.selectedReplicateNumbers.join(', ') || t('analysis.v2.value.none')
+  const excluded = currentAnalysisSelection.excludedReplicateNumbers.join(', ') || t('analysis.v2.value.none')
+  summary.textContent = t('analysis.selection.summary')
+    .replace('{selected}', selected)
+    .replace('{excluded}', excluded)
+  reason.hidden = !currentAnalysisSelection.exclusionReason
+  reason.textContent = currentAnalysisSelection.exclusionReason
+    ? t('analysis.selection.summaryReason').replace('{reason}', currentAnalysisSelection.exclusionReason)
+    : ''
+}
+
 
 function runAnalysis() {
   if (!currentExperiment) {
@@ -283,21 +351,30 @@ function runAnalysis() {
     return
   }
 
+  if (!selectionMatchesExperiment(currentAnalysisSelection, currentExperiment)) {
+    alert(t('analysis.selection.invalid'))
+    return
+  }
+
+  const selection = JSON.parse(JSON.stringify(currentAnalysisSelection))
+
   const experimentContext = {
     id: currentExperiment.id,
     updatedAt: currentExperiment.updatedAt,
     revision: currentExperimentRevision,
-    lang: currentLanguage
+    lang: currentLanguage,
+    selectionKey: analysisSelectionKey(selection)
   }
 
   const requestId = ++requestSequence
-  activeAnalysisRequest = { requestId, context: experimentContext }
+  activeAnalysisRequest = { requestId, context: experimentContext, selection }
   setAnalysisState('running', 'analysis.running', 100)
   analysisWorker.postMessage({
     type: 'analyze',
     requestId,
     context: experimentContext,
     experimentJson: JSON.stringify(currentExperiment),
+    analysisOptionsJson: JSON.stringify(selection),
     lang: currentLanguage
   })
 }
@@ -312,15 +389,16 @@ function handleAnalysisWorkerMessage(message) {
   }
   if (message.type !== 'result') return
   const context = activeAnalysisRequest.context
+  const requestSelection = activeAnalysisRequest.selection
   activeAnalysisRequest = null
-  if (!currentExperiment || currentExperiment.id !== context.id || currentExperiment.updatedAt !== context.updatedAt || currentExperimentRevision !== context.revision || currentLanguage !== context.lang) {
+  if (!currentExperiment || currentExperiment.id !== context.id || currentExperiment.updatedAt !== context.updatedAt || currentExperimentRevision !== context.revision || currentLanguage !== context.lang || analysisSelectionKey(currentAnalysisSelection) !== context.selectionKey) {
     invalidateAnalysisResults()
     setAnalysisState('ready', 'analysis.ready', 100)
     return
   }
   try {
     const result = JSON.parse(message.resultJson)
-    validateAnalysisResult(result)
+    validateAnalysisResult(result, requestSelection)
     analysisResults = result
     analysisResultsContext = context
     renderAnalysisResults(analysisResults)
@@ -374,7 +452,8 @@ function hasCurrentAnalysisResults() {
     analysisResultsContext.id === currentExperiment.id &&
     analysisResultsContext.updatedAt === currentExperiment.updatedAt &&
     analysisResultsContext.revision === currentExperimentRevision &&
-    analysisResultsContext.lang === currentLanguage
+    analysisResultsContext.lang === currentLanguage &&
+    analysisResultsContext.selectionKey === analysisSelectionKey(currentAnalysisSelection)
   )
 }
 
@@ -386,7 +465,7 @@ function hasCurrentAnalysisResults() {
 function renderAnalysisResults(results) {
   validateAnalysisResult(results)
   const containers = ensureAnalysisV2Containers()
-  renderPlanPopulation(containers.planPopulation, results.protocol, results.population)
+  renderPlanPopulation(containers.planPopulation, results.selection, results.protocol, results.population)
   renderBlockScores(containers.blockScores, results.scores)
   renderDispersion(containers.blockScores, results.descriptive)
   renderRcbdAnova(containers.rcbdAnova, results.blockAnova)
@@ -399,9 +478,30 @@ function renderAnalysisResults(results) {
   return containers
 }
 
-function validateAnalysisResult(result) {
+function validateAnalysisResult(result, expectedSelection = null) {
   if (!result || result.analysisSchemaVersion !== ANALYSIS_SCHEMA_VERSION) {
     throw new Error(t('analysis.v2.error.invalidSchema'))
+  }
+  const required = ['selection', 'protocol', 'population', 'descriptive', 'scores', 'blockAnova', 'primaryComparisons', 'controlResponse', 'doseTrend', 'nonParametric', 'transformedAnalysis', 'charts']
+  if (required.some(key => !Object.prototype.hasOwnProperty.call(result, key))) {
+    throw new Error(t('analysis.v2.error.invalidSchema'))
+  }
+  if (expectedSelection && result.selection?.performed !== true) {
+    throw new Error(t('analysis.v2.error.invalidSchema'))
+  }
+  if (expectedSelection) {
+    const returned = {
+      selectionSchemaVersion: result.selection.selectionSchemaVersion,
+      mode: result.selection.mode,
+      availableReplicateNumbers: result.selection.availableBlockNumbers,
+      selectedReplicateNumbers: result.selection.selectedBlockNumbers,
+      excludedReplicateNumbers: result.selection.excludedBlockNumbers,
+      exclusionReason: result.selection.exclusionReason,
+      selectedAt: result.selection.selectedAt
+    }
+    if (analysisSelectionKey(returned) !== analysisSelectionKey(expectedSelection)) {
+      throw new Error(t('analysis.v2.error.invalidSchema'))
+    }
   }
 }
 
@@ -442,8 +542,20 @@ function ensureAnalysisV2Containers() {
   return containers
 }
 
-function renderPlanPopulation(container, protocol, population) {
+function renderPlanPopulation(container, selection, protocol, population) {
   container.replaceChildren()
+  appendCaption(container, t('analysis.selection.resultCaption'))
+  if (!selection || selection.performed === false) {
+    renderNotPerformed(container, selection, false)
+  } else {
+    renderResultTable(container, [t('analysis.v2.header.item'), t('analysis.v2.header.value')], [
+      [t('analysis.selection.available'), (selection.availableBlockNumbers || []).join(', ') || t('analysis.v2.value.none')],
+      [t('analysis.selection.selected'), (selection.selectedBlockNumbers || []).join(', ') || t('analysis.v2.value.none')],
+      [t('analysis.selection.excluded'), (selection.excludedBlockNumbers || []).join(', ') || t('analysis.v2.value.none')],
+      [t('analysis.v2.header.reason'), selection.exclusionReason || t('analysis.v2.value.notApplicable')],
+      [t('analysis.selection.selectedAt'), formatDate(selection.selectedAt)]
+    ], false)
+  }
   appendCaption(container, t('analysis.v2.protocol.caption'))
   if (!protocol || protocol.performed === false) {
     renderNotPerformed(container, protocol, false)
@@ -799,14 +911,14 @@ function shareReport() {
 function exportCsv() {
   if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
-  downloadFile(CometQuantExport.buildRawCsv(currentExperiment), `${exportBaseName()}_raw_slides.csv`, 'text/csv;charset=utf-8')
+  downloadFile(CometQuantExport.buildRawCsv(currentExperiment, analysisResults), `${exportBaseName()}_raw_slides.csv`, 'text/csv;charset=utf-8')
 }
 
 
 function shareCsv() {
   if (!hasCurrentAnalysisResults()) return
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
-  const file = CometQuantExport.buildShareFile(CometQuantExport.buildRawCsv(currentExperiment), `${exportBaseName()}_raw_slides.csv`, 'text/csv')
+  const file = CometQuantExport.buildShareFile(CometQuantExport.buildRawCsv(currentExperiment, analysisResults), `${exportBaseName()}_raw_slides.csv`, 'text/csv')
   shareFileWithFallback(file, { title: t('share.title'), text: t('share.genericText') })
 }
 
@@ -841,9 +953,9 @@ async function exportZip() {
     const data = folder.folder('data')
     data.file('experiment.json', JSON.stringify(currentExperiment, null, 2))
     data.file('analysis.json', JSON.stringify(analysisResults, null, 2))
-    data.file('raw_slides.csv', CometQuantExport.buildRawCsv(currentExperiment))
+    data.file('raw_slides.csv', CometQuantExport.buildRawCsv(currentExperiment, analysisResults))
     data.file('slide_corrections.csv', CometQuantExport.buildSlideEditCsv(currentExperiment))
-    data.file('replicate_scores.csv', CometQuantExport.buildAggregateCsv(currentExperiment))
+    data.file('replicate_scores.csv', CometQuantExport.buildAggregateCsv(currentExperiment, analysisResults))
     data.file('population.csv', CometQuantExport.buildPopulationCsv(analysisResults))
     data.file('block_anova.csv', CometQuantExport.buildBlockAnovaCsv(analysisResults))
     data.file('primary_comparisons.csv', CometQuantExport.buildComparisonsCsv(analysisResults))

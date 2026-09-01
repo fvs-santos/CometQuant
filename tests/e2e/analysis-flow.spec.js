@@ -92,6 +92,37 @@ function referenceExperiment() {
   }
 }
 
+async function confirmAllRepetitions(page) {
+  await expect(page.getByRole('dialog', { name: 'Select repetitions' })).toBeVisible()
+  await page.getByRole('button', { name: 'Continue to analysis' }).click()
+}
+
+test('selects repetitions explicitly and requires a reason for exclusions', async ({ page }) => {
+  await page.addInitScript(experiment => localStorage.setItem('cometquant-experiments', JSON.stringify([experiment])), referenceExperiment())
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.getByRole('button', { name: 'Open' }).click()
+  await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
+  await page.getByRole('button', { name: 'Statistical Analysis' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Select repetitions' })
+  await expect(dialog.getByRole('checkbox')).toHaveCount(3)
+  await dialog.getByRole('button', { name: 'Clear all' }).click()
+  await dialog.getByRole('button', { name: 'Continue to analysis' }).click()
+  await expect(dialog.getByRole('alert')).toHaveText('Select at least one repetition.')
+
+  await dialog.getByRole('checkbox').nth(0).check()
+  await dialog.getByRole('checkbox').nth(2).check()
+  await dialog.getByRole('button', { name: 'Continue to analysis' }).click()
+  await expect(dialog.getByRole('alert')).toHaveText('Enter a general reason for the excluded repetitions.')
+  await dialog.getByLabel('General reason for excluding repetitions').fill('Predefined instrument exclusion')
+  await dialog.getByRole('button', { name: 'Continue to analysis' }).click()
+
+  await expect(page.locator('#screen-analysis')).toHaveClass(/active/)
+  await expect(page.locator('#analysis-selection-summary-text')).toContainText('Selected: 1, 3. Excluded: 2.')
+  await expect(page.locator('#analysis-selection-summary-reason')).toContainText('Predefined instrument exclusion')
+})
+
 test('runs the extracted Python engine in Pyodide with reference results', async ({ page, browserName }, testInfo) => {
   test.setTimeout(360000)
   const remoteRequests = []
@@ -105,6 +136,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   await page.getByRole('button', { name: 'Open' }).click()
   await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
   await page.getByRole('button', { name: 'Statistical Analysis' }).click()
+  await confirmAllRepetitions(page)
 
   await page.getByRole('button', { name: /Prepare Offline Analysis/ }).click()
   await expect.poll(() => page.locator('#pyodide-message').textContent(), { timeout: 240000 })
@@ -124,6 +156,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   await page.getByRole('button', { name: 'Open' }).click()
   await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
   await page.getByRole('button', { name: 'Statistical Analysis' }).click()
+  await confirmAllRepetitions(page)
   await expect(page.locator('#pyodide-message')).toHaveText('Scientific environment ready for offline use.', { timeout: 180000 })
   await page.getByRole('button', { name: 'Run Analysis' }).click()
   await page.evaluate(() => setLanguage('pt'))
@@ -169,7 +202,14 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   }
   const analysisEntry = archive.file(archivedNames.find(name => name.endsWith('data/analysis.json')))
   const analysisJson = JSON.parse(await analysisEntry.async('string'))
-  expect(analysisJson.analysisSchemaVersion).toBe(2)
+  expect(analysisJson.analysisSchemaVersion).toBe(3)
+  expect(analysisJson.selection).toMatchObject({
+    performed: true,
+    availableBlockNumbers: [1, 2, 3],
+    selectedBlockNumbers: [1, 2, 3],
+    excludedBlockNumbers: [],
+    exclusionReason: null
+  })
   expect(analysisJson.nonParametric.performed).toBe(true)
   expect(analysisJson.nonParametric.friedman.pExact).toBeCloseTo(expected.nonParametric.friedman.pExact, 7)
   expect(analysisJson.nonParametric.pageTrend.direction).toBe('increasing')
@@ -197,7 +237,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   await expect(reportPage.locator('.column-chart .holm-marker')).toHaveCount(analysisJson.primaryComparisons.comparisons.filter(row => row.significant).length)
   await expect(reportPage.locator('.column-chart .sr-only')).toContainText('experimentos independentes')
   await expect(reportPage.locator('.report-footer')).toContainText('analysis-reference')
-  await expect(reportPage.locator('.report-footer')).toContainText('2.1.0')
+  await expect(reportPage.locator('.report-footer')).toContainText('2.2.0')
   const indexLinks = reportPage.locator('.report-index a')
   expect(await indexLinks.count()).toBeGreaterThan(10)
   for (let index = 0; index < await indexLinks.count(); index += 1) {
@@ -208,5 +248,23 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   expect(reportRequests).toEqual([])
   await expect(reportPage.locator('#raw details')).not.toHaveAttribute('open', '')
   await reportPage.close()
+
+  await page.getByRole('button', { name: 'Alterar seleção' }).click()
+  const selectionDialog = page.getByRole('dialog', { name: 'Selecionar repetições' })
+  await selectionDialog.getByRole('checkbox').nth(1).uncheck()
+  await selectionDialog.getByLabel('Justificativa geral para excluir repetições').fill('Falha instrumental predefinida')
+  await selectionDialog.getByRole('button', { name: 'Continuar para análise' }).click()
+  await expect(page.locator('#analysis-results')).toBeHidden()
+  await page.getByRole('button', { name: 'Rodar Análise' }).click()
+  await expect(page.locator('#analysis-results')).toBeVisible({ timeout: 60000 })
+  const subset = await page.evaluate(() => ({ selection: analysisResults.selection, population: analysisResults.population }))
+  expect(subset.selection).toMatchObject({
+    selectedBlockNumbers: [1, 3], excludedBlockNumbers: [2], exclusionReason: 'Falha instrumental predefinida'
+  })
+  expect(subset.population.primary.includedBlockNumbers).toEqual([1, 3])
+  expect(subset.population.validation.includedBlockNumbers).toEqual([1, 3])
+  expect(subset.population.blocks.find(block => block.replicateNumber === 2)).toMatchObject({
+    selected: false, primaryEligible: true, primaryIncluded: false, validationEligible: true, validationIncluded: false
+  })
   expect(remoteRequests).toHaveLength(installedRequestCount)
 })

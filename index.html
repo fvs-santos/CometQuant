@@ -556,6 +556,33 @@
   </form>
 </dialog>
 
+<dialog id="analysis-selection-dialog" aria-labelledby="analysis-selection-title" aria-describedby="analysis-selection-description">
+  <form id="analysis-selection-form" class="analysis-selection-content" method="dialog">
+    <h2 id="analysis-selection-title" data-i18n="analysis.selection.title">Select repetitions</h2>
+    <p id="analysis-selection-description" data-i18n="analysis.selection.description">Choose which independent experiments will be considered by the entire scientific analysis. Technical eligibility will still be checked by the statistical engine.</p>
+    <div class="analysis-selection-toolbar">
+      <button type="button" class="btn-secondary btn-compact" id="btn-analysis-select-all" data-i18n="analysis.selection.selectAll">Select all</button>
+      <button type="button" class="btn-secondary btn-compact" id="btn-analysis-select-none" data-i18n="analysis.selection.selectNone">Select none</button>
+      <output id="analysis-selection-count" aria-live="polite"></output>
+    </div>
+    <fieldset class="analysis-selection-fieldset" aria-describedby="analysis-selection-warning analysis-selection-error">
+      <legend data-i18n="analysis.selection.legend">Independent experiments</legend>
+      <div id="analysis-selection-list" class="analysis-selection-list"></div>
+    </fieldset>
+    <div id="analysis-selection-reason-group" class="form-group" hidden>
+      <label for="analysis-selection-reason" data-i18n="analysis.selection.reason">General reason for excluding repetitions</label>
+      <textarea id="analysis-selection-reason" maxlength="500" aria-describedby="analysis-selection-reason-help analysis-selection-error" data-i18n-placeholder="analysis.selection.reasonPlaceholder"></textarea>
+      <p id="analysis-selection-reason-help" class="muted-text" data-i18n="analysis.selection.reasonHelp">The reason will be recorded in the analysis result and its exports.</p>
+    </div>
+    <p id="analysis-selection-warning" class="muted-text" role="status" aria-live="polite" hidden></p>
+    <p id="analysis-selection-error" class="warning-text" role="alert"></p>
+    <div class="backup-dialog-actions">
+      <button type="button" class="btn-secondary" id="btn-analysis-selection-cancel" data-i18n="analysis.selection.cancel">Cancel</button>
+      <button type="submit" class="btn-primary" id="btn-analysis-selection-confirm" data-i18n="analysis.selection.confirm">Continue to analysis</button>
+    </div>
+  </form>
+</dialog>
+
 
 <!-- ============================================
   TELA 5: ANÁLISE ESTATÍSTICA
@@ -567,6 +594,15 @@
             data-i18n="btn.back">← Back</button>
     <h2 data-i18n="analysis.title">Statistical Analysis</h2>
   </div>
+
+  <section id="analysis-selection-summary" class="analysis-selection-summary" aria-labelledby="analysis-selection-summary-title">
+    <div>
+      <h3 id="analysis-selection-summary-title" data-i18n="analysis.selection.summaryTitle">Repetitions in this analysis</h3>
+      <p id="analysis-selection-summary-text"></p>
+      <p id="analysis-selection-summary-reason" class="muted-text" hidden></p>
+    </div>
+    <button type="button" class="btn-secondary btn-compact" id="btn-change-analysis-selection" data-i18n="analysis.selection.change">Change selection</button>
+  </section>
 
   <!-- Scientific runtime status -->
   <div id="pyodide-status" class="pyodide-status" role="status" aria-live="polite">

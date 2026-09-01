@@ -47,7 +47,7 @@ The default version for both reference scripts is v2. The v2 oracle was checked
 with SciPy 1.13.0 and R 4.6.1. Runtime code only uses NumPy/SciPy APIs available
 in the pinned Pyodide stack (NumPy 1.26.4 and SciPy 1.12.0).
 
-## Analysis contract v2
+## Analysis contract v3
 
 Input `studyDesign` requires `version: 1`, `status: "configured"`,
 `primaryReferenceTreatmentIndex`, ordered
@@ -58,11 +58,13 @@ Input `studyDesign` requires `version: 1`, `status: "configured"`,
 `concentration` in the `treatmentMetadata` item identified by `treatmentIndex`.
 Treatment labels are never parsed for dose.
 
-`run_all_analyses` returns strict JSON with exactly these top-level keys:
+`run_all_analyses` also receives a versioned explicit repetition selection and
+returns strict JSON with exactly these top-level keys:
 
 ```json
 {
-  "analysisSchemaVersion": 2,
+  "analysisSchemaVersion": 3,
+  "selection": {},
   "protocol": {},
   "population": {},
   "descriptive": {},
@@ -81,7 +83,10 @@ Treatment labels are never parsed for dose.
 }
 ```
 
-`population.blocks[].cells[]` preserves `replicateNumber`, treatment index,
+`selection` records available, selected and unselected block numbers, the
+general exclusion reason and selection timestamp. `population.blocks[]`
+separates selection, technical eligibility and effective inclusion for primary
+and validation populations. `population.blocks[].cells[]` preserves `replicateNumber`, treatment index,
 expected/recorded/counted, valid/complete, invalid/incomplete and absent slide
 counts, the cell score, and technical-replication completeness. Primary block
 exclusions contain structured reasons and treatment identities. `scores.cells`
