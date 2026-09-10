@@ -192,6 +192,13 @@ body {
   max-width: 320px;
 }
 
+.home-action-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .app-version {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);

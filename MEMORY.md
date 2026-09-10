@@ -683,7 +683,38 @@ Validacao desta continuidade:
 - A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, selecao transitoria de repeticoes, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v3 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
 - Contagens aceitas usam pulso tatil de 30 ms e clique sonoro opcional de 25 ms; as preferencias sao independentes e falhas dessas APIs nao interferem no autosave.
-- A aplicacao esta na versao `2.2.0` e o shell offline usa `cometquant-shell-v22`.
+- A aplicacao esta na versao `2.2.0` e o shell offline usa `cometquant-shell-v24`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.
+
+## Continuidade de 09/09/2026 - gerador de pranchas isolado
+
+- Foi adicionado `plates.html` como subaplicativo estatico e isolado, acessado por um link na tela inicial. Seus scripts em `js/plates/` nao sao carregados por `index.html` e nao acessam IndexedDB, `CometQuantRepository`, schemas de experimento ou o pacote cientifico.
+- O gerador aceita multiplos relatorios HTML, analisa o conteudo com `DOMParser` sem executar scripts, permite revisar agente, linhagem, S9 e composicao, pagina os paineis e gera TIFFs de pagina unica e ZIP. O escopo validado nesta continuidade e o relatorio em portugues de genotoxicidade; o parser tambem reconhece vocabulario ingles e controle de solvente.
+- A renderizacao usa um Worker com `OffscreenCanvas` quando disponivel e fallback para Canvas na interface. Cada pagina e processada sequencialmente, com limite de 40 milhoes de pixels e aviso recomendando desktop.
+- O encoder proprio gera TIFF little-endian em escala de cinza, 8 bits, BlackIsZero, 600 dpi e LZW por strips. A interoperabilidade foi verificada externamente com Pillow/libtiff, incluindo igualdade exata dos pixels decodificados.
+- Nenhuma dependencia foi adicionada ao `science-assets.json`; o gerador usa JavaScript nativo e o JSZip ja vendorizado. Os relatorios e artefatos permanecem transitorios em memoria.
+- O shell offline passou a `cometquant-shell-v23` para incluir `plates.html` e seus recursos; `js/science-package.js` foi alinhado ao novo nome do shell. O schema de experimento permanece 6, o contrato cientifico permanece 3 e a versao declarada da aplicacao permanece 2.2.0.
+- Validacao registrada: `npm run check`; 128 testes JavaScript; 32 testes Python; 92 metricas da referencia R; e 64 cenarios E2E aprovados na matriz Chromium/Pixel 7 e WebKit/iPhone, incluindo navegacao, upload, validacao e geracao de TIFF no novo subaplicativo.
+
+## Continuidade de 10/09/2026 - antigenotoxicidade no gerador de pranchas
+
+- Os novos relatorios HTML receberam metadados `data-*` nao visiveis com tipo de ensaio, identidade e papel dos tratamentos, referencia primaria e participantes da comparacao de validacao. O conteudo apresentado ao pesquisador permaneceu inalterado.
+- O parser do gerador passou a resolver o desenho por metadados estruturados, depois pelo protocolo e, por fim, por inferencia conservadora do vocabulario legado. Divergencias entre fontes sao recusadas em vez de resolvidas silenciosamente.
+- O modelo de barras ficou agnostico ao ensaio: as barras primarias continuam vindo de `primary-means`, e o participante da validacao que nao pertence a esse conjunto e acrescentado por identidade, sem duplicacao.
+- Em genotoxicidade, o suplementar e o controle positivo e permanece a direita por padrao. Em antigenotoxicidade, o controle positivo e a referencia primaria e o suplementar e o controle basal negativo/solvente, posicionado a esquerda por padrao. A posicao continua ajustavel.
+- Por decisao explicita, os nomes internos `positiveControl*` foram preservados para minimizar alteracoes, embora representem o tratamento suplementar. O rotulo `Ctrl` foi preservado para a referencia basal da genotoxicidade; a referencia positiva da antigenotoxicidade usa seu nome real.
+- Hachura e `dagger` representam a comparacao de validacao; asteriscos permanecem exclusivos das comparacoes primarias com Holm. DP nao estimavel nao produz haste de erro.
+- A interface ganhou revisao do tipo de ensaio e rotulos neutros para o tratamento da validacao. As legendas distinguem controle positivo em genotoxicidade, controle basal em antigenotoxicidade e formulacao generica em composicoes mistas.
+- Fixtures cobrem G-N, G-S, G-NS, A-N, A-S e A-NS, relatorios PT/EN, fallback legado, validacao nao estimavel, `n=1`, metadados conflitantes e endpoint de validacao ja presente no conjunto primario.
+- A revisao final acrescentou validacao de repeticoes unicas, `n`, faixa de scores, consistencia entre indices e rotulos e rejeicao de relatorios hibridos com identidades estruturadas em apenas uma tabela. Concentracoes pequenas preservam casas significativas; medias ausentes sao identificadas e DP ausente omite somente a haste de erro.
+- O shell offline foi incrementado para `cometquant-shell-v24`. Schema de experimento, contrato cientifico e versao publica permanecem 6, 3 e `2.2.0`, respectivamente.
+
+Validacao desta continuidade:
+
+- `npm run check` passou;
+- `npm run test:coverage` passou com 146 testes JavaScript e 92,14% de cobertura global;
+- `npm run test:analysis` passou com 32 testes Python;
+- a referencia R v2 validou 92 metricas;
+- a matriz E2E completa passou com 66 cenarios (33 Chromium/Pixel 7 e 33 WebKit/iPhone), incluindo deteccao de antigenotoxicidade e posicionamento do controle basal da validacao.

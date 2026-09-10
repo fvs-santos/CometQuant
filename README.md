@@ -42,10 +42,45 @@ Use `npx http-server . -p 4173 -c-1` to run the application locally.
 - `js/science-package.js`: verified scientific package installation and storage diagnostics.
 - `python/cometquant_analysis.py`: statistical engine used by both Pyodide and Python tests.
 - `js/export.js`: safe JSON, CSV, HTML and ZIP builders.
+- `plates.html` and `js/plates/`: isolated in-browser composer for report panels and TIFF export.
 - `service-worker.js`: application-shell cache for the PWA.
 
 Scripts are loaded as classic browser scripts, so their order in `index.html`
 is significant.
+
+## Plate Generator
+
+The home screen links to an isolated static subapplication that combines panels
+from multiple CometQuant HTML reports. It parses selected files without executing
+their scripts, lets the user review panel metadata and composition, and exports
+single-page grayscale TIFF files with 8-bit samples, BlackIsZero photometry,
+600 dpi resolution and LZW compression. Multiple pages can be downloaded as a
+ZIP using the vendored JSZip copy.
+
+The generator is implemented in browser-native JavaScript and does not load
+Pyodide, Python packages or the statistical worker. Reports, previews and TIFFs
+remain transient in the generator page; it does not open or modify experiments
+in IndexedDB. Genotoxicity and antigenotoxicity reports are supported in
+Portuguese and English, including negative and vehicle controls. New reports
+carry non-visible treatment identities and study-design metadata; older reports
+remain supported through conservative protocol and vocabulary fallbacks. Mixed
+or conflicting identity metadata is rejected rather than reconciled silently,
+and ambiguous legacy assay types can be confirmed in the generator.
+
+Primary-analysis treatments are kept distinct from the supplemental validation
+treatment. In genotoxicity the supplemental bar is the positive control; in
+antigenotoxicity it is the selected negative or vehicle control. The generator
+unifies bars by treatment identity, preventing duplication when a validation
+endpoint is already present in the primary set.
+
+Validation-treatment placement is automatic per assay when mixed report types
+share a composition, and remains manually adjustable. Missing means are shown
+as undetermined, missing standard deviations omit the error bar, and small dose
+values retain their significant decimal places instead of being rounded to zero.
+
+High-resolution rasterization requires substantial memory. Desktop use is
+recommended. The browser implementation limits each page to 40 million pixels,
+renders pages sequentially and terminates its dedicated worker after each page.
 
 ## Data And Blinding
 
@@ -174,6 +209,10 @@ recommended. Once prepared, the analysis worker and all scientific packages
 run after a fully offline reload. Counting remains available without the
 scientific package.
 
+The plate generator code is part of the static offline shell but is loaded only
+after navigation to `plates.html`. It has no Python dependency and does not add
+assets to the separately installed scientific package.
+
 Experiments are stored atomically in IndexedDB with monotonic revisions.
 Existing `localStorage` data is copied on first use, and malformed, duplicate
 or future-version records are retained in quarantine. When quarantine data is
@@ -197,6 +236,7 @@ and storage eviction remain part of the real-device checklist.
 - Encrypted backup protects the exported file, not a device user with access to browser storage or developer tools.
 - Merge rejects active partial progress instead of reconciling concurrent counts.
 - Browser automation covers Chromium/Pixel 7 and Playwright WebKit/iPhone emulation; Safari/iOS support still requires the real-device checklist.
+- Plate generation is memory-intensive and is recommended on desktop hardware; its TIFF output still requires validation on representative desktop image-processing software and physical mobile devices.
 - The comet class illustrations are provisional.
 - Three independent experiments are supported as the common assay design, but estimates and confidence intervals may remain imprecise; statistical non-significance is not evidence of equivalence or absence of effect.
 - The blocked model assumes additive block effects (no treatment-by-experiment interaction), which is undiagnosable with a single replication per cell; this assumption is declared rather than testable.
