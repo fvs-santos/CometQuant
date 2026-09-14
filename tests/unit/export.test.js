@@ -560,7 +560,8 @@ describe('safe exports', () => {
     const data = experiment()
     const analysis = v3Analysis()
     const zip = new JSZip()
-    zip.file('report.html', exporter.buildReportHtml(data, analysis, 'en'))
+    const reportName = 'CometQuant_Agent_Cells_2026-01-01_report.html'
+    zip.file(reportName, exporter.buildReportHtml(data, analysis, 'en'))
     zip.file('data/experiment.json', JSON.stringify(data))
     zip.file('data/analysis.json', JSON.stringify(analysis))
     zip.file('data/raw_slides.csv', exporter.buildRawCsv(data, analysis))
@@ -579,7 +580,7 @@ describe('safe exports', () => {
     const archive = await zip.generateAsync({ type: 'nodebuffer' })
     const opened = await JSZip.loadAsync(archive)
     expect(Object.keys(opened.files)).toEqual(expect.arrayContaining([
-      'report.html', 'data/experiment.json', 'data/analysis.json', 'data/raw_slides.csv', 'data/replicate_scores.csv',
+      reportName, 'data/experiment.json', 'data/analysis.json', 'data/raw_slides.csv', 'data/replicate_scores.csv',
       'data/population.csv', 'data/block_anova.csv', 'data/primary_comparisons.csv', 'data/control_response.csv',
       'data/dose_trend.csv', 'data/non_parametric.csv', 'data/transformed_analysis.csv', 'data/study_design.csv',
       'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'

@@ -943,9 +943,10 @@ async function exportZip() {
   if (hasPendingSlides(currentExperiment)) return alert(t('alert.blindingActive'))
   if (typeof JSZip === 'undefined') return alert(t('analysis.v2.export.zipUnavailable'))
   try {
+    const baseName = exportBaseName()
     const zip = new JSZip()
-    const folder = zip.folder(exportBaseName())
-    folder.file('report.html', CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage, {
+    const folder = zip.folder(baseName)
+    folder.file(`${baseName}_report.html`, CometQuantExport.buildReportHtml(currentExperiment, analysisResults, currentLanguage, {
       generatedAt: new Date().toISOString(),
       appVersion: CometQuantExport.APP_VERSION
     }))
@@ -969,7 +970,7 @@ async function exportZip() {
     if (CometQuantExport.validPngBase64(analysisResults.charts?.differences)) charts.file('primary_differences.png', analysisResults.charts.differences, { base64: true })
     if (CometQuantExport.validPngBase64(analysisResults.charts?.classes)) charts.file('class_distribution.png', analysisResults.charts.classes, { base64: true })
     const zipBlob = await zip.generateAsync({ type: 'blob' })
-    downloadFile(zipBlob, `${exportBaseName()}.zip`, 'application/zip', true)
+    downloadFile(zipBlob, `${baseName}.zip`, 'application/zip', true)
   } catch (error) {
     console.error('ZIP export error:', error)
     alert(t('analysis.v2.export.zipFailed'))

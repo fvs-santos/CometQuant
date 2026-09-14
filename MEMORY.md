@@ -633,6 +633,19 @@ Validacao desta continuidade:
 - os 4 cenarios E2E direcionados de selecao/legado e os 4 cenarios do fluxo cientifico completo passaram em Chromium e WebKit;
 - a matriz E2E completa aprovou 59 de 60 cenarios; o unico encerramento de contexto Chromium ocorreu no importador XLSX preexistente e o mesmo cenario passou ao ser repetido isoladamente.
 
+Continuidade de 14/09/2026 (nome do relatorio no pacote ZIP):
+
+- o relatorio HTML dentro do pacote ZIP passou a usar o mesmo nome especifico da exportacao individual, formado por agente, linhagem e data, em vez do generico `report.html`;
+- o nome-base e calculado uma unica vez por pacote e reutilizado na pasta interna, no relatorio e no arquivo ZIP;
+- os JSONs, schemas e demais artefatos do pacote permanecem inalterados;
+- o shell offline foi incrementado para `cometquant-shell-v23`.
+
+Validacao desta continuidade:
+
+- `npm run check` passou;
+- `npm test` passou com 115 testes JavaScript;
+- os 4 cenarios E2E de analise passaram em Chromium/Pixel 7 e WebKit/iPhone, incluindo a comparacao do nome do relatorio individual com o arquivo HTML interno do ZIP.
+
 ## Arquivos de referencia
 
 - `README.md`
@@ -683,7 +696,7 @@ Validacao desta continuidade:
 - A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, selecao transitoria de repeticoes, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v3 e exportacoes detalhadas.
 - A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
 - Contagens aceitas usam pulso tatil de 30 ms e clique sonoro opcional de 25 ms; as preferencias sao independentes e falhas dessas APIs nao interferem no autosave.
-- A aplicacao esta na versao `2.2.0` e o shell offline usa `cometquant-shell-v22`.
+- A aplicacao esta na versao `2.2.0` e o shell offline usa `cometquant-shell-v23`.
 - A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.

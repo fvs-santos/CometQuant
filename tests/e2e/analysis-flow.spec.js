@@ -187,19 +187,27 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   await expect(page.locator('#analysis-results')).toBeVisible({ timeout: 60000 })
   await expect(page.locator('#section-analysis-primary-comparisons .result-title')).toHaveText('Comparações Planejadas')
   await expect(page.locator('#analysis-primary-comparisons')).not.toContainText('analysis.v2.')
+  const reportDownloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Exportar Relatório (.html)' }).click()
+  const reportDownload = await reportDownloadPromise
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Baixar Tudo (.zip)' }).click()
   const download = await downloadPromise
   const archive = await JSZip.loadAsync(fs.readFileSync(await download.path()))
   const archivedNames = Object.keys(archive.files)
   for (const suffix of [
-    'report.html', 'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
+    'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
     'data/primary_comparisons.csv', 'data/control_response.csv', 'data/dose_trend.csv',
     'data/non_parametric.csv', 'data/transformed_analysis.csv', 'data/slide_corrections.csv',
     'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
   ]) {
     expect(archivedNames.some(name => name.endsWith(suffix))).toBe(true)
   }
+  const archiveBaseName = download.suggestedFilename().replace(/\.zip$/i, '')
+  const reportName = reportDownload.suggestedFilename()
+  expect(reportName).toBe(`${archiveBaseName}_report.html`)
+  expect(archive.file(`${archiveBaseName}/${reportName}`)).not.toBeNull()
+  expect(archive.file(`${archiveBaseName}/report.html`)).toBeNull()
   const analysisEntry = archive.file(archivedNames.find(name => name.endsWith('data/analysis.json')))
   const analysisJson = JSON.parse(await analysisEntry.async('string'))
   expect(analysisJson.analysisSchemaVersion).toBe(3)
@@ -214,7 +222,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   expect(analysisJson.nonParametric.friedman.pExact).toBeCloseTo(expected.nonParametric.friedman.pExact, 7)
   expect(analysisJson.nonParametric.pageTrend.direction).toBe('increasing')
   expect(analysisJson.transformedAnalysis.scale).toBe('arcsin_sqrt')
-  const reportEntry = archive.file(archivedNames.find(name => name.endsWith('report.html')))
+  const reportEntry = archive.file(`${archiveBaseName}/${reportName}`)
   const reportHtml = await reportEntry.async('string')
   expect(reportHtml).toContain('Síntese das evidências')
   expect(reportHtml).toContain('Efeito na direção esperada detectado')
