@@ -1,6 +1,5 @@
 const JSZip = require('jszip')
 const exporter = require('../../js/export.js')
-const platesParser = require('../../js/plates/parser.js')
 const { experiment } = require('../fixtures/experiment.js')
 
 function v3Analysis(overrides = {}) {
@@ -440,8 +439,6 @@ describe('safe exports', () => {
     expect(document.querySelector('.dose-chart svg').textContent).not.toContain('Controle do solvente')
     const positiveControlAccessibleRow = [...document.querySelectorAll('.dose-chart .sr-only tbody tr')].find(row => row.cells[0].textContent === 'Positive control')
     expect(positiveControlAccessibleRow.cells[2].textContent).toBe('-')
-    expect(document.querySelector('#dose-overview').dataset).toMatchObject({ assayType: 'genotoxicity', primaryReference: '0', validationReference: '0', validationTreatment: '1' })
-    expect(positiveControlAccessibleRow.dataset).toMatchObject({ treatmentIndex: '1', role: 'positive-control', population: 'validation' })
 
     const columnChart = document.querySelector('.column-chart')
     expect(columnChart).not.toBeNull()
@@ -534,11 +531,10 @@ describe('safe exports', () => {
     analysis.doseTrend.treatmentDoses = [{ treatmentIndex: 1, concentration: 0 }, { treatmentIndex: 2, concentration: 1 }, { treatmentIndex: 3, concentration: 5 }]
     analysis.nonParametric.pageTrend.direction = 'decreasing'
     analysis.descriptive.treatments = [
-      { treatmentIndex: 1, treatment: 'Positive control', blockCount: 2, mean: 48, standardDeviation: Math.sqrt(18), coefficientOfVariation: 8.84 },
-      { treatmentIndex: 2, treatment: 'Compound 1 uM', blockCount: 2, mean: 20, standardDeviation: Math.sqrt(18), coefficientOfVariation: 21.21 },
-      { treatmentIndex: 3, treatment: 'Compound 5 uM', blockCount: 2, mean: 10, standardDeviation: Math.sqrt(8), coefficientOfVariation: 28.28 }
+      { treatmentIndex: 1, treatment: 'Positive control', blockCount: 3, mean: 48, standardDeviation: 3, coefficientOfVariation: 6.25 },
+      { treatmentIndex: 2, treatment: 'Compound 1 uM', blockCount: 3, mean: 20, standardDeviation: 3, coefficientOfVariation: 15 },
+      { treatmentIndex: 3, treatment: 'Compound 5 uM', blockCount: 3, mean: 10, standardDeviation: 2, coefficientOfVariation: 20 }
     ]
-    analysis.population.blocks.forEach((block, index) => { block.cells.find(cell => cell.treatmentIndex === 3).score = [8, 10, 12][index] })
 
     const html = exporter.buildReportHtml(data, analysis, 'pt')
     expect(html).toContain('Sinal de antigenotoxicidade')
@@ -546,10 +542,6 @@ describe('safe exports', () => {
     expect(html).toContain('tendência significativa, ordenada')
     const document = new DOMParser().parseFromString(html, 'text/html')
     expect(document.querySelector('.column-chart .reference-bar title').textContent).toContain('Positive control')
-    expect(document.querySelector('#primary-means').dataset).toMatchObject({ assayType: 'antigenotoxicity', primaryReference: '1', validationReference: '0', validationTreatment: '1' })
-    const parsed = platesParser.parseReport(html, { filename: 'antigenotoxicity.html' }, { DOMParser })
-    expect(parsed).toMatchObject({ assayType: 'antigenotoxicity', supplementalTreatmentId: 'treatment:0', positiveControlSignificant: true })
-    expect(parsed.positiveControl).toMatchObject({ label: 'Negative control', role: 'negative_control' })
   })
 
   it('flags a significant but non-monotonic response as weak and irregular', () => {

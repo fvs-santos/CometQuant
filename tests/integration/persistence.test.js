@@ -82,21 +82,6 @@ describe('browser-facing contracts', () => {
     expect(serviceWorker).toContain("const SHELL_READY_MARKER = './cometquant-shell-ready'")
   })
 
-  it('keeps the plate generator isolated from experiments and the scientific package', () => {
-    const index = fs.readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8')
-    const plates = fs.readFileSync(path.resolve(__dirname, '../../js/plates/app.js'), 'utf8')
-    const serviceWorker = fs.readFileSync(path.resolve(__dirname, '../../service-worker.js'), 'utf8')
-    const scienceManifest = fs.readFileSync(path.resolve(__dirname, '../../science-assets.json'), 'utf8')
-
-    expect(index).toContain('href="./plates.html"')
-    expect(index).not.toContain('src="./js/plates/')
-    expect(plates).not.toMatch(/indexedDB|CometQuantRepository|CometQuantScience/)
-    expect(scienceManifest).not.toContain('plates')
-    for (const relativePath of ['./plates.html', './css/plates.css', './js/plates/app.js', './js/plates/worker.js']) {
-      expect(serviceWorker).toContain(`'${relativePath}'`)
-    }
-  })
-
   it('associates analysis results with the current experiment version', () => {
     const analysis = fs.readFileSync(path.resolve(__dirname, '../../js/analysis.js'), 'utf8')
     const app = fs.readFileSync(path.resolve(__dirname, '../../js/app.js'), 'utf8')

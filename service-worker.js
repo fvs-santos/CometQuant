@@ -2,7 +2,7 @@
 // Quando atualizar o app, mude o número da versão aqui
 const SHELL_CACHE_PREFIX = 'cometquant-shell-'
 const SCIENCE_CACHE_PREFIX = 'cometquant-science-'
-const CACHE_NAME = `${SHELL_CACHE_PREFIX}v24`
+const CACHE_NAME = `${SHELL_CACHE_PREFIX}v22`
 const SHELL_READY_MARKER = './cometquant-shell-ready'
 
 // Lista de todos os arquivos que o Service Worker vai guardar
@@ -11,7 +11,6 @@ const FILES_TO_CACHE = [
   './index.html',
   './manifest.json',
   './css/style.css',
-  './css/plates.css',
   './js/app.js',
   './js/legacy-xlsx.js',
   './js/backup.js',
@@ -22,13 +21,6 @@ const FILES_TO_CACHE = [
   './js/science-package.js',
   './js/analysis.js',
   './js/analysis-worker.js',
-  './js/plates/parser.js',
-  './js/plates/layout.js',
-  './js/plates/tiff.js',
-  './js/plates/renderer.js',
-  './js/plates/worker.js',
-  './js/plates/app.js',
-  './plates.html',
   './science-assets.json',
   './python/cometquant_analysis.py',
   './vendor/jszip.min.js',

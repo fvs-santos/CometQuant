@@ -17,7 +17,6 @@ const translations = {
     // Tela 1 — Início
     'home.newExperiment': 'Novo Experimento',
     'home.resumeExperiment': 'Retomar Experimento',
-    'home.generatePlates': 'Gerar Pranchas',
     'home.hapticFeedback': 'Feedback tátil',
     'home.soundFeedback': 'Feedback sonoro',
 
@@ -523,7 +522,6 @@ const translations = {
     // Screen 1 — Home
     'home.newExperiment': 'New Experiment',
     'home.resumeExperiment': 'Resume Experiment',
-    'home.generatePlates': 'Generate Plates',
     'home.hapticFeedback': 'Haptic feedback',
     'home.soundFeedback': 'Sound feedback',
 

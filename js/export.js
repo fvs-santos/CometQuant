@@ -391,17 +391,11 @@
     })))
   }
 
-  function dataAttributes(attributes = {}) {
-    return Object.entries(attributes).filter(([name, value]) => /^data-[a-z0-9-]+$/.test(name) && value !== null && value !== undefined && value !== '')
-      .map(([name, value]) => ` ${name}="${escapeHtml(value)}"`).join('')
-  }
-
   function htmlTable(headers, rows, options = {}) {
     const body = rows.map((row, index) => {
       const values = Array.isArray(row) ? row : row.cells
       const rowClass = Array.isArray(row) ? options.rowClasses?.[index] : row.className
-      const attributes = Array.isArray(row) ? '' : dataAttributes(row.attributes)
-      return `<tr${rowClass ? ` class="${escapeHtml(rowClass)}"` : ''}${attributes}>${values.map(value => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`
+      return `<tr${rowClass ? ` class="${escapeHtml(rowClass)}"` : ''}>${values.map(value => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`
     }).join('')
     return `<div class="table-scroll"><table><thead><tr>${headers.map(value => `<th scope="col">${escapeHtml(value)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`
   }
@@ -769,21 +763,10 @@
     const accessibleRows = chartGroups.flatMap(group => {
       const role = group.role === 'negative-control' ? labels.negativeControl : group.role === 'positive-control' ? labels.positiveControl : group.role === 'solvent-control' ? labels.solventControl : labels.testConcentration
       const concentration = group.concentration !== null && group.concentration !== undefined && group.concentration !== '' && Number.isFinite(Number(group.concentration)) ? `${reportNumber(group.concentration, pt)} ${experiment.concUnit || ''}`.trim() : '-'
-      return group.points.map(point => ({
-        cells: [group.treatment, role, concentration, point.replicateNumber, point.score, group.mean],
-        attributes: { 'data-treatment-index': group.treatmentIndex, 'data-role': group.role, 'data-population': group.population }
-      }))
+      return group.points.map(point => [group.treatment, role, concentration, point.replicateNumber, point.score, group.mean])
     })
     const accessibleTable = htmlTable([labels.treatment, labels.role, labels.concentration, labels.replicate, labels.visualScore, labels.engineMean], accessibleRows)
-    const protocol = analysis?.protocol?.performed === false ? null : analysis?.protocol
-    const validation = protocol?.validationComparison || {}
-    const metadataAttributes = dataAttributes({
-      'data-assay-type': protocol?.assayType,
-      'data-primary-reference': protocol?.primaryReferenceTreatmentIndex,
-      'data-validation-reference': validation.referenceTreatmentIndex,
-      'data-validation-treatment': validation.treatmentIndex
-    })
-    return `<div class="dose-chart"${metadataAttributes}><svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="dose-chart-title dose-chart-desc"><title id="dose-chart-title">${escapeHtml(labels.visualOverview)}</title><desc id="dose-chart-desc">${escapeHtml(labels.visualOverviewReading)}</desc><style>.chart-grid{stroke:#d7dee8;stroke-width:1}.chart-tick,.chart-label,.chart-role,.chart-mean,.chart-axis{font-family:Arial,sans-serif;fill:#27364a}.chart-tick{font-size:13px}.chart-label{font-size:13px;font-weight:700}.chart-role{font-size:11px}.chart-mean{font-size:11px;font-weight:700}.chart-axis{font-size:14px;font-weight:700}</style>${grid}<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#67768a"/><line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" stroke="#67768a"/><text x="18" y="${top + plotHeight / 2}" transform="rotate(-90 18 ${top + plotHeight / 2})" text-anchor="middle" class="chart-axis">${escapeHtml(labels.visualScore)}</text>${marks}<circle class="chart-legend-point" cx="${left}" cy="${height - 12}" r="6" fill="#0072B2"/><text x="${left + 12}" y="${height - 8}" class="chart-role">${escapeHtml(labels.independentExperiment)}</text><line x1="${left + 190}" y1="${height - 12}" x2="${left + 228}" y2="${height - 12}" stroke="#111827" stroke-width="5"/><text x="${left + 238}" y="${height - 8}" class="chart-role">${escapeHtml(labels.engineMean)}</text></svg><div class="sr-only"><h3>${escapeHtml(labels.chartData)}</h3>${accessibleTable}</div></div>`
+    return `<div class="dose-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="dose-chart-title dose-chart-desc"><title id="dose-chart-title">${escapeHtml(labels.visualOverview)}</title><desc id="dose-chart-desc">${escapeHtml(labels.visualOverviewReading)}</desc><style>.chart-grid{stroke:#d7dee8;stroke-width:1}.chart-tick,.chart-label,.chart-role,.chart-mean,.chart-axis{font-family:Arial,sans-serif;fill:#27364a}.chart-tick{font-size:13px}.chart-label{font-size:13px;font-weight:700}.chart-role{font-size:11px}.chart-mean{font-size:11px;font-weight:700}.chart-axis{font-size:14px;font-weight:700}</style>${grid}<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#67768a"/><line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" stroke="#67768a"/><text x="18" y="${top + plotHeight / 2}" transform="rotate(-90 18 ${top + plotHeight / 2})" text-anchor="middle" class="chart-axis">${escapeHtml(labels.visualScore)}</text>${marks}<circle class="chart-legend-point" cx="${left}" cy="${height - 12}" r="6" fill="#0072B2"/><text x="${left + 12}" y="${height - 8}" class="chart-role">${escapeHtml(labels.independentExperiment)}</text><line x1="${left + 190}" y1="${height - 12}" x2="${left + 228}" y2="${height - 12}" stroke="#111827" stroke-width="5"/><text x="${left + 238}" y="${height - 8}" class="chart-role">${escapeHtml(labels.engineMean)}</text></svg><div class="sr-only"><h3>${escapeHtml(labels.chartData)}</h3>${accessibleTable}</div></div>`
   }
 
   function buildPrimaryColumnSvg(experiment, analysis, labels, pt) {
@@ -805,7 +788,6 @@
         mean: Number(item.mean),
         sd: Number(item.standardDeviation),
         n: Number(item.blockCount),
-        role: metadata.get(treatmentIndex)?.role,
         concentration: metadata.get(treatmentIndex)?.concentration,
         comparison
       } : null
@@ -854,21 +836,11 @@
       const isReference = group.treatmentIndex === referenceIndex
       const pAdjusted = !isReference && Number.isFinite(Number(group.comparison?.pAdjusted)) ? reportProbability(group.comparison.pAdjusted, pt) : '-'
       const decision = isReference ? labels.reference : (group.comparison?.significant ? labels.significant : labels.notSignificant)
-      return {
-        cells: [group.treatment, reportNumber(group.mean, pt), group.n > 1 && Number.isFinite(group.sd) ? reportNumber(group.sd, pt) : labels.notEstimable, group.n, pAdjusted, decision],
-        attributes: { 'data-treatment-index': group.treatmentIndex, 'data-role': group.role, 'data-primary-reference': isReference ? 'true' : 'false' }
-      }
+      return [group.treatment, reportNumber(group.mean, pt), group.n > 1 && Number.isFinite(group.sd) ? reportNumber(group.sd, pt) : labels.notEstimable, group.n, pAdjusted, decision]
     })
     const table = htmlTable([labels.treatment, labels.mean, labels.sd, labels.biologicalN, labels.holmP, labels.decision], rows)
     const reference = groups.find(group => group.treatmentIndex === referenceIndex)?.treatment || protocol.primaryReferenceTreatment || '-'
-    const validation = protocol.validationComparison || {}
-    const metadataAttributes = dataAttributes({
-      'data-assay-type': protocol.assayType,
-      'data-primary-reference': referenceIndex,
-      'data-validation-reference': validation.referenceTreatmentIndex,
-      'data-validation-treatment': validation.treatmentIndex
-    })
-    return `<div class="column-chart"${metadataAttributes}><svg viewBox="0 0 ${width} ${height}" style="min-width:${width}px" role="img" aria-labelledby="column-chart-title column-chart-desc"><title id="column-chart-title">${escapeHtml(labels.columnChart)}</title><desc id="column-chart-desc">${escapeHtml(`${labels.columnChartReading} ${labels.columnMeaning}. ${labels.reference}: ${reference}. ${labels.holmLegend}.`)}</desc><style>.column-grid{stroke:#d7dee8;stroke-width:1}.column-tick,.column-label,.column-value,.column-n,.column-axis{font-family:Arial,sans-serif;fill:#27364a}.column-tick{font-size:13px}.column-label{font-size:13px;font-weight:700}.column-value,.column-n{font-size:11px}.column-axis{font-size:14px;font-weight:700}.column-bar{fill:#4f8fba;stroke:#24587a;stroke-width:1}.reference-bar{fill:#8799aa}.error-bar{stroke:#17202a;stroke-width:2}.holm-marker{font-family:Arial,sans-serif;font-size:26px;font-weight:800;fill:#962f2f}</style>${grid}<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#67768a"/><line x1="${left}" y1="${baselineY}" x2="${width - right}" y2="${baselineY}" stroke="#67768a"/><text x="20" y="${top + plotHeight / 2}" transform="rotate(-90 20 ${top + plotHeight / 2})" text-anchor="middle" class="column-axis">${escapeHtml(labels.visualScore)}</text>${marks}<text x="${left}" y="${height - 10}" class="column-n">${escapeHtml(`${labels.reference}: ${reference}; ${labels.columnMeaning}; ${labels.holmLegend}`)}</text></svg><div class="sr-only"><h3>${escapeHtml(labels.chartData)}</h3>${table}</div></div>`
+    return `<div class="column-chart"><svg viewBox="0 0 ${width} ${height}" style="min-width:${width}px" role="img" aria-labelledby="column-chart-title column-chart-desc"><title id="column-chart-title">${escapeHtml(labels.columnChart)}</title><desc id="column-chart-desc">${escapeHtml(`${labels.columnChartReading} ${labels.columnMeaning}. ${labels.reference}: ${reference}. ${labels.holmLegend}.`)}</desc><style>.column-grid{stroke:#d7dee8;stroke-width:1}.column-tick,.column-label,.column-value,.column-n,.column-axis{font-family:Arial,sans-serif;fill:#27364a}.column-tick{font-size:13px}.column-label{font-size:13px;font-weight:700}.column-value,.column-n{font-size:11px}.column-axis{font-size:14px;font-weight:700}.column-bar{fill:#4f8fba;stroke:#24587a;stroke-width:1}.reference-bar{fill:#8799aa}.error-bar{stroke:#17202a;stroke-width:2}.holm-marker{font-family:Arial,sans-serif;font-size:26px;font-weight:800;fill:#962f2f}</style>${grid}<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#67768a"/><line x1="${left}" y1="${baselineY}" x2="${width - right}" y2="${baselineY}" stroke="#67768a"/><text x="20" y="${top + plotHeight / 2}" transform="rotate(-90 20 ${top + plotHeight / 2})" text-anchor="middle" class="column-axis">${escapeHtml(labels.visualScore)}</text>${marks}<text x="${left}" y="${height - 10}" class="column-n">${escapeHtml(`${labels.reference}: ${reference}; ${labels.columnMeaning}; ${labels.holmLegend}`)}</text></svg><div class="sr-only"><h3>${escapeHtml(labels.chartData)}</h3>${table}</div></div>`
   }
 
   function reportGlossary(labels, pt) {
@@ -940,15 +912,9 @@
       className: row.significant ? 'row-significant' : 'row-not-significant'
     })) : [[labels.notPerformed, reasonText(comparisons?.reason), '-', '-', '-', '-', '-', '-']]
     const control = analysis?.controlResponse
-    const treatmentMetadata = new Map((experiment.treatmentMetadata || []).map(item => [item.treatmentIndex, item]))
     const controlRows = control?.performed ? [{
       cells: [control.comparison.referenceTreatment, control.comparison.treatment, reportNumber(control.comparison.difference, pt), `${reportNumber(control.comparison.ciLow, pt)} - ${reportNumber(control.comparison.ciHigh, pt)}`, reportProbability(control.comparison.pRaw, pt), control.comparison.significant ? labels.significant : labels.notSignificant, localizedScientificValue(control.comparison.direction, pt)],
-      className: control.comparison.significant ? 'row-significant' : 'row-not-significant',
-      attributes: {
-        'data-validation-reference': control.comparison.referenceTreatmentIndex,
-        'data-validation-treatment': control.comparison.treatmentIndex,
-        'data-role': treatmentMetadata.get(control.comparison.treatmentIndex)?.role
-      }
+      className: control.comparison.significant ? 'row-significant' : 'row-not-significant'
     }] : [[labels.notPerformed, reasonText(control?.reason), '-', '-', '-', '-', '-']]
     const trend = analysis?.doseTrend
     const trendRows = trend?.performed ? [
@@ -1042,24 +1008,14 @@
   function buildReportHtml(experiment, analysis, lang = 'en', context = {}) {
     const pt = lang === 'pt'
     const labels = reportLabels(pt)
-    const protocol = analysis?.protocol?.performed === false ? null : analysis?.protocol
-    const validation = protocol?.validationComparison || {}
-    const scientificAttributes = dataAttributes({
-      'data-assay-type': protocol?.assayType,
-      'data-primary-reference': protocol?.primaryReferenceTreatmentIndex,
-      'data-validation-reference': validation.referenceTreatmentIndex,
-      'data-validation-treatment': validation.treatmentIndex
-    })
     let html = buildReportHtmlBase(experiment, analysis, lang)
     html = html.replace('<section class="conclusion-panel" aria-labelledby="conclusion-title">', '<section class="conclusion-panel" id="evidence-summary" aria-labelledby="conclusion-title">')
-    html = html.replace(`<section class="report-section"><h2>${escapeHtml(labels.visualOverview)}</h2>`, `<section class="report-section" id="dose-overview"${scientificAttributes}><h2>${escapeHtml(labels.visualOverview)}</h2>`)
-    html = html.replace('<section class="report-section" id="control">', `<section class="report-section" id="control"${scientificAttributes}>`)
-    html = html.replace('<section class="report-section" id="protocol">', `<section class="report-section" id="protocol"${scientificAttributes}>`)
+    html = html.replace(`<section class="report-section"><h2>${escapeHtml(labels.visualOverview)}</h2>`, `<section class="report-section" id="dose-overview"><h2>${escapeHtml(labels.visualOverview)}</h2>`)
     html = html.replace('<section class="glossary">', '<section class="glossary" id="glossary">')
 
     const columnChart = buildPrimaryColumnSvg(experiment, analysis, labels, pt)
     if (columnChart) {
-      const section = `<section class="report-section" id="primary-means"${scientificAttributes}><h2>${escapeHtml(labels.columnChart)}</h2><p class="simple-reading"><span>${escapeHtml(labels.simpleReading)}:</span> ${escapeHtml(labels.columnChartReading)}</p>${columnChart}</section>`
+      const section = `<section class="report-section" id="primary-means"><h2>${escapeHtml(labels.columnChart)}</h2><p class="simple-reading"><span>${escapeHtml(labels.simpleReading)}:</span> ${escapeHtml(labels.columnChartReading)}</p>${columnChart}</section>`
       html = html.replace('<section class="report-section" id="comparisons">', `${section}<section class="report-section" id="comparisons">`)
     }
 
