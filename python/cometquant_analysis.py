@@ -10,6 +10,7 @@ from collections import Counter
 import matplotlib
 import numpy as np
 from scipy import stats
+from scipy.optimize import minimize_scalar
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -22,6 +23,11 @@ CHART_MUTED = "#52606D"
 CHART_GRID = "#D9E2EC"
 CHART_SPINE = "#BCCCDC"
 CHART_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#6A3D9A", "#56B4E9"]
+
+MINIMUM_INDEPENDENT_EXPERIMENTS = 3
+DUNNETT_RANDOM_STATE = 20240601
+FLOOR_CEILING_THRESHOLD = 5.0
+FLOOR_CEILING_RATIO_FLAG = 0.5
 
 
 def _apply_light_chart_style(figure, axes, grid_axis="y"):
@@ -765,7 +771,6 @@ def _parse_protocol(experiment):
         "validationComparison": validation,
         "alpha": 0.05,
         "alternative": "two-sided",
-        "multiplicityAdjustment": "holm",
         "confidenceLevel": 0.95,
         "includePrimaryReferenceAsZero": True,
         "visualScoreDenominator": "effective_counted_nucleoids",
@@ -989,6 +994,70 @@ def _population(blocks, protocol):
     }
 
 
+def _validate_design(experiment, protocol, metadata_by_index, blocks, population):
+    """Automatic design-validation step, run before any statistical test.
+
+    Reports the facts a reader needs to judge whether the block design supports the standard
+    inferential analysis (independent experiment count, control presence, completeness,
+    score-range sanity, floor/ceiling accumulation), without itself deciding significance.
+    ``estimable`` is the single source of truth other functions consult indirectly through
+    ``_rcbd_anova``'s own minimum-block check; it is duplicated here only for reporting.
+    """
+    primary_indices = [protocol["primaryReferenceTreatmentIndex"]] + protocol["primaryTreatmentIndices"]
+    included_blocks = set(population["primary"]["includedBlockNumbers"])
+    block_count = len(included_blocks)
+
+    roles = {item.get("role") for item in metadata_by_index.values()}
+    basal_control_present = bool(roles & {"negative-control", "solvent-control"})
+    positive_control_present = "positive-control" in roles
+
+    cell_completeness = []
+    included_scores = []
+    for block in blocks:
+        cell_by_index = {cell["treatmentIndex"]: cell for cell in block["cells"]}
+        for index in primary_indices:
+            cell = cell_by_index[index]
+            cell_completeness.append(
+                {
+                    "replicateNumber": block["replicateNumber"],
+                    "treatmentIndex": index,
+                    "treatment": cell["treatment"],
+                    "expectedSlides": cell["expectedSlides"],
+                    "validSlides": cell["validSlides"],
+                    "absentSlides": cell["absentSlides"],
+                    "scoreAvailable": cell["score"] is not None,
+                }
+            )
+            if block["replicateNumber"] in included_blocks and cell["score"] is not None:
+                included_scores.append(cell["score"])
+
+    out_of_range_count = sum(1 for score in included_scores if score < 0 or score > 100)
+    near_floor_count = sum(1 for score in included_scores if score <= FLOOR_CEILING_THRESHOLD)
+    near_ceiling_count = sum(1 for score in included_scores if score >= 100 - FLOOR_CEILING_THRESHOLD)
+    floor_ceiling_ratio = (
+        (near_floor_count + near_ceiling_count) / len(included_scores) if included_scores else 0.0
+    )
+
+    return {
+        "performed": True,
+        "independentExperimentCount": block_count,
+        "minimumRequiredExperiments": MINIMUM_INDEPENDENT_EXPERIMENTS,
+        "estimable": block_count >= MINIMUM_INDEPENDENT_EXPERIMENTS,
+        "basalControlPresent": basal_control_present,
+        "positiveControlPresent": positive_control_present,
+        "viabilityDataAvailable": False,
+        "cellCompleteness": cell_completeness,
+        "scoreOutOfRangeCount": out_of_range_count,
+        "floorCeilingFlag": {
+            "flagged": floor_ceiling_ratio >= FLOOR_CEILING_RATIO_FLAG,
+            "ratio": _finite(floor_ceiling_ratio) if included_scores else None,
+            "nearFloorCount": near_floor_count,
+            "nearCeilingCount": near_ceiling_count,
+            "threshold": FLOOR_CEILING_THRESHOLD,
+        },
+    }
+
+
 def _included_values(blocks, treatment_indices, block_numbers):
     selected = set(block_numbers)
     rows = []
@@ -1003,10 +1072,16 @@ def _included_values(blocks, treatment_indices, block_numbers):
 def _rcbd_anova(values, treatment_indices, experiment):
     block_count, treatment_count = values.shape
     residual_df = (block_count - 1) * (treatment_count - 1)
-    if block_count < 2 or treatment_count < 2 or residual_df <= 0:
+    if treatment_count < 2 or residual_df <= 0:
         return _reason(
             "insufficient_complete_blocks",
-            "RCBD analysis requires at least two complete independent experiments and two treatments.",
+            "RCBD analysis requires at least two treatments with a positive residual degrees of freedom.",
+        )
+    if block_count < MINIMUM_INDEPENDENT_EXPERIMENTS:
+        return _reason(
+            "insufficient_independent_experiments",
+            "The standard inferential analysis requires at least three independent experiments with a "
+            f"complete primary cell; received {block_count}.",
         )
     grand_mean = float(np.mean(values))
     treatment_means = np.mean(values, axis=0)
@@ -1100,11 +1175,58 @@ def _comparison_result(reference_index, treatment_index, values, mse, residual_d
     }
 
 
+def _dunnett_rho(n_control, n_samples):
+    """Equicorrelation matrix for contrasts sharing a common control (Dunnett 1955, the
+    unlabeled equation after Eq. 1: rho_ij = 1/sqrt((N0/Ni+1)(N0/Nj+1)))."""
+    ratio = float(n_control) / np.asarray(n_samples, dtype=float) + 1.0
+    rho = 1.0 / np.sqrt(ratio[:, None] * ratio[None, :])
+    np.fill_diagonal(rho, 1.0)
+    return rho
+
+
+def _dunnett_adjusted_pvalues(rho, df, statistics, seed=DUNNETT_RANDOM_STATE):
+    """Single-step Dunnett two-sided adjusted p-values from the equicorrelated multivariate-t
+    reference distribution.
+
+    This mirrors the private ``_pvalue_dunnett`` helper behind ``scipy.stats.dunnett`` (scipy
+    1.12, ``scipy/stats/_multicomp.py``), using the same public, documented
+    ``scipy.stats.multivariate_t`` primitive. ``scipy.stats.dunnett`` itself only supports a
+    completely randomized (one-way) layout: it estimates its own pooled variance and residual
+    degrees of freedom from the raw group samples, which would silently discard the block
+    structure of this randomized complete block design. Passing this function the block
+    model's own residual MSE-derived statistics and residual degrees of freedom (df) is the
+    standard generalization of Dunnett's test to a general linear model (the same approach
+    ``multcomp::glht``/``emmeans`` use in R for a fitted model), not an ad hoc approximation.
+    """
+    mvt = stats.multivariate_t(shape=rho, df=df, seed=seed)
+    bound = np.abs(np.asarray(statistics, dtype=float)).reshape(-1, 1)
+    return np.atleast_1d(1 - mvt.cdf(bound, lower_limit=-bound))
+
+
+def _dunnett_critical_value(rho, df, alpha, seed=DUNNETT_RANDOM_STATE, tol=1e-4):
+    """The equicoordinate critical value c such that P(max_i |T_i| < c) = 1 - alpha under the
+    Dunnett reference distribution, mirroring ``DunnettResult._allowance``."""
+
+    def gap(candidate):
+        pvalue = _dunnett_adjusted_pvalues(rho, df, [candidate], seed)[0]
+        return abs(pvalue - alpha) / alpha
+
+    result = minimize_scalar(gap, method="brent", tol=tol)
+    return abs(float(result.x))
+
+
 def calculate_primary_comparisons(values, anova, protocol, experiment):
+    block_count = int(values.shape[0]) if values.size else 0
+    if block_count < MINIMUM_INDEPENDENT_EXPERIMENTS:
+        return _reason(
+            "insufficient_independent_experiments",
+            "Dunnett comparisons require at least three independent experiments with a complete "
+            f"primary cell; received {block_count}.",
+        )
     if not anova.get("performed", False):
         return _reason(
             "block_anova_not_estimable",
-            "Planned comparisons require an estimable common residual MSE. "
+            "Dunnett comparisons require an estimable common residual MSE from the block model. "
             + anova["reason"]["detail"],
         )
     reference_index = protocol["primaryReferenceTreatmentIndex"]
@@ -1119,17 +1241,34 @@ def calculate_primary_comparisons(values, anova, protocol, experiment):
             experiment,
         )
         comparisons.append(comparison)
-    adjusted = _holm_adjust([comparison["pRaw"] for comparison in comparisons])
-    for comparison, p_adjusted in zip(comparisons, adjusted):
-        comparison["pAdjusted"] = _probability(p_adjusted)
+
+    n_samples = np.full(len(comparisons), block_count, dtype=float)
+    rho = _dunnett_rho(block_count, n_samples)
+    statistics = np.array([comparison["t"] for comparison in comparisons])
+    adjusted_p = _dunnett_adjusted_pvalues(rho, anova["residualDF"], statistics)
+    critical_value = _dunnett_critical_value(rho, anova["residualDF"], protocol["alpha"])
+    expected_direction = "lower" if protocol["assayType"] == "antigenotoxicity" else "higher"
+
+    for comparison, p_adjusted in zip(comparisons, adjusted_p):
+        standard_error = comparison["standardError"]
+        comparison["pAdjusted"] = _probability(float(p_adjusted))
         comparison["significant"] = bool(p_adjusted < protocol["alpha"])
+        comparison["ciLow"] = _finite(comparison["difference"] - critical_value * standard_error)
+        comparison["ciHigh"] = _finite(comparison["difference"] + critical_value * standard_error)
+        comparison["increaseDetected"] = bool(
+            comparison["significant"] and comparison["direction"] == expected_direction
+        )
+
     return {
         "performed": True,
         "family": "each_primary_concentration_vs_reference",
         "familySize": len(comparisons),
-        "adjustment": "holm",
+        "comparisonMethod": "dunnett",
+        "adjustment": "dunnett",
         "confidenceLevel": 0.95,
-        "confidenceIntervals": "nominal",
+        "confidenceIntervals": "simultaneous",
+        "dunnettCriticalValue": _finite(critical_value),
+        "randomStateSeed": DUNNETT_RANDOM_STATE,
         "omnibusGateUsed": False,
         "comparisons": comparisons,
     }
@@ -1159,20 +1298,33 @@ def calculate_control_response(blocks, population, protocol, experiment):
         indices[0], indices[1], values, anova["MSE"], anova["residualDF"], experiment
     )
     comparison["significant"] = bool(comparison["pRaw"] < protocol["alpha"])
-    return {
-        "performed": True,
-        "purpose": "separate_validation_comparison",
-        "blockNumbers": block_numbers,
-        "blockAnova": anova,
-        "comparison": comparison,
-        "note": {
+    notes = [
+        {
             "code": "low_residual_degrees_of_freedom",
             "detail": (
                 "The two-treatment validation block model estimates a residual with few "
                 "degrees of freedom. The separate model is kept intentionally rather than "
                 "pooling the error with the primary population."
             ),
-        },
+        }
+    ]
+    if values.shape[0] == MINIMUM_INDEPENDENT_EXPERIMENTS:
+        notes.append(
+            {
+                "code": "elevated_uncertainty_minimum_blocks",
+                "detail": (
+                    "The positive-control comparison is based on the minimum of three "
+                    "independent experiments, which carries elevated uncertainty."
+                ),
+            }
+        )
+    return {
+        "performed": True,
+        "purpose": "separate_validation_comparison",
+        "blockNumbers": block_numbers,
+        "blockAnova": anova,
+        "comparison": comparison,
+        "notes": notes,
     }
 
 
@@ -1519,20 +1671,286 @@ def _calculate_transformed_analysis(values, treatment_indices, metadata_by_index
     }
 
 
+def _calculate_trend_analysis(values, treatment_indices, assay_type):
+    """Standard concentration-trend analysis: the exact Page L test only (the sole standard
+    trend test per protocol; Friedman is redundant with the block ANOVA and does not identify
+    which concentration differs, so it stays out of the standard contract)."""
+    if values.size == 0:
+        return _reason(
+            "no_complete_primary_blocks",
+            "Trend analysis requires complete primary blocks.",
+        )
+    block_count = values.shape[0]
+    if block_count < MINIMUM_INDEPENDENT_EXPERIMENTS:
+        return _reason(
+            "insufficient_independent_experiments",
+            "The standard trend analysis requires at least three independent experiments; "
+            f"received {block_count}.",
+        )
+    direction = _page_direction(assay_type)
+    page = _page_exact(values, treatment_indices, direction)
+    if not page.get("performed", False):
+        return {
+            "performed": False,
+            "reason": page["reason"],
+            "population": "primary_complete_blocks",
+        }
+    return {
+        "performed": True,
+        "population": "primary_complete_blocks",
+        "pageTrend": page,
+    }
+
+
+def _calculate_diagnostics(values, treatment_indices, block_numbers, anova, comparisons, protocol, experiment):
+    """Collapsed technical diagnostics: residuals vs fitted, standardized residuals, a Q-Q
+    reference, per-block treatment-minus-control differences, and leave-one-block-out
+    influence. Influence reports only direction/magnitude per omitted block and an
+    ``unstable`` flag -- it never produces a new p-value."""
+    if values.size == 0:
+        return _reason(
+            "no_complete_primary_blocks",
+            "Diagnostics require complete primary blocks.",
+        )
+    block_count, treatment_count = values.shape
+    if block_count < 4:
+        return _reason(
+            "insufficient_blocks_for_influence_analysis",
+            "Diagnostics and leave-one-block-out influence analysis require at least four "
+            f"independent experiments; received {block_count}.",
+        )
+    if not anova.get("performed", False) or not comparisons.get("performed", False):
+        return _reason(
+            "block_anova_not_estimable",
+            "Diagnostics require an estimable block model and Dunnett comparisons.",
+        )
+
+    grand_mean = float(np.mean(values))
+    treatment_means = np.mean(values, axis=0)
+    block_means = np.mean(values, axis=1)
+    fitted = grand_mean + (treatment_means[None, :] - grand_mean) + (block_means[:, None] - grand_mean)
+    residuals = values - fitted
+    mse = anova["MSE"]
+    # Hat-matrix diagonal for a balanced, orthogonal two-way (block+treatment) layout; constant
+    # across all cells because the design is balanced (sum of leverages = number of model
+    # parameters = block_count + treatment_count - 1, confirmed: N*h = block_count+treatment_count-1).
+    leverage = 1.0 / block_count + 1.0 / treatment_count - 1.0 / (block_count * treatment_count)
+    denominator = math.sqrt(max(mse * (1 - leverage), np.finfo(float).eps))
+    standardized = residuals / denominator
+
+    residual_points = []
+    for block_index, block_number in enumerate(block_numbers):
+        for column, treatment_index in enumerate(treatment_indices):
+            residual_points.append(
+                {
+                    "replicateNumber": block_number,
+                    "treatmentIndex": treatment_index,
+                    "fitted": _finite(fitted[block_index, column]),
+                    "residual": _finite(residuals[block_index, column]),
+                    "standardizedResidual": _finite(standardized[block_index, column]),
+                }
+            )
+
+    flat_standardized = np.sort(standardized.reshape(-1))
+    n_points = flat_standardized.size
+    theoretical_quantiles = stats.norm.ppf((np.arange(1, n_points + 1) - 0.375) / (n_points + 0.25))
+    qq_points = [
+        {"theoreticalQuantile": _finite(theoretical), "standardizedResidual": _finite(sample)}
+        for theoretical, sample in zip(theoretical_quantiles, flat_standardized)
+    ]
+
+    treatment_control_differences = []
+    for block_index, block_number in enumerate(block_numbers):
+        for column in range(1, treatment_count):
+            treatment_control_differences.append(
+                {
+                    "replicateNumber": block_number,
+                    "treatmentIndex": treatment_indices[column],
+                    "difference": _finite(values[block_index, column] - values[block_index, 0]),
+                }
+            )
+
+    full_directions = {
+        comparison["treatmentIndex"]: comparison["direction"] for comparison in comparisons["comparisons"]
+    }
+    influence = []
+    unstable = False
+    for omit_index, omitted_block_number in enumerate(block_numbers):
+        remaining_mask = np.ones(block_count, dtype=bool)
+        remaining_mask[omit_index] = False
+        remaining_values = values[remaining_mask]
+        remaining_anova = _rcbd_anova(remaining_values, treatment_indices, experiment)
+        remaining_comparisons = calculate_primary_comparisons(remaining_values, remaining_anova, protocol, experiment)
+        block_influence = {
+            "omittedReplicateNumber": omitted_block_number,
+            "performed": bool(remaining_comparisons.get("performed", False)),
+        }
+        if remaining_comparisons.get("performed", False):
+            details = []
+            for comparison in remaining_comparisons["comparisons"]:
+                direction_changed = comparison["direction"] != full_directions.get(comparison["treatmentIndex"])
+                if direction_changed:
+                    unstable = True
+                details.append(
+                    {
+                        "treatmentIndex": comparison["treatmentIndex"],
+                        "difference": comparison["difference"],
+                        "direction": comparison["direction"],
+                        "directionChangedFromFullSample": direction_changed,
+                    }
+                )
+            block_influence["comparisons"] = details
+        else:
+            block_influence["reason"] = remaining_comparisons.get("reason")
+        influence.append(block_influence)
+
+    return {
+        "performed": True,
+        "leverage": _finite(leverage),
+        "residuals": residual_points,
+        "qqPlot": qq_points,
+        "treatmentControlDifferences": treatment_control_differences,
+        "influence": influence,
+        "unstable": unstable,
+        "note": {
+            "code": "no_new_significance_from_influence_analysis",
+            "detail": (
+                "Leave-one-block-out influence analysis reports direction and magnitude only; "
+                "it does not produce new p-values."
+            ),
+        },
+    }
+
+
+def _build_interpretation(comparisons, trend_analysis, control_response, validation, diagnostics, protocol):
+    """Orientative conclusion table (never a genotoxic/non-genotoxic classification): Dunnett
+    significance x Page L significance x assay validity -> one of five conclusion codes."""
+    if not validation.get("estimable", False):
+        return _reason(
+            "insufficient_independent_experiments",
+            "The standard interpretation requires the primary inferential analysis to be estimable.",
+        )
+    if not comparisons.get("performed", False) or not trend_analysis.get("performed", False):
+        return _reason(
+            "primary_analysis_not_estimable",
+            "The interpretation requires estimable Dunnett comparisons and a Page L trend result.",
+        )
+
+    expected_direction = "lower" if protocol["assayType"] == "antigenotoxicity" else "higher"
+    alpha = protocol["alpha"]
+
+    alerts = []
+    floor_ceiling = validation.get("floorCeilingFlag", {})
+    if floor_ceiling.get("flagged"):
+        alerts.append(
+            {
+                "code": "floor_ceiling_effect",
+                "detail": "Primary scores accumulate near the 0-100 scale limits, which may compress observable differences.",
+            }
+        )
+    if diagnostics.get("performed", False) and diagnostics.get("unstable"):
+        alerts.append(
+            {
+                "code": "influence_instability",
+                "detail": "The direction of at least one comparison changes when a single independent experiment is omitted; consider independent replication.",
+            }
+        )
+    if not validation.get("positiveControlPresent", False):
+        alerts.append({"code": "no_positive_control", "detail": "No positive control was configured for this study design."})
+    alerts.append({"code": "viability_not_collected", "detail": "Viability/cytotoxicity data is not collected by this schema version."})
+    for note in control_response.get("notes", []) if control_response.get("performed", False) else []:
+        if note["code"] == "elevated_uncertainty_minimum_blocks":
+            alerts.append(note)
+
+    # Validity criterion: fails only when the control comparison could not be estimated, or was
+    # estimated and is significant in the direction OPPOSITE to expected. A non-significant
+    # control response in the expected direction does not fail the criterion by itself.
+    control_comparison = control_response.get("comparison") if control_response.get("performed", False) else None
+    if control_comparison is None:
+        validity_criterion_met = False
+        validity_code = "control_response_not_estimable"
+    elif control_comparison["significant"] and control_comparison["direction"] != expected_direction:
+        validity_criterion_met = False
+        validity_code = "control_response_unexpected_direction"
+    elif control_comparison["significant"]:
+        validity_criterion_met = True
+        validity_code = "expected_control_response_detected"
+    else:
+        validity_criterion_met = True
+        validity_code = "expected_control_response_not_detected"
+        alerts.append(
+            {
+                "code": "control_response_uncertainty",
+                "detail": "The positive control did not reach statistical significance in the expected direction.",
+            }
+        )
+
+    if not validity_criterion_met:
+        alerts.append(
+            {
+                "code": "assay_validity_criterion_not_met",
+                "detail": "Interpretation is inconclusive because the essential validity criterion was not met.",
+            }
+        )
+        return {
+            "performed": True,
+            "conclusionCode": "inconclusive_validity_not_met",
+            "validityCriterionMet": False,
+            "validityCode": validity_code,
+            "dunnettAnyPositiveSignificant": None,
+            "pageTrendSignificant": None,
+            "alerts": alerts,
+        }
+
+    dunnett_rows = comparisons["comparisons"]
+    any_positive_significant = any(
+        row["significant"] and row["direction"] == expected_direction for row in dunnett_rows
+    )
+    page = trend_analysis.get("pageTrend")
+    expected_page_direction = "decreasing" if protocol["assayType"] == "antigenotoxicity" else "increasing"
+    page_significant = bool(
+        page
+        and page.get("performed", False)
+        and page["direction"] == expected_page_direction
+        and page["pExact"] < alpha
+    )
+
+    if any_positive_significant and page_significant:
+        conclusion_code = "increase_detected_with_ordered_trend"
+    elif any_positive_significant and not page_significant:
+        conclusion_code = "increase_detected_without_ordered_trend"
+    elif not any_positive_significant and page_significant:
+        conclusion_code = "ordered_trend_without_individual_increase"
+    else:
+        conclusion_code = "no_increase_detected"
+
+    return {
+        "performed": True,
+        "conclusionCode": conclusion_code,
+        "validityCriterionMet": True,
+        "validityCode": validity_code,
+        "dunnettAnyPositiveSignificant": any_positive_significant,
+        "pageTrendSignificant": page_significant,
+        "alerts": alerts,
+    }
+
+
 def _unavailable_analysis(reason, selection=None):
     return {
-        "analysisSchemaVersion": 3,
+        "analysisSchemaVersion": 4,
         "selection": selection if selection is not None else reason,
         "protocol": reason,
         "population": reason,
+        "validation": reason,
         "descriptive": reason,
         "scores": reason,
         "blockAnova": reason,
         "primaryComparisons": reason,
         "controlResponse": reason,
-        "doseTrend": reason,
-        "nonParametric": reason,
-        "transformedAnalysis": reason,
+        "trendAnalysis": reason,
+        "diagnostics": reason,
+        "interpretation": reason,
+        "comparisonMethod": None,
         "charts": reason,
     }
 
@@ -1551,9 +1969,13 @@ def analyze_experiment(experiment, lang="en", analysis_options=None):
         return _unavailable_analysis(unavailable, selection)
 
     population = _population(blocks, protocol)
+    validation = _validate_design(experiment, protocol, metadata_by_index, blocks, population)
     treatment_indices = [protocol["primaryReferenceTreatmentIndex"]] + protocol["primaryTreatmentIndices"]
     included_blocks = population["primary"]["includedBlockNumbers"]
     values = _included_values(blocks, treatment_indices, included_blocks)
+    block_numbers = [
+        block["replicateNumber"] for block in blocks if block["replicateNumber"] in set(included_blocks)
+    ]
     if values.size == 0:
         block_anova = _reason(
             "no_complete_primary_blocks",
@@ -1565,25 +1987,21 @@ def analyze_experiment(experiment, lang="en", analysis_options=None):
         values, block_anova, protocol, experiment
     )
     control_response = calculate_control_response(blocks, population, protocol, experiment)
-    dose_trend = (
-        calculate_dose_trend(values, treatment_indices, metadata_by_index, protocol)
-        if values.size
-        else _reason(
-            "no_complete_primary_blocks",
-            "Dose trend requires complete primary blocks.",
-        )
+    trend_analysis = _calculate_trend_analysis(values, treatment_indices, protocol["assayType"])
+    diagnostics = _calculate_diagnostics(
+        values, treatment_indices, block_numbers, block_anova, primary_comparisons, protocol, experiment
     )
-    non_parametric = _calculate_non_parametric(values, treatment_indices, protocol["assayType"])
-    transformed_analysis = _calculate_transformed_analysis(
-        values, treatment_indices, metadata_by_index, protocol, experiment
+    interpretation = _build_interpretation(
+        primary_comparisons, trend_analysis, control_response, validation, diagnostics, protocol
     )
     scores, descriptive = _scores_and_descriptive(blocks, treatment_indices, included_blocks)
     heterogeneity_flag = _heterogeneity_flag(descriptive)
     return {
-        "analysisSchemaVersion": 3,
+        "analysisSchemaVersion": 4,
         "selection": selection,
         "protocol": protocol,
         "population": population,
+        "validation": validation,
         "descriptive": {
             "performed": True,
             "population": "primary_complete_blocks",
@@ -1598,9 +2016,10 @@ def analyze_experiment(experiment, lang="en", analysis_options=None):
         "blockAnova": block_anova,
         "primaryComparisons": primary_comparisons,
         "controlResponse": control_response,
-        "doseTrend": dose_trend,
-        "nonParametric": non_parametric,
-        "transformedAnalysis": transformed_analysis,
+        "trendAnalysis": trend_analysis,
+        "diagnostics": diagnostics,
+        "interpretation": interpretation,
+        "comparisonMethod": "dunnett",
         "charts": {
             "scores": generate_block_score_chart(
                 blocks, treatment_indices, included_blocks, experiment, lang

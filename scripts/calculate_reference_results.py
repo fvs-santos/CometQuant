@@ -433,12 +433,153 @@ def calculate_v2():
     }
 
 
+def dunnett_rho(n_control, n_samples):
+    """Equicorrelation matrix for common-control contrasts (Dunnett 1955, unlabeled
+    equation after Eq. 1), independently re-derived here (not imported from the app engine)."""
+    ratio = float(n_control) / np.asarray(n_samples, dtype=float) + 1.0
+    rho = 1.0 / np.sqrt(ratio[:, None] * ratio[None, :])
+    np.fill_diagonal(rho, 1.0)
+    return rho
+
+
+def dunnett_adjust(rho, df, statistics, seed):
+    mvt = stats.multivariate_t(shape=rho, df=df, seed=seed)
+    bound = np.abs(np.asarray(statistics, dtype=float)).reshape(-1, 1)
+    return np.atleast_1d(1 - mvt.cdf(bound, lower_limit=-bound))
+
+
+def dunnett_critical_value(rho, df, alpha, seed):
+    from scipy.optimize import minimize_scalar
+
+    def gap(candidate):
+        pvalue = dunnett_adjust(rho, df, [candidate], seed)[0]
+        return abs(pvalue - alpha) / alpha
+
+    result = minimize_scalar(gap, method="brent", tol=1e-4)
+    return abs(float(result.x))
+
+
+def calculate_v3(seed):
+    """Same block design and raw data as v2 (slides.csv is shared), independently
+    recomputed for the v4 Dunnett-based contract: Dunnett-adjusted planned comparisons
+    with a simultaneous 95% CI (replacing Holm), and the Page L trend only (no Friedman,
+    no arcsine-sqrt transform, no linear dose regression, per the v4 contract)."""
+    dataset = ROOT / "tests" / "reference" / "v2" / "slides.csv"
+    slides = []
+    with dataset.open(encoding="utf-8", newline="") as source:
+        for row in csv.DictReader(source):
+            row["replicate_number"] = int(row["replicate_number"])
+            row["treatment_index"] = int(row["treatment_index"])
+            row["score"] = float(row["score"])
+            slides.append(row)
+
+    grouped = defaultdict(list)
+    labels = {}
+    for row in slides:
+        labels[row["treatment_index"]] = row["treatment"]
+        if row["status"] == "counted" and row["completion"] == "complete":
+            grouped[(row["replicate_number"], row["treatment_index"])].append(row["score"])
+    cells = {key: float(np.mean(values)) for key, values in grouped.items()}
+    blocks = sorted({row["replicate_number"] for row in slides})
+    primary_indices = [0, 2, 3, 4]
+    complete_blocks = [
+        block for block in blocks if all((block, index) in cells for index in primary_indices)
+    ]
+    values = np.asarray(
+        [[cells[(block, index)] for index in primary_indices] for block in complete_blocks]
+    )
+    anova = rcbd(values, primary_indices)
+
+    comparisons = []
+    for column, treatment_index in enumerate(primary_indices[1:], start=1):
+        result = contrast(values[:, 0], values[:, column], anova["MSE"], anova["residualDF"])
+        result["treatmentIndex"] = treatment_index
+        comparisons.append(result)
+
+    block_count = values.shape[0]
+    n_samples = np.full(len(comparisons), block_count, dtype=float)
+    rho = dunnett_rho(block_count, n_samples)
+    statistics = np.array([item["t"] for item in comparisons])
+    adjusted_p = dunnett_adjust(rho, anova["residualDF"], statistics, seed)
+    critical_value = dunnett_critical_value(rho, anova["residualDF"], 0.05, seed)
+    for item, p_adjusted in zip(comparisons, adjusted_p):
+        item["pAdjusted"] = float(p_adjusted)
+        item["ciLow"] = item["difference"] - critical_value * item["standardError"]
+        item["ciHigh"] = item["difference"] + critical_value * item["standardError"]
+
+    validation_indices = [0, 1]
+    validation_blocks = [
+        block for block in blocks if all((block, index) in cells for index in validation_indices)
+    ]
+    validation_values = np.asarray(
+        [[cells[(block, index)] for index in validation_indices] for block in validation_blocks]
+    )
+    validation_anova = rcbd(validation_values, validation_indices)
+    validation_comparison = contrast(
+        validation_values[:, 0],
+        validation_values[:, 1],
+        validation_anova["MSE"],
+        validation_anova["residualDF"],
+    )
+
+    page = page_exact(values, "increasing")
+
+    descriptive_treatments = []
+    for column, treatment_index in enumerate(primary_indices):
+        column_values = values[:, column]
+        mean = float(np.mean(column_values))
+        standard_deviation = float(np.std(column_values, ddof=1)) if len(column_values) > 1 else 0.0
+        descriptive_treatments.append(
+            {
+                "treatmentIndex": treatment_index,
+                "mean": mean,
+                "standardDeviation": standard_deviation,
+                "coefficientOfVariation": standard_deviation / mean * 100.0 if mean > 0 else 0.0,
+            }
+        )
+
+    return {
+        "provenance": {
+            "method": (
+                "Independent SciPy distributions, explicit RCBD sums of squares, contrasts, "
+                "an independently re-derived Dunnett equicorrelated multivariate-t adjustment "
+                "(scipy.stats.multivariate_t, not scipy.stats.dunnett -- see reference_analysis.R "
+                "for the R/multcomp cross-check), and the exact Page L permutation test."
+            ),
+            "scipy": scipy.__version__,
+            "dataset": "v2/slides.csv",
+            "dunnettRandomStateSeed": seed,
+        },
+        "fixture": {
+            "independentExperiments": len(blocks),
+            "slides": len(slides),
+            "primaryIncludedBlockNumbers": complete_blocks,
+        },
+        "blockAnova": anova,
+        "primaryComparisons": comparisons,
+        "dunnettCriticalValue": critical_value,
+        "controlResponse": {
+            "blockNumbers": validation_blocks,
+            "blockAnova": validation_anova,
+            "comparison": validation_comparison,
+        },
+        "trendAnalysis": {"pageTrend": page},
+        "descriptive": {"treatments": descriptive_treatments},
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", choices=("v1", "v2"), default="v2")
+    parser.add_argument("--version", choices=("v1", "v2", "v3"), default="v2")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--seed", type=int, default=20240601)
     arguments = parser.parse_args()
-    result = calculate_v1() if arguments.version == "v1" else calculate_v2()
+    if arguments.version == "v1":
+        result = calculate_v1()
+    elif arguments.version == "v3":
+        result = calculate_v3(arguments.seed)
+    else:
+        result = calculate_v2()
     serialized = json.dumps(result, indent=2, allow_nan=False) + "\n"
     if arguments.output:
         arguments.output.write_text(serialized, encoding="utf-8")

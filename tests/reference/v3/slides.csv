@@ -1,0 +1,31 @@
+replicate_number,treatment_index,treatment,role,concentration,slide,status,completion,score
+1,0,Negative control,primary_reference,0,1,counted,complete,8
+1,0,Negative control,primary_reference,0,2,counted,complete,10
+1,1,Positive control,validation_control,,1,counted,complete,48
+1,1,Positive control,validation_control,,2,counted,complete,52
+1,2,Compound 1 uM,primary_treatment,1,1,counted,complete,13
+1,2,Compound 1 uM,primary_treatment,1,2,counted,complete,15
+1,3,Compound 5 uM,primary_treatment,5,1,counted,complete,23
+1,3,Compound 5 uM,primary_treatment,5,2,counted,complete,27
+1,4,Compound 10 uM,primary_treatment,10,1,counted,complete,38
+1,4,Compound 10 uM,primary_treatment,10,2,counted,complete,42
+2,0,Negative control,primary_reference,0,1,counted,complete,11
+2,0,Negative control,primary_reference,0,2,counted,complete,13
+2,1,Positive control,validation_control,,1,counted,complete,55
+2,1,Positive control,validation_control,,2,counted,complete,57
+2,2,Compound 1 uM,primary_treatment,1,1,counted,complete,17
+2,2,Compound 1 uM,primary_treatment,1,2,counted,complete,19
+2,3,Compound 5 uM,primary_treatment,5,1,counted,complete,30
+2,3,Compound 5 uM,primary_treatment,5,2,counted,complete,32
+2,4,Compound 10 uM,primary_treatment,10,1,counted,complete,47
+2,4,Compound 10 uM,primary_treatment,10,2,counted,complete,49
+3,0,Negative control,primary_reference,0,1,counted,complete,7
+3,0,Negative control,primary_reference,0,2,counted,complete,9
+3,1,Positive control,validation_control,,1,counted,complete,45
+3,1,Positive control,validation_control,,2,counted,complete,49
+3,2,Compound 1 uM,primary_treatment,1,1,counted,complete,12
+3,2,Compound 1 uM,primary_treatment,1,2,counted,complete,14
+3,3,Compound 5 uM,primary_treatment,5,1,counted,complete,21
+3,3,Compound 5 uM,primary_treatment,5,2,counted,complete,25
+3,4,Compound 10 uM,primary_treatment,10,1,counted,complete,35
+3,4,Compound 10 uM,primary_treatment,10,2,counted,incomplete,39

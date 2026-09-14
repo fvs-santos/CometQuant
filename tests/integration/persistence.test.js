@@ -9,31 +9,38 @@ describe('browser-facing contracts', () => {
     expect(analysis).toContain('CometQuantExport.buildRawCsv')
     expect(analysis).toContain('CometQuantExport.buildAggregateCsv')
     expect(analysis).toContain('CometQuantExport.buildPopulationCsv')
+    expect(analysis).toContain('CometQuantExport.buildValidationCsv')
     expect(analysis).toContain('CometQuantExport.buildBlockAnovaCsv')
-    expect(analysis).toContain('CometQuantExport.buildComparisonsCsv')
+    expect(analysis).toContain('CometQuantExport.buildPrimaryComparisonsCsv')
     expect(analysis).toContain('CometQuantExport.buildControlResponseCsv')
-    expect(analysis).toContain('CometQuantExport.buildDoseTrendCsv')
+    expect(analysis).toContain('CometQuantExport.buildTrendCsv')
+    expect(analysis).toContain('CometQuantExport.buildDiagnosticsResidualsCsv')
+    expect(analysis).toContain('CometQuantExport.buildDiagnosticsInfluenceCsv')
+    expect(analysis).toContain('CometQuantExport.buildInterpretationCsv')
     expect(analysis).toContain('CometQuantExport.buildStudyDesignCsv')
   })
 
-  it('enforces and renders only the scientific analysis v3 contract', () => {
+  it('enforces and renders only the scientific analysis v4 contract', () => {
     const analysis = fs.readFileSync(path.resolve(__dirname, '../../js/analysis.js'), 'utf8')
-    expect(analysis).toMatch(/const ANALYSIS_SCHEMA_VERSION = 3/)
+    expect(analysis).toMatch(/const ANALYSIS_SCHEMA_VERSION = 4/)
     expect(analysis).toMatch(/function validateAnalysisResult[\s\S]*?result\.analysisSchemaVersion !== ANALYSIS_SCHEMA_VERSION/)
+    expect(analysis).toContain('analysis-interpretation')
+    expect(analysis).toContain('analysis-validation')
     expect(analysis).toContain('analysis-plan-population')
     expect(analysis).toContain('analysis-block-scores')
     expect(analysis).toContain('analysis-rcbd-anova')
+    expect(analysis).toContain('analysis-diagnostics')
     expect(analysis).toContain('analysis-primary-comparisons')
     expect(analysis).toContain('analysis-control-response')
-    expect(analysis).toContain('analysis-dose-trend')
+    expect(analysis).toContain('analysis-trend')
     expect(analysis).toContain('analysis-v2-charts')
-    expect(analysis).not.toMatch(/function render(?:Shapiro|Tukey|Regression)Table/)
-    expect(analysis).not.toMatch(/results\.(?:shapiro|anova|tukey|regression)/)
+    expect(analysis).not.toMatch(/function render(?:Shapiro|Tukey|Regression|DoseTrend|NonParametric|TransformedAnalysis)Table/)
+    expect(analysis).not.toMatch(/results\.(?:shapiro|anova|tukey|regression|doseTrend|nonParametric|transformedAnalysis)\b/)
   })
 
   it('packages the scientific CSVs, analysis JSON and all three charts', () => {
     const analysis = fs.readFileSync(path.resolve(__dirname, '../../js/analysis.js'), 'utf8')
-    for (const filename of ['raw_slides.csv', 'replicate_scores.csv', 'population.csv', 'block_anova.csv', 'primary_comparisons.csv', 'control_response.csv', 'dose_trend.csv', 'study_design.csv', 'analysis.json']) {
+    for (const filename of ['raw_slides.csv', 'replicate_scores.csv', 'population.csv', 'validation.csv', 'block_anova.csv', 'primary_comparisons.csv', 'control_response.csv', 'trend.csv', 'diagnostics_residuals.csv', 'diagnostics_influence.csv', 'interpretation.csv', 'study_design.csv', 'analysis.json']) {
       expect(analysis).toContain(`'${filename}'`)
     }
     for (const filename of ['block_scores.png', 'primary_differences.png', 'class_distribution.png']) {

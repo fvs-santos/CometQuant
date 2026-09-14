@@ -1,0 +1,183 @@
+{
+  "provenance": {
+    "method": "Independent SciPy distributions, explicit RCBD sums of squares, contrasts, an independently re-derived Dunnett equicorrelated multivariate-t adjustment (scipy.stats.multivariate_t, not scipy.stats.dunnett -- see reference_analysis.R for the R/multcomp cross-check), and the exact Page L permutation test.",
+    "scipy": "1.13.0",
+    "dataset": "v2/slides.csv",
+    "dunnettRandomStateSeed": 20240601
+  },
+  "fixture": {
+    "independentExperiments": 3,
+    "slides": 30,
+    "primaryIncludedBlockNumbers": [
+      1,
+      2,
+      3
+    ]
+  },
+  "blockAnova": {
+    "model": "score ~ treatment + block",
+    "blockCount": 3,
+    "treatmentIndices": [
+      0,
+      2,
+      3,
+      4
+    ],
+    "residualDF": 6,
+    "MSE": 4.138888888888876,
+    "terms": [
+      {
+        "term": "treatment",
+        "SS": 1730.6666666666667,
+        "DF": 3,
+        "MS": 576.8888888888889,
+        "F": 139.3825503355709,
+        "p": 6.1593383796696e-06
+      },
+      {
+        "term": "block",
+        "SS": 118.5,
+        "DF": 2,
+        "MS": 59.25,
+        "F": 14.315436241610783,
+        "p": 0.005200719747946682
+      },
+      {
+        "term": "residual",
+        "SS": 24.833333333333258,
+        "DF": 6,
+        "MS": 4.138888888888876
+      }
+    ]
+  },
+  "primaryComparisons": [
+    {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 15.0,
+      "difference": 5.333333333333334,
+      "standardError": 1.6611018208584478,
+      "t": 3.2107202980351306,
+      "DF": 6,
+      "ciLow": 0.18437752604181057,
+      "ciHigh": 10.482289140624857,
+      "pRaw": 0.018350366918446104,
+      "treatmentIndex": 2,
+      "pAdjusted": 0.04363643273110607
+    },
+    {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 26.333333333333332,
+      "difference": 16.666666666666664,
+      "standardError": 1.6611018208584478,
+      "t": 10.03350093135978,
+      "DF": 6,
+      "ciLow": 11.517710859375141,
+      "ciHigh": 21.815622473958186,
+      "pRaw": 5.682549087781244e-05,
+      "treatmentIndex": 3,
+      "pAdjusted": 0.00012655832235686226
+    },
+    {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 41.0,
+      "difference": 31.333333333333336,
+      "standardError": 1.6611018208584478,
+      "t": 18.862981750956394,
+      "DF": 6,
+      "ciLow": 26.184377526041814,
+      "ciHigh": 36.48228914062486,
+      "pRaw": 1.4340819926595778e-06,
+      "treatmentIndex": 4,
+      "pAdjusted": 1.2530601445348566e-08
+    }
+  ],
+  "dunnettCriticalValue": 3.0997231732793917,
+  "controlResponse": {
+    "blockNumbers": [
+      1,
+      2,
+      3
+    ],
+    "blockAnova": {
+      "model": "score ~ treatment + block",
+      "blockCount": 3,
+      "treatmentIndices": [
+        0,
+        1
+      ],
+      "residualDF": 2,
+      "MSE": 3.166666666666817,
+      "terms": [
+        {
+          "term": "treatment",
+          "SS": 2562.6666666666665,
+          "DF": 1,
+          "MS": 2562.6666666666665,
+          "F": 809.2631578946983,
+          "p": 0.001233406292355654
+        },
+        {
+          "term": "block",
+          "SS": 44.333333333333336,
+          "DF": 2,
+          "MS": 22.166666666666668,
+          "F": 6.999999999999668,
+          "p": 0.1250000000000052
+        },
+        {
+          "term": "residual",
+          "SS": 6.333333333333634,
+          "DF": 2,
+          "MS": 3.166666666666817
+        }
+      ]
+    },
+    "comparison": {
+      "referenceMean": 9.666666666666666,
+      "treatmentMean": 51.0,
+      "difference": 41.333333333333336,
+      "standardError": 1.4529663145135923,
+      "t": 28.447550999948987,
+      "DF": 2,
+      "ciLow": 35.081723854034884,
+      "ciHigh": 47.58494281263179,
+      "pRaw": 0.0012334062923556532
+    }
+  },
+  "trendAnalysis": {
+    "pageTrend": {
+      "direction": "increasing",
+      "statistic": 90.0,
+      "pExact": 7.233796296296296e-05,
+      "pExactOpposite": 1.0
+    }
+  },
+  "descriptive": {
+    "treatments": [
+      {
+        "treatmentIndex": 0,
+        "mean": 9.666666666666666,
+        "standardDeviation": 2.081665999466133,
+        "coefficientOfVariation": 21.534475856546205
+      },
+      {
+        "treatmentIndex": 2,
+        "mean": 15.0,
+        "standardDeviation": 2.6457513110645907,
+        "coefficientOfVariation": 17.638342073763937
+      },
+      {
+        "treatmentIndex": 3,
+        "mean": 26.333333333333332,
+        "standardDeviation": 4.163331998932266,
+        "coefficientOfVariation": 15.810121514932657
+      },
+      {
+        "treatmentIndex": 4,
+        "mean": 41.0,
+        "standardDeviation": 6.557438524302,
+        "coefficientOfVariation": 15.993752498297562
+      }
+    ]
+  }
+}

@@ -646,6 +646,58 @@ Validacao desta continuidade:
 - `npm test` passou com 115 testes JavaScript;
 - os 4 cenarios E2E de analise passaram em Chromium/Pixel 7 e WebKit/iPhone, incluindo a comparacao do nome do relatorio individual com o arquivo HTML interno do ZIP.
 
+Continuidade de 14/09/2026 (reformulacao estatistica v3 -> v4, Dunnett e sintese de evidencias):
+
+### Motivacao
+
+- Documento `prompt_implementacao_otimizacao_estatistica_cometa.md` (adicionado na raiz pelo usuario) pediu reorganizar a analise e o relatorio para leitores sem formacao estatistica avancada, evitando analises alternativas apresentadas como votos equivalentes e evitando que o app classifique automaticamente uma substancia.
+- Investigacao previa confirmou um fato central que simplificou todo o escopo de compatibilidade: nenhum resultado de analise e persistido ou reimportado pelo app (`analysisResults` em `js/analysis.js` e so memoria, recalculado a cada execucao). Nao ha migracao de dados salvos a fazer; relatorios HTML/JSON/CSV/ZIP antigos exportados continuam corretos como arquivos estaticos, nunca relidos pelo app.
+- Decisoes confirmadas com o usuario antes de implementar: (1) Friedman, transformacao arcsine-sqrt e regressao linear saem do contrato padrao e do relatorio, mas o codigo Python permanece no arquivo sem chamador (reativavel no futuro); (2) a tela de resultados dentro do app tambem foi reorganizada, nao so o relatorio exportado; (3) o criterio essencial de validade do ensaio (linha "inconclusivo" da tabela de interpretacao) falha somente quando a comparacao do controle positivo nao pode ser estimada ou e significativa na direcao oposta a esperada -- resposta nao significativa na direcao esperada gera so um alerta de incerteza elevada.
+
+### Correcao tecnica descoberta durante a implementacao
+
+- `scipy.stats.dunnett` (disponivel desde SciPy 1.11, presente na versao pinada 1.12.0) so suporta desenho inteiramente casualizado: ele estima sua propria variancia e graus de liberdade a partir dos grupos brutos (`df = n - n_groups - 1`), ignorando silenciosamente a estrutura de bloco. Usa-lo diretamente sobre os escores por bloco teria descartado o ajuste por bloco.
+- Solucao adotada: reaproveitar a mesma distribuicao de referencia t-multivariada equicorrelacionada que o proprio scipy usa internamente (`scipy.stats.multivariate_t`, API publica e documentada), alimentada com o erro residual e os graus de liberdade do modelo em blocos (`_rcbd_anova`), em vez de scipy.stats.dunnett. E a generalizacao padrao de Dunnett (1955) para um modelo linear geral -- o mesmo que `multcomp::glht` faz em R -- nao uma aproximacao ad hoc.
+- Validado de forma independente: (1) reducao exata ao teste t simples no caso de 1 unica comparacao; (2) simulacao Monte Carlo sob H0 confirmando taxa de erro familiar ~5% (alfa nominal); (3) oraculo Python independente (`scripts/calculate_reference_results.py`, funcao `calculate_v3`) batendo exatamente com o motor (mesma seed fixa `20240601`); (4) **validacao real com R** via `multcomp::glht` sobre `lm(score ~ treatment + block)` -- unica excecao documentada a convencao "sem pacotes externos" dos testes de referencia, pois a generalizacao de Dunnett para modelo em blocos nao tem equivalente em R base.
+
+### Motor Python (`python/cometquant_analysis.py`)
+
+- Novo gate `MINIMUM_INDEPENDENT_EXPERIMENTS = 3`: `_rcbd_anova` agora exige >=3 blocos (antes exigia >=2), propagando o motivo `insufficient_independent_experiments` para ANOVA em blocos, comparacoes de Dunnett e resposta do controle (todos dependem de `_rcbd_anova`). `_calculate_trend_analysis` (novo wrapper so para Page L) aplica o mesmo gate separadamente, sem alterar `_page_exact`/`_friedman_exact` (que ficam intocados, dormentes).
+- `calculate_primary_comparisons` reescrita: usa `_dunnett_rho`/`_dunnett_adjusted_pvalues`/`_dunnett_critical_value` (novas funcoes, baseadas em `scipy.stats.multivariate_t` + `scipy.optimize.minimize_scalar`) para IC simultaneo e p ajustado; adiciona `comparisonMethod: "dunnett"`, `dunnettCriticalValue`, `randomStateSeed` (constante `DUNNETT_RANDOM_STATE = 20240601`) e `increaseDetected` por comparacao (so conta positivo + significativo, direcao ciente do `assayType`).
+- `calculate_control_response`: campo `note` (singular) virou `notes` (lista), com novo codigo `elevated_uncertainty_minimum_blocks` quando o bloco tem exatamente 3 experimentos. Mantido o modelo de 2 tratamentos existente (`_comparison_result`/`_rcbd_anova`) -- validado numericamente como equivalente exato a `scipy.stats.ttest_rel`.
+- Novas funcoes: `_validate_design` (bloco `validation`: contagem de experimentos, presenca de controles, `scoreOutOfRangeCount`, `floorCeilingFlag`), `_calculate_diagnostics` (residuos, padronizados via formula fechada de alavancagem para desenho balanceado `1/b + 1/t - 1/(b*t)`, Q-Q, diferencas tratamento-referencia por bloco, influencia leave-one-block-out sem gerar novo p; exige >=4 blocos), `_build_interpretation` (tabela de 5 linhas: Dunnett positivo x Page L x validade -> `conclusionCode`; alerts separados para piso/teto, instabilidade, incerteza do controle, ausencia de controle positivo, viabilidade nao coletada).
+- Campo `protocol.multiplicityAdjustment` (sempre "holm", obsoleto) foi removido do contrato -- o metodo real agora vem de `comparisonMethod`/`primaryComparisons.comparisonMethod`.
+- Contrato v4 (`analysisSchemaVersion: 4`): chaves de topo `selection, protocol, population, validation, descriptive, scores, blockAnova (so apendice), primaryComparisons, controlResponse, trendAnalysis, diagnostics, interpretation, comparisonMethod, charts`. `doseTrend`, `nonParametric`, `transformedAnalysis` foram removidos do contrato (nao so `performed:false`). Nada foi apagado do arquivo: `_holm_adjust`, `_friedman_exact`, `_arcsin_sqrt_transform`, `_calculate_non_parametric`, `_calculate_transformed_analysis`, `calculate_dose_trend`, `calculate_regression` ficam presentes e sem chamador.
+
+### Relatorio HTML e tela in-app
+
+- `js/export.js`: removida `buildLegacyReportHtml` (codigo morto confirmado, ~465 linhas, nao exportado nem testado). `buildInterpretation` reescrita para ler `analysis.interpretation`/`analysis.validation`/`analysis.controlResponse.notes` em vez de recalcular logica de "sinal"/"dose" localmente; produz exatamente 3 cartoes (validade, comparacoes, tendencia) + lista de alertas separada. Texto de conclusao e do cartao de comparacoes agora e ciente do `assayType` (template `{effect}` -> "aumento do dano ao DNA" ou "redução do dano ao DNA"/"increased/reduced DNA damage"), corrigindo um problema real: a linguagem antiga sempre dizia "aumento", mesmo para antigenotoxicidade (onde o efeito esperado e reducao/protecao).
+- `buildDoseResponseSvg` ganhou linhas finas conectando os pontos do mesmo experimento independente entre tratamentos (`.block-line`), atendendo ao pedido do documento.
+- CSVs renomeados/adicionados: `buildPrimaryComparisonsCsv` (era `buildComparisonsCsv`), `buildTrendCsv` (era `buildNonParametricCsv`, so Page L agora), `buildValidationCsv`, `buildDiagnosticsResidualsCsv`, `buildDiagnosticsInfluenceCsv`, `buildInterpretationCsv` (novos); `buildDoseTrendCsv` e `buildTransformedAnalysisCsv` removidos.
+- Relatorio reorganizado na ordem: identificacao -> validade/integridade dos dados -> sintese de evidencias -> grafico principal -> comparacoes primarias -> tendencia -> controle positivo -> diagnosticos (recolhido) -> paragrafo de metodos (auto-gerado, so menciona o que realmente rodou) -> apendice tecnico (dispersao, ANOVA, populacao, protocolo, graficos, scores, dados brutos).
+- `js/analysis.js`: `ANALYSIS_SCHEMA_VERSION` 3->4; `renderAnalysisResults` reordenada (interpretacao e validacao no topo, depois comparacoes/tendencia/controle, depois apendice tecnico com ANOVA/diagnosticos/scores/graficos); novas `renderInterpretation`, `renderValidation`, `renderTrend`, `renderDiagnostics`; `renderDoseTrend`/`renderNonParametric`/`renderTransformedAnalysis` removidas. Mesma correcao de linguagem por `assayType` aplicada (`comparisonValues`/`renderPrimaryComparisons` recebem `protocol` para escolher "Aumento"/"Redução detectada").
+- `js/i18n.js`: chaves novas para interpretacao/validacao/diagnosticos/decisao em pt/en; `analysis.v2.trend.title` corrigida (dizia "Tendencia de Dose Ajustada por Bloco", que agora e sobre Page L, nao mais regressao linear).
+
+### Versionamento
+
+- `APP_VERSION` (export.js) e `package.json` version: 2.2.0 -> 2.3.0. Shell offline: `cometquant-shell-v23` -> `cometquant-shell-v24` (`service-worker.js` e `js/science-package.js`, mantidos em sincronia).
+
+### Validacao completa desta continuidade
+
+- `npm run check` passou.
+- `npm test` (Vitest) passou com 114 testes (10 arquivos), apos reescrever `tests/unit/export.test.js`, `tests/unit/analysis.test.js`, `tests/integration/persistence.test.js` e `tests/unit/science-package.test.js` para o contrato v4.
+- `npm run test:analysis` passou com 40 testes Python (32 antigos + 8 novos), incluindo a nova classe `BlockAnalysisV4Tests` com gate de 3 experimentos, Dunnett batendo com oraculo independente, reprodutibilidade com seed fixa, equivalencia exata a `scipy.stats.ttest_rel` para o controle positivo, diagnosticos/influencia com fixture sintetica de 4 blocos, e as 5 combinacoes da tabela de interpretacao testadas isoladamente.
+- **R esta instalado nesta maquina** (`C:/Program Files/R/R-4.6.1`), permitindo validacao real (nao so planejada): `npm run test:reference:r` passa para v1 (28 metricas), v2 (92 metricas) e a nova `tests/reference/v3/` (49 metricas, usando `multcomp::glht`, pacote instalado na biblioteca de usuario). O pacote `multcomp` precisou de tolerancia numerica mais frouxa que o resto do arquivo para as quantidades baseadas em QMC (p ajustado, IC simultaneo, valor critico de Dunnett) porque R e Python usam amostradores QMC independentes e nao sincronizados por seed entre linguagens; valores de p muito pequenos (<1e-4) sao tratados como equivalentes por piso, pois a diferenca de magnitude deixa de ter significado cientifico nesse regime.
+- **E2E real rodou nos dois motores**: `npx playwright test` com `--project=chromium-pixel-7` e `--project=webkit-iphone` passou 30/30 cenarios em cada um (60 no total), incluindo o motor Python real executando dentro do Pyodide de verdade (nao mock), gerando relatorio e ZIP reais e conferindo a nova estrutura de secoes, ausencia de Holm/Friedman/transformacao, e presenca de "Dunnett" no relatorio.
+- `tests/e2e/analysis-flow.spec.js` foi atualizado para o contrato v4 (novos ids de secao, `.dunnett-marker` em vez de `.holm-marker`, novas chaves de CSV no ZIP, `analysisSchemaVersion: 4`).
+
+### Pendencias e limitacoes desta continuidade
+
+- Viabilidade/citotoxicidade continua fora do schema do experimento; o alerta correspondente sempre informa "nao coletado" em vez de inventar um limiar -- fica fora de escopo (mudaria o schema/UI de contagem).
+- Fallback Monte Carlo para Page L quando a enumeracao exata excede o limite computacional nao foi implementado (decisao do usuario: desenhos reais do laboratorio ficam bem abaixo do limite de 5 milhoes de arranjos).
+- Nenhum modo "avancado" com toggle de usuario foi criado para reativar Friedman/transformada/regressao; o codigo fica dormente no motor, sem UI.
+- README atualizado (protocolo estatistico, validacao independente, changelog, limitacoes); MEMORY.md atualizado nesta secao.
+
 ## Arquivos de referencia
 
 - `README.md`
@@ -688,15 +740,20 @@ Validacao desta continuidade:
 - `tests/python/test_cometquant_analysis.py`
 - `tests/reference/v1/`
 - `tests/reference/v2/`
+- `tests/reference/v3/` (fixture Dunnett; `reference_analysis.R` usa `multcomp::glht`)
+- `scripts/calculate_reference_results.py`
+- `scripts/validate_reference_with_r.py`
 - `.github/workflows/ci.yml`
+- `prompt_implementacao_otimizacao_estatistica_cometa.md` (especificacao original da continuidade v4, na raiz)
 
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, selecao transitoria de repeticoes, ANOVA em blocos, comparacoes planejadas com Holm, resposta separada dos controles, tendencia ajustada por bloco com R² parcial, dispersao com flag de heterogeneidade, sensibilidade nao-parametrica exata (Friedman/Page) e analise transformada arcsine-sqrt, contrato cientifico v3 e exportacoes detalhadas.
-- A fixture `tests/reference/v2/` representa tres experimentos independentes e foi validada com calculos SciPy externos ao motor, R e execucao real no Pyodide.
+- A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, selecao transitoria de repeticoes, validacao automatica do desenho antes de qualquer teste (>=3 experimentos independentes), ANOVA em blocos como apendice tecnico, comparacoes planejadas com ajuste de Dunnett (IC simultaneo, validado contra R `multcomp::glht`), resposta separada do controle positivo, Page L como unico teste padrao de tendencia, diagnosticos de robustez (residuos, Q-Q, influencia leave-one-block-out) e uma tabela de interpretacao orientativa de 5 linhas. Contrato cientifico `analysisSchemaVersion: 4`. Friedman, transformacao arcsine-sqrt e regressao linear de dose saem do contrato/relatorio padrao mas o codigo Python permanece no arquivo, dormente.
+- A fixture `tests/reference/v2/` (ANOVA/controle/Page L) e a nova `tests/reference/v3/` (Dunnett, mesmos dados) foram validadas com calculos SciPy independentes do motor, com R real (`multcomp::glht` para v3) e com execucao real no Pyodide via Playwright.
 - Contagens aceitas usam pulso tatil de 30 ms e clique sonoro opcional de 25 ms; as preferencias sao independentes e falhas dessas APIs nao interferem no autosave.
-- A aplicacao esta na versao `2.2.0` e o shell offline usa `cometquant-shell-v23`.
-- A implementacao possui validacao estatistica automatizada independente para o protocolo v2, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica.
-- Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente.
+- A aplicacao esta na versao `2.3.0` e o shell offline usa `cometquant-shell-v24`.
+- A implementacao possui validacao estatistica automatizada independente para o protocolo v4 (SciPy + R real via `multcomp`), alem de 60 cenarios E2E reais em Chromium e WebKit executando o motor Python dentro do Pyodide verdadeiro, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica -- a revisao estatistica externa citada no documento de origem continua pendente.
+- Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente. O workflow de CI ganhou um passo de instalacao do pacote R `multcomp` antes de validar `tests/reference/v3/`.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.
+- Nenhum resultado de analise e persistido pelo app (sempre recalculado); por isso a mudanca de contrato v3->v4 nao exigiu nenhuma migracao de dados armazenados, so do contrato de saida do motor.

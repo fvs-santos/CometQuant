@@ -9,18 +9,20 @@ function loadAnalysisFunctions() {
 function resultWithSelection(selection) {
   const unavailable = { performed: false, reason: { code: 'test', detail: 'test' } }
   return {
-    analysisSchemaVersion: 3,
+    analysisSchemaVersion: 4,
     selection,
     protocol: unavailable,
     population: unavailable,
+    validation: unavailable,
     descriptive: unavailable,
     scores: unavailable,
     blockAnova: unavailable,
     primaryComparisons: unavailable,
     controlResponse: unavailable,
-    doseTrend: unavailable,
-    nonParametric: unavailable,
-    transformedAnalysis: unavailable,
+    trendAnalysis: unavailable,
+    diagnostics: unavailable,
+    interpretation: unavailable,
+    comparisonMethod: null,
     charts: unavailable
   }
 }

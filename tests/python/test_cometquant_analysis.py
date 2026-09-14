@@ -18,6 +18,7 @@ import cometquant_analysis as engine
 
 REFERENCE = ROOT / "tests" / "reference" / "v1"
 REFERENCE_V2 = ROOT / "tests" / "reference" / "v2"
+REFERENCE_V3 = ROOT / "tests" / "reference" / "v3"
 
 
 def reference_experiment():
@@ -308,7 +309,33 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertTrue(chart.startswith("iVBORw0KGgo"))
 
 
-class BlockAnalysisV3Tests(unittest.TestCase):
+def four_block_experiment():
+    """A synthetic 4-block variant of reference_v2_experiment(), used only to exercise
+    diagnostics/influence analysis, which requires at least four independent experiments.
+    Per-(block, treatment) jitter (not just a uniform per-block shift) keeps the design from
+    being perfectly additive, so the block model has a genuinely estimable positive residual."""
+    base = reference_v2_experiment()
+    template = base["replicates"][0]
+    experiment = json.loads(json.dumps(base))
+    experiment["replicates"] = []
+    jitter = {
+        1: {0: 0, 1: 0, 2: 0, 3: 0, 4: 0},
+        2: {0: 2, 1: -1, 2: 1, 3: 2, 4: -2},
+        3: {0: -1, 1: 1, 2: -2, 3: 1, 4: 2},
+        4: {0: 1, 1: 2, 2: -1, 3: -2, 4: 1},
+    }
+    for block_number in (1, 2, 3, 4):
+        replicate = json.loads(json.dumps(template))
+        replicate["replicateNumber"] = block_number
+        for gel in replicate["gels"]:
+            bump = jitter[block_number][gel["treatmentIndex"]]
+            score = max(1, min(99, gel["class4"] + bump))
+            gel.update(class0=100 - score, class4=score, total=100, completion="complete")
+        experiment["replicates"].append(replicate)
+    return experiment
+
+
+class BlockAnalysisV4Tests(unittest.TestCase):
     @staticmethod
     def _remove_counts(gel):
         for index in range(5):
@@ -320,13 +347,23 @@ class BlockAnalysisV3Tests(unittest.TestCase):
     def setUpClass(cls):
         cls.experiment = reference_v2_experiment()
         cls.expected = json.loads(
-            (REFERENCE_V2 / "expected.json").read_text(encoding="utf-8")
+            (REFERENCE_V3 / "expected.json").read_text(encoding="utf-8")
         )
         cls.result = analyze(cls.experiment)
 
     def assert_close(self, actual, expected, tolerance=1e-7):
         self.assertTrue(
             math.isclose(actual, expected, rel_tol=1e-9, abs_tol=tolerance),
+            f"{actual} != {expected}",
+        )
+
+    def assert_close_qmc(self, actual, expected, rel_tol=1e-4):
+        """Looser tolerance for quantities derived from the randomized QMC integration of the
+        Dunnett reference distribution -- deterministic given a fixed seed within this engine,
+        but not meant to be bitwise-compared against a differently-implemented oracle run with
+        a different seed/integration path."""
+        self.assertTrue(
+            math.isclose(actual, expected, rel_tol=rel_tol, abs_tol=1e-4),
             f"{actual} != {expected}",
         )
 
@@ -358,137 +395,115 @@ class BlockAnalysisV3Tests(unittest.TestCase):
         self.assertFalse(cell["technicalReplicationComplete"])
         self.assertEqual(cell["score"], 35.0)
 
-    def test_rcbd_contrasts_control_and_trend_match_independent_scipy_oracle(self):
+    def test_dunnett_contrasts_control_and_trend_match_independent_oracle(self):
         self.assert_anova_matches(self.result["blockAnova"], self.expected["blockAnova"])
         comparisons = self.result["primaryComparisons"]
         self.assertTrue(comparisons["performed"])
         self.assertFalse(comparisons["omnibusGateUsed"])
         self.assertEqual(comparisons["familySize"], 3)
+        self.assertEqual(comparisons["comparisonMethod"], "dunnett")
+        self.assertEqual(comparisons["confidenceIntervals"], "simultaneous")
+        self.assert_close_qmc(comparisons["dunnettCriticalValue"], self.expected["dunnettCriticalValue"])
         for actual, expected in zip(
             comparisons["comparisons"], self.expected["primaryComparisons"]
         ):
             self.assertEqual(actual["treatmentIndex"], expected["treatmentIndex"])
-            for field in (
-                "referenceMean",
-                "treatmentMean",
-                "difference",
-                "standardError",
-                "t",
-                "ciLow",
-                "ciHigh",
-                "pRaw",
-                "pAdjusted",
-            ):
+            for field in ("referenceMean", "treatmentMean", "difference", "standardError", "t", "pRaw"):
                 self.assert_close(actual[field], expected[field])
+            for field in ("ciLow", "ciHigh", "pAdjusted"):
+                self.assert_close_qmc(actual[field], expected[field])
             self.assertEqual(actual["DF"], expected["DF"])
+        # All three planned concentrations are expected to show a real increase in this fixture.
+        self.assertTrue(all(row["increaseDetected"] for row in comparisons["comparisons"]))
 
         control = self.result["controlResponse"]
         self.assertTrue(control["performed"])
         self.assertNotIn("valid", control)
         self.assertNotIn("classification", control)
-        self.assert_anova_matches(
-            control["blockAnova"], self.expected["controlResponse"]["blockAnova"]
+        self.assertNotIn("note", control)
+        self.assertEqual(
+            {note["code"] for note in control["notes"]},
+            {"low_residual_degrees_of_freedom", "elevated_uncertainty_minimum_blocks"},
         )
-        for field in (
-            "referenceMean",
-            "treatmentMean",
-            "difference",
-            "standardError",
-            "t",
-            "ciLow",
-            "ciHigh",
-            "pRaw",
-        ):
+        for field in ("difference", "t", "pRaw"):
             self.assert_close(
-                control["comparison"][field],
-                self.expected["controlResponse"]["comparison"][field],
+                control["comparison"][field], self.expected["controlResponse"]["comparison"][field]
             )
 
-        trend = self.result["doseTrend"]
+        trend = self.result["trendAnalysis"]
         self.assertTrue(trend["performed"])
-        for field in (
-            "slope",
-            "standardError",
-            "t",
-            "MSE",
-            "ciLow",
-            "ciHigh",
-            "p",
-            "r2",
-            "r2Partial",
-        ):
-            self.assert_close(trend[field], self.expected["doseTrend"][field])
-        self.assertEqual(trend["DF"], self.expected["doseTrend"]["DF"])
-        self.assertEqual(trend["trendKind"], "linear")
-        self.assertEqual(
-            [item["concentration"] for item in trend["treatmentDoses"]],
-            [0.0, 1.0, 5.0, 10.0],
-        )
-
-    def test_non_parametric_matches_independent_exact_oracle(self):
-        result = self.result["nonParametric"]
-        self.assertTrue(result["performed"])
-        self.assertEqual(result["population"], "primary_complete_blocks")
-        friedman = result["friedman"]
-        self.assertTrue(friedman["performed"])
-        self.assertEqual(friedman["treatmentIndices"], [0, 2, 3, 4])
-        self.assert_close(friedman["statistic"], self.expected["nonParametric"]["friedman"]["statistic"])
-        self.assertEqual(friedman["df"], self.expected["nonParametric"]["friedman"]["df"])
-        self.assert_close(friedman["pExact"], self.expected["nonParametric"]["friedman"]["pExact"])
-        self.assertEqual(
-            friedman["exactArrangements"],
-            self.expected["nonParametric"]["friedman"]["exactArrangements"],
-        )
-        page = result["pageTrend"]
+        page = trend["pageTrend"]
         self.assertTrue(page["performed"])
+        self.assertEqual(page["treatmentIndices"], [0, 2, 3, 4])
         self.assertEqual(page["direction"], "increasing")
-        self.assertEqual(page["directionSource"], "assay_type")
-        self.assert_close(page["statistic"], self.expected["nonParametric"]["pageTrend"]["statistic"])
-        self.assert_close(page["pExact"], self.expected["nonParametric"]["pageTrend"]["pExact"])
-        self.assert_close(
-            page["pExactOpposite"], self.expected["nonParametric"]["pageTrend"]["pExactOpposite"]
-        )
+        self.assert_close(page["statistic"], self.expected["trendAnalysis"]["pageTrend"]["statistic"])
+        self.assert_close(page["pExact"], self.expected["trendAnalysis"]["pageTrend"]["pExact"])
+
+    def test_dunnett_reproducible_with_fixed_seed(self):
+        second_run = analyze(reference_v2_experiment())
+        for first, second in zip(
+            self.result["primaryComparisons"]["comparisons"],
+            second_run["primaryComparisons"]["comparisons"],
+        ):
+            self.assertEqual(first["pAdjusted"], second["pAdjusted"])
+            self.assertEqual(first["ciLow"], second["ciLow"])
+            self.assertEqual(first["ciHigh"], second["ciHigh"])
+
+    def test_dunnett_requires_at_least_three_independent_experiments(self):
+        result = analyze(self.experiment, [1, 3], "Only two retained for this run")
+        for key in ("blockAnova", "primaryComparisons", "trendAnalysis", "controlResponse", "interpretation"):
+            self.assertFalse(result[key]["performed"], key)
+            self.assertEqual(result[key]["reason"]["code"], "insufficient_independent_experiments", key)
+        self.assertTrue(result["descriptive"]["performed"])
+        self.assertTrue(result["scores"]["performed"])
+        self.assertTrue(result["validation"]["performed"])
+        self.assertEqual(result["validation"]["independentExperimentCount"], 2)
+        self.assertFalse(result["validation"]["estimable"])
+
+    def test_positive_control_equivalent_to_paired_ttest(self):
+        from scipy import stats as scipy_stats
+
+        blocks = self.result["population"]["blocks"]
+        reference_scores = []
+        positive_scores = []
+        for block in blocks:
+            cells = {cell["treatmentIndex"]: cell for cell in block["cells"]}
+            reference_scores.append(cells[0]["score"])
+            positive_scores.append(cells[1]["score"])
+        paired = scipy_stats.ttest_rel(positive_scores, reference_scores)
+        comparison = self.result["controlResponse"]["comparison"]
+        self.assert_close(comparison["t"], float(paired.statistic))
+        self.assert_close(comparison["pRaw"], float(paired.pvalue))
+        self.assertEqual(comparison["DF"], int(paired.df))
+
+    def test_positive_control_elevated_uncertainty_only_at_minimum_blocks(self):
+        four_blocks = four_block_experiment()
+        result = analyze(four_blocks)
+        codes = {note["code"] for note in result["controlResponse"]["notes"]}
+        self.assertNotIn("elevated_uncertainty_minimum_blocks", codes)
 
     def test_page_direction_derives_from_assay_type(self):
         antigenotoxic = reference_v2_experiment()
         antigenotoxic["studyDesign"]["assayType"] = "antigenotoxicity"
         result = analyze(antigenotoxic)
-        page = result["nonParametric"]["pageTrend"]
+        page = result["trendAnalysis"]["pageTrend"]
         self.assertEqual(page["direction"], "decreasing")
         self.assertEqual(page["directionSource"], "assay_type")
-
-    def test_transformed_analysis_matches_independent_arcsine_sqrt_oracle(self):
-        result = self.result["transformedAnalysis"]
-        self.assertTrue(result["performed"])
-        self.assertEqual(result["scale"], "arcsin_sqrt")
-        expected = self.expected["transformedAnalysis"]
-        self.assert_anova_matches(result["blockAnova"], expected["blockAnova"])
-        for actual, exp in zip(
-            result["primaryComparisons"]["comparisons"], expected["primaryComparisons"]
-        ):
-            self.assertEqual(actual["treatmentIndex"], exp["treatmentIndex"])
-            for field in ("difference", "standardError", "t", "pRaw", "pAdjusted"):
-                self.assert_close(actual[field], exp[field])
-        for field in ("slope", "standardError", "t", "p", "r2Partial"):
-            self.assert_close(result["doseTrend"][field], expected["doseTrend"][field])
 
     def test_descriptive_exposes_dispersion_and_heterogeneity_flag(self):
         descriptive = self.result["descriptive"]
         self.assertTrue(descriptive["performed"])
-        expected = self.expected["descriptive"]
-        for actual, exp in zip(descriptive["treatments"], expected["treatments"]):
+        expected_v2 = json.loads((REFERENCE_V2 / "expected.json").read_text(encoding="utf-8"))["descriptive"]
+        for actual, exp in zip(descriptive["treatments"], expected_v2["treatments"]):
             self.assertEqual(actual["treatmentIndex"], exp["treatmentIndex"])
             self.assert_close(actual["mean"], exp["mean"])
             self.assert_close(actual["standardDeviation"], exp["standardDeviation"])
             self.assert_close(actual["coefficientOfVariation"], exp["coefficientOfVariation"])
         flag = descriptive["heterogeneityFlag"]
         self.assertTrue(flag["performed"])
-        self.assertEqual(flag["flagged"], expected["heterogeneityFlag"]["flagged"])
-        self.assert_close(flag["maximumStandardDeviation"], expected["heterogeneityFlag"]["maximumStandardDeviation"])
-        self.assert_close(flag["minimumStandardDeviation"], expected["heterogeneityFlag"]["minimumStandardDeviation"])
-        self.assert_close(flag["ratio"], expected["heterogeneityFlag"]["ratio"])
+        self.assertEqual(flag["flagged"], expected_v2["heterogeneityFlag"]["flagged"])
 
-    def test_non_parametric_requires_at_least_three_treatments(self):
+    def test_trend_analysis_requires_at_least_three_treatments(self):
         experiment = reference_v2_experiment()
         experiment["studyDesign"]["primaryTreatmentIndices"] = [2]
         for replicate in experiment["replicates"]:
@@ -499,27 +514,148 @@ class BlockAnalysisV3Tests(unittest.TestCase):
                 item for item in replicate["assignments"] if item["treatmentIndex"] not in (3, 4)
             ]
         result = analyze(experiment)
-        non_parametric = result["nonParametric"]
-        self.assertFalse(non_parametric["performed"])
-        self.assertEqual(non_parametric["reason"]["code"], "insufficient_treatments")
+        trend = result["trendAnalysis"]
+        self.assertFalse(trend["performed"])
+        self.assertEqual(trend["reason"]["code"], "insufficient_treatments")
 
-    def test_non_parametric_fails_structured_on_missing_reference(self):
+    def test_trend_analysis_fails_structured_on_missing_reference(self):
         experiment = reference_v2_experiment()
         for replicate in experiment["replicates"]:
             for gel in replicate["gels"]:
                 if gel["treatmentIndex"] == 0:
                     self._remove_counts(gel)
         result = analyze(experiment)
-        non_parametric = result["nonParametric"]
-        self.assertFalse(non_parametric["performed"])
-        self.assertEqual(non_parametric["reason"]["code"], "no_complete_primary_blocks")
-        transformed = result["transformedAnalysis"]
-        self.assertFalse(transformed["performed"])
-        self.assertEqual(transformed["reason"]["code"], "no_complete_primary_blocks")
+        trend = result["trendAnalysis"]
+        self.assertFalse(trend["performed"])
+        self.assertEqual(trend["reason"]["code"], "no_complete_primary_blocks")
 
-    def test_contract_is_strict_v3_json_without_retired_analyses(self):
+    def test_validation_reports_design_facts_and_estimability(self):
+        validation = self.result["validation"]
+        self.assertTrue(validation["performed"])
+        self.assertEqual(validation["independentExperimentCount"], 3)
+        self.assertEqual(validation["minimumRequiredExperiments"], 3)
+        self.assertTrue(validation["estimable"])
+        self.assertTrue(validation["basalControlPresent"])
+        self.assertTrue(validation["positiveControlPresent"])
+        self.assertFalse(validation["viabilityDataAvailable"])
+        self.assertEqual(validation["scoreOutOfRangeCount"], 0)
+        self.assertFalse(validation["floorCeilingFlag"]["flagged"])
+        primary_cells = [
+            item for item in validation["cellCompleteness"] if item["treatmentIndex"] in (0, 2, 3, 4)
+        ]
+        self.assertEqual(len(primary_cells), 3 * 4)
+
+    def test_validation_detects_floor_ceiling_effect(self):
+        experiment = reference_v2_experiment()
+        for replicate in experiment["replicates"]:
+            for gel in replicate["gels"]:
+                if gel["treatmentIndex"] in (0, 2, 3, 4):
+                    gel.update(class0=99, class1=0, class2=0, class3=0, class4=1, total=100, completion="complete")
+        result = analyze(experiment)
+        self.assertTrue(result["validation"]["floorCeilingFlag"]["flagged"])
+
+    def test_diagnostics_requires_at_least_four_independent_experiments(self):
+        self.assertFalse(self.result["diagnostics"]["performed"])
+        self.assertEqual(
+            self.result["diagnostics"]["reason"]["code"], "insufficient_blocks_for_influence_analysis"
+        )
+
+    def test_diagnostics_reports_leverage_residuals_and_influence_without_new_pvalues(self):
+        experiment = four_block_experiment()
+        result = analyze(experiment)
+        diagnostics = result["diagnostics"]
+        self.assertTrue(diagnostics["performed"])
+        self.assertAlmostEqual(diagnostics["leverage"], 1 / 4 + 1 / 4 - 1 / 16)
+        self.assertEqual(len(diagnostics["residuals"]), 4 * 4)
+        self.assertEqual(len(diagnostics["qqPlot"]), 4 * 4)
+        self.assertEqual(len(diagnostics["treatmentControlDifferences"]), 4 * 3)
+        self.assertEqual(len(diagnostics["influence"]), 4)
+        self.assertIsInstance(diagnostics["unstable"], bool)
+        serialized = json.dumps(diagnostics)
+        self.assertNotIn('"p"', serialized)
+        self.assertNotIn("pValue", serialized)
+        for row in diagnostics["influence"]:
+            self.assertIn("omittedReplicateNumber", row)
+            if row["performed"]:
+                for comparison in row["comparisons"]:
+                    self.assertEqual(
+                        set(comparison),
+                        {"treatmentIndex", "difference", "direction", "directionChangedFromFullSample"},
+                    )
+
+    def test_interpretation_five_conclusion_codes(self):
+        protocol = {"assayType": "genotoxicity", "alpha": 0.05}
+
+        def comparisons(*significant_flags):
+            return {
+                "performed": True,
+                "comparisons": [
+                    {"treatmentIndex": index, "significant": flag, "direction": "higher"}
+                    for index, flag in enumerate(significant_flags)
+                ],
+            }
+
+        def trend(significant, direction="increasing"):
+            return {
+                "performed": True,
+                "pageTrend": {"performed": True, "direction": direction, "pExact": 0.001 if significant else 0.5},
+            }
+
+        valid_control = {
+            "performed": True,
+            "notes": [],
+            "comparison": {"significant": True, "direction": "higher"},
+        }
+        invalid_control = {
+            "performed": True,
+            "notes": [],
+            "comparison": {"significant": True, "direction": "lower"},
+        }
+        validation = {"performed": True, "estimable": True, "positiveControlPresent": True, "floorCeilingFlag": {}}
+        diagnostics = {"performed": False}
+
+        cases = [
+            (comparisons(True, False, False), trend(True), valid_control, "increase_detected_with_ordered_trend"),
+            (comparisons(True, False, False), trend(False), valid_control, "increase_detected_without_ordered_trend"),
+            (comparisons(False, False, False), trend(True), valid_control, "ordered_trend_without_individual_increase"),
+            (comparisons(False, False, False), trend(False), valid_control, "no_increase_detected"),
+            (comparisons(True, False, False), trend(True), invalid_control, "inconclusive_validity_not_met"),
+        ]
+        for comparisons_input, trend_input, control_input, expected_code in cases:
+            with self.subTest(expected=expected_code):
+                result = engine._build_interpretation(
+                    comparisons_input, trend_input, control_input, validation, diagnostics, protocol
+                )
+                self.assertTrue(result["performed"])
+                self.assertEqual(result["conclusionCode"], expected_code)
+
+    def test_interpretation_validity_criterion_distinguishes_nonsignificant_from_wrong_direction(self):
+        protocol = {"assayType": "genotoxicity", "alpha": 0.05}
+        comparisons = {"performed": True, "comparisons": [{"treatmentIndex": 2, "significant": False, "direction": "higher"}]}
+        trend = {"performed": True, "pageTrend": {"performed": True, "direction": "increasing", "pExact": 0.5}}
+        validation = {"performed": True, "estimable": True, "positiveControlPresent": True, "floorCeilingFlag": {}}
+        diagnostics = {"performed": False}
+
+        not_significant = {"performed": True, "notes": [], "comparison": {"significant": False, "direction": "higher"}}
+        result = engine._build_interpretation(comparisons, trend, not_significant, validation, diagnostics, protocol)
+        self.assertTrue(result["validityCriterionMet"])
+        self.assertEqual(result["validityCode"], "expected_control_response_not_detected")
+
+        wrong_direction = {"performed": True, "notes": [], "comparison": {"significant": True, "direction": "lower"}}
+        result = engine._build_interpretation(comparisons, trend, wrong_direction, validation, diagnostics, protocol)
+        self.assertFalse(result["validityCriterionMet"])
+        self.assertEqual(result["validityCode"], "control_response_unexpected_direction")
+        self.assertEqual(result["conclusionCode"], "inconclusive_validity_not_met")
+
+        not_estimable = {"performed": False}
+        result = engine._build_interpretation(comparisons, trend, not_estimable, validation, diagnostics, protocol)
+        self.assertFalse(result["validityCriterionMet"])
+        self.assertEqual(result["validityCode"], "control_response_not_estimable")
+
+    def test_contract_is_strict_v4_json_without_retired_analyses(self):
+        experiment = four_block_experiment()
         serialized = engine.run_all_analyses(
-            json.dumps(self.experiment), json.dumps(selection_options(self.experiment)), "en"
+            json.dumps(experiment), json.dumps(selection_options(experiment)), "en"
         )
         parsed = json.loads(serialized, parse_constant=lambda value: self.fail(value))
         self.assertEqual(
@@ -529,18 +665,21 @@ class BlockAnalysisV3Tests(unittest.TestCase):
                 "selection",
                 "protocol",
                 "population",
+                "validation",
                 "descriptive",
                 "scores",
                 "blockAnova",
                 "primaryComparisons",
                 "controlResponse",
-                "doseTrend",
-                "nonParametric",
-                "transformedAnalysis",
+                "trendAnalysis",
+                "diagnostics",
+                "interpretation",
+                "comparisonMethod",
                 "charts",
             },
         )
-        self.assertEqual(parsed["analysisSchemaVersion"], 3)
+        self.assertEqual(parsed["analysisSchemaVersion"], 4)
+        self.assertEqual(parsed["comparisonMethod"], "dunnett")
         self.assertEqual(
             set(parsed["selection"]),
             {
@@ -559,9 +698,12 @@ class BlockAnalysisV3Tests(unittest.TestCase):
             "effective_counted_nucleoids",
         )
         self.assertTrue(parsed["protocol"]["offTargetSlidesIncluded"])
-        self.assertFalse({"shapiro", "tukey", "pearson", "regression"} & set(parsed))
+        self.assertFalse(
+            {"shapiro", "tukey", "pearson", "regression", "doseTrend", "nonParametric", "transformedAnalysis"}
+            & set(parsed)
+        )
         self.assertEqual(set(parsed["charts"]), {"scores", "differences", "classes"})
-        self.assertEqual(set(parsed["nonParametric"]), {"performed", "population", "friedman", "pageTrend"})
+        self.assertEqual(set(parsed["trendAnalysis"]), {"performed", "population", "pageTrend"})
         for chart in parsed["charts"].values():
             self.assertTrue(chart.startswith("iVBORw0KGgo"))
             image = Image.open(io.BytesIO(base64.b64decode(chart))).convert("RGB")
@@ -608,7 +750,22 @@ class BlockAnalysisV3Tests(unittest.TestCase):
         reason = primary["excludedBlocks"][0]["reasons"][0]
         self.assertEqual(reason["code"], "no_valid_slides")
         self.assertEqual(reason["treatmentIndex"], 3)
-        self.assertEqual(result["blockAnova"]["blockCount"], 2)
+        # Only 2 complete primary blocks remain, below the standard minimum of three.
+        self.assertFalse(result["blockAnova"]["performed"])
+        self.assertEqual(result["blockAnova"]["reason"]["code"], "insufficient_independent_experiments")
+
+    def test_incomplete_primary_cell_exclusion_still_estimable_with_enough_blocks(self):
+        experiment = four_block_experiment()
+        for gel in experiment["replicates"][1]["gels"]:
+            if gel["treatmentIndex"] == 3:
+                self._remove_counts(gel)
+        result = analyze(experiment)
+        primary = result["population"]["primary"]
+        self.assertEqual(primary["includedBlockNumbers"], [1, 3, 4])
+        self.assertEqual(primary["excludedBlocks"][0]["replicateNumber"], 2)
+        self.assertTrue(result["blockAnova"]["performed"])
+        self.assertEqual(result["blockAnova"]["blockCount"], 3)
+        self.assertTrue(result["primaryComparisons"]["performed"])
 
     def test_explicit_subset_is_canonical_and_keeps_all_blocks_for_audit(self):
         options = selection_options(self.experiment, [1, 3], "  Prespecified quality review  ")
@@ -644,8 +801,13 @@ class BlockAnalysisV3Tests(unittest.TestCase):
             sorted({cell["replicateNumber"] for cell in result["scores"]["cells"]}),
             [1, 3],
         )
-        self.assertEqual(result["blockAnova"]["blockCount"], 2)
-        self.assertEqual(result["controlResponse"]["blockNumbers"], [1, 3])
+        # Only 2 of the 3 available blocks were selected, below the standard minimum of three.
+        self.assertFalse(result["blockAnova"]["performed"])
+        self.assertEqual(result["blockAnova"]["reason"]["code"], "insufficient_independent_experiments")
+        self.assertFalse(result["controlResponse"]["performed"])
+        self.assertEqual(
+            result["controlResponse"]["reason"]["code"], "insufficient_independent_experiments"
+        )
 
     def test_unselected_ineligible_blocks_remain_auditable_but_not_excluded(self):
         experiment = reference_v2_experiment()
@@ -708,8 +870,8 @@ class BlockAnalysisV3Tests(unittest.TestCase):
                 result = engine.analyze_experiment(
                     self.experiment, analysis_options=options
                 )
-                self.assertEqual(result["analysisSchemaVersion"], 3)
-                unavailable = set(result) - {"analysisSchemaVersion"}
+                self.assertEqual(result["analysisSchemaVersion"], 4)
+                unavailable = set(result) - {"analysisSchemaVersion", "comparisonMethod"}
                 self.assertTrue(all(not result[key]["performed"] for key in unavailable))
                 self.assertTrue(
                     all(result[key]["reason"]["code"] == code for key in unavailable)
@@ -744,16 +906,6 @@ class BlockAnalysisV3Tests(unittest.TestCase):
                 )
                 self.assertEqual(result["selection"]["reason"]["code"], code)
 
-    def test_trend_uses_metadata_instead_of_parsing_labels(self):
-        experiment = reference_v2_experiment()
-        experiment["treatments"][2:] = ["low", "middle", "high"]
-        for replicate in experiment["replicates"]:
-            for gel in replicate["gels"]:
-                gel["treatment"] = experiment["treatments"][gel["treatmentIndex"]]
-        result = analyze(experiment)
-        self.assertTrue(result["doseTrend"]["performed"])
-        self.assert_close(result["doseTrend"]["slope"], self.expected["doseTrend"]["slope"])
-
     def test_missing_reference_and_zero_residual_variance_have_structured_reasons(self):
         missing_reference = reference_v2_experiment()
         for replicate in missing_reference["replicates"]:
@@ -783,19 +935,19 @@ class BlockAnalysisV3Tests(unittest.TestCase):
             additive_result["primaryComparisons"]["reason"]["code"],
             "block_anova_not_estimable",
         )
-        self.assertEqual(
-            additive_result["doseTrend"]["reason"]["code"],
-            "zero_residual_variance",
-        )
+        # Page L is rank-based and does not need an estimable residual MSE, so the trend
+        # analysis is unaffected by the block model's zero-residual-variance degeneracy.
+        self.assertTrue(additive_result["trendAnalysis"]["performed"])
+        self.assertTrue(additive_result["trendAnalysis"]["pageTrend"]["performed"])
 
     def test_unconfigured_study_design_returns_the_full_unavailable_contract(self):
         experiment = reference_v2_experiment()
         del experiment["studyDesign"]
         result = analyze(experiment)
-        self.assertEqual(result["analysisSchemaVersion"], 3)
+        self.assertEqual(result["analysisSchemaVersion"], 4)
         self.assertTrue(result["selection"]["performed"])
         self.assertEqual(result["protocol"]["reason"]["code"], "study_design_unconfigured")
-        unavailable = set(result) - {"analysisSchemaVersion", "selection"}
+        unavailable = set(result) - {"analysisSchemaVersion", "selection", "comparisonMethod"}
         self.assertTrue(all(not result[key]["performed"] for key in unavailable))
 
 

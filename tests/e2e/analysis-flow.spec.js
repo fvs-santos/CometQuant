@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const JSZip = require('jszip')
 const expected = require('../reference/v2/expected.json')
+const expectedV3 = require('../reference/v3/expected.json')
 
 function referenceExperiment() {
   const lines = fs.readFileSync(path.resolve(__dirname, '../reference/v2/slides.csv'), 'utf8').trim().split(/\r?\n/)
@@ -177,10 +178,13 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   ])
   await expect(page.locator('#analysis-primary-comparisons tbody tr')).toHaveCount(expected.primaryComparisons.length)
   await expect(page.locator('#analysis-v2-charts img')).toHaveCount(3)
-  await expect(page.locator('#section-analysis-non-parametric .result-title')).toHaveText('Non-parametric Sensitivity')
-  await expect(page.locator('#analysis-non-parametric')).not.toContainText('analysis.v2.')
-  await expect(page.locator('#section-analysis-transformed .result-title')).toHaveText('Transformed Sensitivity')
-  await expect(page.locator('#analysis-transformed')).not.toContainText('analysis.v2.')
+  await expect(page.locator('#section-analysis-interpretation .result-title')).toHaveText('Evidence Synthesis')
+  await expect(page.locator('#analysis-interpretation')).not.toContainText('analysis.v2.')
+  await expect(page.locator('#section-analysis-trend .result-title')).toHaveText('Concentration Trend (Page L)')
+  await expect(page.locator('#analysis-trend')).not.toContainText('analysis.v2.')
+  await expect(page.locator('#analysis-results')).not.toContainText('Friedman')
+  await expect(page.locator('#analysis-results')).not.toContainText('Holm')
+  await expect(page.locator('#analysis-results')).not.toContainText('Transformed sensitivity')
   await page.evaluate(() => setLanguage('pt'))
   await expect(page.locator('#analysis-results')).toBeHidden()
   await page.getByRole('button', { name: 'Rodar Análise' }).click()
@@ -196,9 +200,9 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   const archive = await JSZip.loadAsync(fs.readFileSync(await download.path()))
   const archivedNames = Object.keys(archive.files)
   for (const suffix of [
-    'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/block_anova.csv',
-    'data/primary_comparisons.csv', 'data/control_response.csv', 'data/dose_trend.csv',
-    'data/non_parametric.csv', 'data/transformed_analysis.csv', 'data/slide_corrections.csv',
+    'data/analysis.json', 'data/study_design.csv', 'data/population.csv', 'data/validation.csv', 'data/block_anova.csv',
+    'data/primary_comparisons.csv', 'data/control_response.csv', 'data/trend.csv',
+    'data/diagnostics_residuals.csv', 'data/diagnostics_influence.csv', 'data/interpretation.csv', 'data/slide_corrections.csv',
     'charts/block_scores.png', 'charts/primary_differences.png', 'charts/class_distribution.png'
   ]) {
     expect(archivedNames.some(name => name.endsWith(suffix))).toBe(true)
@@ -210,7 +214,8 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   expect(archive.file(`${archiveBaseName}/report.html`)).toBeNull()
   const analysisEntry = archive.file(archivedNames.find(name => name.endsWith('data/analysis.json')))
   const analysisJson = JSON.parse(await analysisEntry.async('string'))
-  expect(analysisJson.analysisSchemaVersion).toBe(3)
+  expect(analysisJson.analysisSchemaVersion).toBe(4)
+  expect(analysisJson.comparisonMethod).toBe('dunnett')
   expect(analysisJson.selection).toMatchObject({
     performed: true,
     availableBlockNumbers: [1, 2, 3],
@@ -218,18 +223,27 @@ test('runs the extracted Python engine in Pyodide with reference results', async
     excludedBlockNumbers: [],
     exclusionReason: null
   })
-  expect(analysisJson.nonParametric.performed).toBe(true)
-  expect(analysisJson.nonParametric.friedman.pExact).toBeCloseTo(expected.nonParametric.friedman.pExact, 7)
-  expect(analysisJson.nonParametric.pageTrend.direction).toBe('increasing')
-  expect(analysisJson.transformedAnalysis.scale).toBe('arcsin_sqrt')
+  expect(analysisJson).not.toHaveProperty('nonParametric')
+  expect(analysisJson).not.toHaveProperty('transformedAnalysis')
+  expect(analysisJson).not.toHaveProperty('doseTrend')
+  expect(analysisJson.primaryComparisons.comparisonMethod).toBe('dunnett')
+  expect(analysisJson.primaryComparisons.comparisons[0].pAdjusted).toBeCloseTo(expectedV3.primaryComparisons[0].pAdjusted, 3)
+  expect(analysisJson.trendAnalysis.performed).toBe(true)
+  expect(analysisJson.trendAnalysis.pageTrend.pExact).toBeCloseTo(expected.nonParametric.pageTrend.pExact, 7)
+  expect(analysisJson.trendAnalysis.pageTrend.direction).toBe('increasing')
+  expect(analysisJson.validation.performed).toBe(true)
+  expect(analysisJson.validation.independentExperimentCount).toBe(3)
+  expect(analysisJson.interpretation.performed).toBe(true)
   const reportEntry = archive.file(`${archiveBaseName}/${reportName}`)
   const reportHtml = await reportEntry.async('string')
   expect(reportHtml).toContain('Síntese das evidências')
-  expect(reportHtml).toContain('Efeito na direção esperada detectado')
-  expect(reportHtml).toContain('Relação dose-resposta')
+  expect(reportHtml).toContain('Gráfico principal: experimentos independentes por tratamento')
   expect(reportHtml).toContain('<svg viewBox="0 0 900 500"')
   expect(reportHtml).toContain('<svg viewBox="0 0 900 520"')
   expect(reportHtml).not.toMatch(/<link\b|<script\b|https?:\/\//)
+  expect(reportHtml).not.toContain('Holm')
+  expect(reportHtml).not.toContain('Friedman')
+  expect(reportHtml).not.toMatch(/arcsin|transformad/)
   const reportPath = testInfo.outputPath('CometQuant_reference_report_pt.html')
   fs.writeFileSync(reportPath, reportHtml)
   await testInfo.attach('reference-report', { path: reportPath, contentType: 'text/html' })
@@ -242,10 +256,10 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   await expect(reportPage.locator('.dose-chart svg .chart-label')).toHaveCount(5)
   await expect(reportPage.locator('.dose-chart .data-point')).toHaveCount(15)
   await expect(reportPage.locator('.column-chart .column-bar')).toHaveCount(analysisJson.primaryComparisons.comparisons.length + 1)
-  await expect(reportPage.locator('.column-chart .holm-marker')).toHaveCount(analysisJson.primaryComparisons.comparisons.filter(row => row.significant).length)
+  await expect(reportPage.locator('.column-chart .dunnett-marker')).toHaveCount(analysisJson.primaryComparisons.comparisons.filter(row => row.increaseDetected).length)
   await expect(reportPage.locator('.column-chart .sr-only')).toContainText('experimentos independentes')
   await expect(reportPage.locator('.report-footer')).toContainText('analysis-reference')
-  await expect(reportPage.locator('.report-footer')).toContainText('2.2.0')
+  await expect(reportPage.locator('.report-footer')).toContainText('2.3.0')
   const indexLinks = reportPage.locator('.report-index a')
   expect(await indexLinks.count()).toBeGreaterThan(10)
   for (let index = 0; index < await indexLinks.count(); index += 1) {
