@@ -254,7 +254,7 @@ describe('safe exports', () => {
     expect(html).not.toContain('<img src=x onerror=alert(1)>')
     expect(html.indexOf('Available replicates')).toBeLessThan(html.indexOf('Included primary blocks'))
     expect(html.indexOf('Selection rationale')).toBeLessThan(html.indexOf('Excluded primary blocks'))
-    expect(exporter.APP_VERSION).toBe('2.3.0')
+    expect(exporter.APP_VERSION).toBe('2.3.1')
   })
 
   it('escapes HTML payloads in reports', () => {
@@ -441,7 +441,7 @@ describe('safe exports', () => {
   it('adds navigable traceability and a Dunnett-annotated primary column chart', () => {
     const { data, analysis } = reportScenario()
     const generatedAt = '2026-08-25T12:34:56.000Z'
-    const html = exporter.buildReportHtml(data, analysis, 'pt', { generatedAt, appVersion: '2.3.0' })
+    const html = exporter.buildReportHtml(data, analysis, 'pt', { generatedAt, appVersion: '2.3.1' })
     const document = new DOMParser().parseFromString(html, 'text/html')
 
     const links = [...document.querySelectorAll('.report-index a')]
@@ -468,7 +468,7 @@ describe('safe exports', () => {
 
     const footer = document.querySelector('.report-footer')
     expect(footer.textContent).toContain('exp-1')
-    expect(footer.textContent).toContain('2.3.0')
+    expect(footer.textContent).toContain('2.3.1')
     expect(footer.querySelector(`time[datetime="${generatedAt}"]`)).not.toBeNull()
     expect(footer.querySelector('time[datetime="2026-01-02T00:00:00.000Z"]')).not.toBeNull()
     expect(footer.textContent).toContain('UTC')

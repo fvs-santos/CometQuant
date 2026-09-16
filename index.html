@@ -759,6 +759,23 @@
 
   <script>
     if ('serviceWorker' in navigator) {
+      // A background update activates a new Service Worker (and its cache) for an
+      // already-open tab without re-running the page's own already-loaded scripts.
+      // Left unhandled, that splits the session across two versions: JS in memory
+      // from the old shell fetching assets (e.g. the Python engine) that are now
+      // served from the new shell's cache, tripping the analysis contract-version
+      // guard. Reload on that switch so every asset comes from one version — but
+      // only when it replaces a controller the page already had, since the very
+      // first activation of a tab's first-ever install is the same version already
+      // in memory and reloading there would just be a needless extra load.
+      const hadControllerAtLoad = Boolean(navigator.serviceWorker.controller)
+      let reloadingForServiceWorkerUpdate = false
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadControllerAtLoad || reloadingForServiceWorkerUpdate) return
+        reloadingForServiceWorkerUpdate = true
+        window.location.reload()
+      })
+
       navigator.serviceWorker.register('./service-worker.js')
         .then(() => console.log('CometQuant: Service Worker registered'))
         .catch(err => console.log('Service Worker error:', err))

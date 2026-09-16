@@ -259,7 +259,7 @@ test('runs the extracted Python engine in Pyodide with reference results', async
   await expect(reportPage.locator('.column-chart .dunnett-marker')).toHaveCount(analysisJson.primaryComparisons.comparisons.filter(row => row.increaseDetected).length)
   await expect(reportPage.locator('.column-chart .sr-only')).toContainText('experimentos independentes')
   await expect(reportPage.locator('.report-footer')).toContainText('analysis-reference')
-  await expect(reportPage.locator('.report-footer')).toContainText('2.3.0')
+  await expect(reportPage.locator('.report-footer')).toContainText('2.3.1')
   const indexLinks = reportPage.locator('.report-index a')
   expect(await indexLinks.count()).toBeGreaterThan(10)
   for (let index = 0; index < await indexLinks.count(); index += 1) {

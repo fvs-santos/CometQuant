@@ -239,6 +239,28 @@ and storage eviction remain part of the real-device checklist.
 
 ## Changelog
 
+### 2.3.1 — Fix stale Service Worker causing analysis contract mismatches
+
+- Fixed a Service Worker update race that could leave an already-open tab
+  running JavaScript from one shell version while its background fetches
+  (e.g. the Python engine) were served from a newly-activated cache belonging
+  to a different version, tripping the analysis result-version guard with
+  "The scientific engine returned an incompatible result version." This only
+  affected tabs that had a prior CometQuant visit under an older Service
+  Worker and updated in the background during the session (hosted deployments
+  such as GitHub Pages, not a fresh `Live Server`/first-visit session, which
+  is why it was hard to reproduce locally).
+- The page now reloads itself when the Service Worker's controller changes
+  mid-session after it already had one at load (a genuine version swap), so
+  every asset for a given page load — HTML, JS and the Python engine — always
+  comes from a single, consistent shell version. The very first activation of
+  a brand-new install is left alone, since that load's assets already match
+  the version being activated.
+- Offline shell cache bumped to `cometquant-shell-v25`; if you hit the
+  incompatible-version error before this fix, a hard refresh
+  (Ctrl+Shift+R / clear site data) resolves it immediately without waiting
+  for the next visit's background update.
+
 ### 2.3.0 — Statistics engine v4 (Dunnett-based synthesis)
 
 - Planned comparisons against the reference now use Dunnett's single-step
