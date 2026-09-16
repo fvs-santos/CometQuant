@@ -139,20 +139,21 @@ O score visual e calculado por:
 
 A meta `nucleoidsPerGel` continua limitando a coleta interativa e serve para relatar aderencia, mas nao e mais o denominador cientifico. O contrato v2 registra `visualScoreDenominator: effective_counted_nucleoids` e `offTargetSlidesIncluded: true`.
 
-Analises atualmente implementadas no contrato `analysisSchemaVersion: 3`:
+Analises atualmente implementadas no contrato `analysisSchemaVersion: 4` (protocolo vigente desde a continuidade de 14/09/2026 "reformulacao estatistica v3 -> v4", ver "Estado no momento deste registro" ao final deste documento; secoes anteriores deste documento sobre Holm, tendencia linear, Friedman e a transformada arcsine-sqrt descrevem protocolos ja superados):
 
-- selecao explicita e transitoria das repeticoes que formam a populacao candidata de cada execucao, com justificativa geral obrigatoria quando alguma repeticao e retirada;
-- ANOVA em blocos completos pelo modelo `score ~ tratamento + experimento`;
-- comparacoes bilaterais planejadas de cada concentracao contra a referencia, sem gate omnibus e com ajuste Holm;
-- diferenca estimada, erro-padrao, IC nominal de 95%, p bruto, p ajustado e direcao;
-- resposta do controle positivo em comparacao separada, sem classificacao automatica da validade do ensaio;
-- tendencia linear secundaria ajustada por bloco, incluindo a referencia como dose zero, com R² parcial da concentracao;
-- dispersao por tratamento (media, DP, CV) e flag de heterogeneidade de variancia (aviso, nao gate);
-- bloco `nonParametric` com Friedman exato por permutacao (omnibus) e Page L exato (tendencia ordenada), sobre a populacao primaria (referencia + doses, sem CP), com direcao do Page derivada do `assayType`;
-- bloco `transformedAnalysis` com reanalise na escala arcsine-sqrt da ANOVA, das comparacoes e da tendencia, como checagem de robustez de variancia;
+- gate automatico de pelo menos 3 experimentos independentes antes de qualquer inferencia (`insufficient_independent_experiments`); abaixo disso, so descritivas/graficos ficam disponiveis;
+- passo automatico de validacao de desenho (`validation`) antes de qualquer teste: contagem de experimentos, presenca de controles, `scoreOutOfRangeCount` e flag de efeito piso/teto;
+- ANOVA em blocos completos pelo modelo `score ~ tratamento + experimento`, mantida apenas como apendice tecnico e nunca como gate das comparacoes planejadas;
+- comparacoes bilaterais planejadas de cada concentracao contra a referencia, com ajuste de **Dunnett** (`comparisonMethod: "dunnett"`) generalizado ao erro residual e aos graus de liberdade do modelo em blocos, com IC simultaneo de 95% coerente com o p ajustado;
+- flag `increaseDetected` por comparacao (significativo e na direcao esperada para o tipo de ensaio), nao so significancia isolada;
+- resposta do controle positivo em comparacao separada (equivalente a um teste t pareado), sem classificacao automatica da validade do ensaio a partir de p < 0,05 isolado;
+- o teste exato **Page L** como unico teste padrao de tendencia por concentracao, com direcao pre-especificada pelo `assayType`; nao substitui as comparacoes de Dunnett nem precisa ser significativo para reconhecer efeito numa unica concentracao;
+- diagnosticos tecnicos recolhidos (residuos vs. ajustados, referencia Q-Q, diferencas tratamento-referencia por bloco, influencia leave-one-block-out) disponiveis a partir de 4 experimentos independentes; a influencia reporta so direcao/magnitude, nunca gera novo p-valor;
+- bloco `interpretation`, uma tabela orientativa de 5 linhas que cruza significancia de Dunnett x significancia de Page L x um criterio essencial de validade (falha so quando a comparacao do controle positivo nao pode ser estimada ou e significativa na direcao oposta a esperada) em um dos cinco codigos de conclusao, sempre em linguagem hedged (nunca "genotoxico"/"nao genotoxico", nunca tratando nao-significancia como prova de ausencia de efeito);
+- dispersao por tratamento (media, DP, CV) e flag de heterogeneidade de variancia, deslocados do resumo principal para o apendice tecnico;
 - perfis individuais por bloco, grafico das diferencas com IC e distribuicao descritiva das classes.
 
-Shapiro-Wilk, ANOVA one-way, Tukey, Pearson agrupado e o antigo calculo de poder nao integram mais o runtime v2. Friedman exato e Page substituem o antigo adiamento; o Wilcoxon pareado continua fora porque tem resolucao minima (p=0,25) com n=3. Os blocos nao-parametrico e transformado sao robustez/concordancia, nao segunda tentativa de significancia. Alteracoes futuras no protocolo estatistico devem continuar sendo validadas contra referencias cientificas independentes.
+Shapiro-Wilk, ANOVA one-way, Tukey, Pearson agrupado e o antigo calculo de poder ja nao integravam o runtime desde o protocolo v2. A partir do protocolo v4, tambem saem do contrato e do relatorio padrao (mas permanecem no arquivo, sem chamador, reativaveis no futuro): o ajuste Holm (substituido por Dunnett), o teste de Friedman, a reanalise transformada arcsine-sqrt e a regressao linear de tendencia de dose (substituida por Page L como unico teste padrao). O Wilcoxon pareado nunca integrou o protocolo por ter resolucao minima (p=0,25) com n=3. Alteracoes futuras no protocolo estatistico devem continuar sendo validadas contra referencias cientificas independentes.
 
 ## Exportacao e seguranca de saida
 
@@ -180,7 +181,9 @@ O shell local e armazenado pelo service worker em um cache separado do runtime c
 
 A analise estatistica usa um pacote opcional pinado e verificado por SHA-256. Depois da preparacao explicita, Pyodide, NumPy, SciPy e Matplotlib executam em Web Worker apos reload totalmente offline.
 
-## Trabalho realizado na sessao mais recente
+## Marco fundacional (commit `0b0779a`, 13/08/2026)
+
+Esta secao descreve o commit fundacional a partir do qual este documento foi originalmente reconstruido -- nao a sessao mais recente. Para o estado atual do projeto, ver "## Estado no momento deste registro" ao final deste documento; para o historico completo entre esse commit e o estado atual, ver "## Proximos passos recomendados" (log cronologico de continuidades).
 
 O commit `0b0779a` foi uma alteracao ampla, com 21 arquivos e aproximadamente 5.711 insercoes e 928 remocoes. As principais entregas foram:
 
@@ -218,6 +221,7 @@ npm run test:e2e
 npm run test:e2e:chromium
 npm run test:e2e:webkit
 npm run test:analysis
+npm run test:reference:r
 npm run check
 npm run vendor
 ```
@@ -370,7 +374,7 @@ Plano estatistico implementado na continuidade de 18/08/2026:
 
 - **Aditividade dos blocos**: o modelo de replica unica assume efeito aditivo de bloco (ausencia de interacao tratamento x experimento). Com n = 3 isso e indiagnosticavel; a suposicao e declarada no manual, nao testada.
 - **Controle positivo em modelo de 2 tratamentos**: o residuo da validacao tem poucos graus de liberdade. Decidiu-se manter o modelo separado (sem pooling do erro com a populacao principal), com nota estruturada `low_residual_degrees_of_freedom` exposta no resultado.
-- **Holm vs Dunnett**: manteve-se Holm como padrao. Os IC ja sao rotulados como "nominal". Dunnett e uma melhoria de poder futura, mas exigiria dependencia R nova (DescTools/multcomp) ou valores criticos manuais.
+- **Holm vs Dunnett**: manteve-se Holm como padrao. Os IC ja sao rotulados como "nominal". Dunnett e uma melhoria de poder futura, mas exigiria dependencia R nova (DescTools/multcomp) ou valores criticos manuais. (Nota: decisao revista na continuidade de 14/09/2026 "v3 -> v4" -- Dunnett foi implementado e passou a ser o ajuste padrao, com IC simultaneo em vez de nominal; ver "Estado no momento deste registro".)
 - **Direcao do Page pre-especificada**: derivada do `assayType` (genotoxicidade = crescente; antigenotoxicidade = decrescente), nunca escolhida pelos dados, para nao inflar o erro tipo I.
 - **Nao-parametrico/transformado como robustez**: nao sao decisao; a UI e o relatorio os apresentam como concordancia, nao como segunda tentativa de significancia.
 - **Posicionamento regulatorio**: a filosofia "informar, nao decidir" e a recusa ao gate global estao mantidas. Parte da comunidade OECD/IWGT espera criterio de tendencia + reprodutibilidade; isso e registrado como posicionamento no manual, nao como mudanca de motor.
@@ -430,7 +434,7 @@ Concluido na continuidade de robustez estatistica (versao 2.1.0):
 - A cascata `Shapiro -> parametrico/nao parametrico -> omnibus -> pos-teste` permaneceu rejeitada; nao ha troca automatica de metodo.
 - A direcao do teste de Page foi **pre-especificada e derivada do `assayType`** (genotoxicidade = crescente; antigenotoxicidade = decrescente), nunca escolhida pelos dados, para nao inflar o erro tipo I.
 - O controle positivo manteve modelo proprio de 2 tratamentos (sem pooling do erro com a populacao principal), com nota estruturada `low_residual_degrees_of_freedom`.
-- Holm permaneceu como ajuste padrao; os IC ja sao rotulados "nominal". Dunnett e uma melhoria de poder futura (exigiria dependencia R nova ou valores criticos manuais).
+- Holm permaneceu como ajuste padrao; os IC ja sao rotulados "nominal". Dunnett e uma melhoria de poder futura (exigiria dependencia R nova ou valores criticos manuais). (Nota: revisto na continuidade de 14/09/2026 "v3 -> v4" -- Dunnett substituiu Holm como padrao.)
 - A aditividade dos blocos (ausencia de interacao tratamento x experimento) e declarada, nao testada; com n = 3 e indiagnosticavel.
 
 ### Implementado no motor
@@ -503,7 +507,7 @@ Concluido na continuidade de 21/08/2026 (reformulacao da apresentacao do relator
 - O relatorio passou a produzir uma sintese narrativa da balanca de evidencias, traduzindo a direcao das comparacoes para aumento ou reducao de dano de acordo com o tipo de ensaio.
 - A sintese informa quantas concentracoes apresentaram efeito estatisticamente detectado na direcao esperada e separa esse resultado da existencia de uma tendencia dose-resposta.
 - A qualidade da dose-resposta integra tendencia linear ajustada por bloco, Page L e reversoes observadas entre doses sucessivas. Isso permite mostrar, por exemplo, efeito em concentracoes individuais sem afirmar que existe uma relacao dose-resposta ordenada.
-- Friedman, Page L e a analise arcsine-sqrt continuam sendo analises de sensibilidade/robustez, nao uma segunda tentativa de obter significancia. O relatorio agora explica essa funcao em linguagem comum e pode destacar discordancias em relacao a analise principal.
+- Friedman, Page L e a analise arcsine-sqrt continuam sendo analises de sensibilidade/robustez, nao uma segunda tentativa de obter significancia. O relatorio agora explica essa funcao em linguagem comum e pode destacar discordancias em relacao a analise principal. (Nota: revisto na continuidade de 14/09/2026 "v3 -> v4" -- Friedman e a transformada arcsine-sqrt saem do relatorio padrao; Page L deixa de ser "sensibilidade" e passa a ser o unico teste de tendencia padrao.)
 - Significancia estatistica continua nao sendo sinonimo de relevancia biologica. A sintese declara que nao classifica automaticamente a substancia e lembra que citotoxicidade, controles historicos e o guia cientifico adotado tambem devem ser considerados.
 
 ### Graficos, acessibilidade e arquivo autocontido
