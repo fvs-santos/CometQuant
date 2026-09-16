@@ -69,7 +69,7 @@ function v4Analysis(overrides = {}) {
     interpretation: {
       performed: true, conclusionCode: 'increase_detected_with_ordered_trend', validityCriterionMet: true,
       validityCode: 'expected_control_response_detected', dunnettAnyPositiveSignificant: true, pageTrendSignificant: true,
-      alerts: [{ code: 'viability_not_collected', detail: 'Viability/cytotoxicity data is not collected by this schema version.' }]
+      alerts: [{ code: 'viability_not_collected', detail: 'Cell viability was not reported as >75% for this experiment.' }]
     },
     descriptive: {
       performed: true, population: 'primary_complete_blocks',
@@ -115,7 +115,7 @@ function reportScenario() {
   analysis.interpretation = {
     performed: true, conclusionCode: 'increase_detected_with_ordered_trend', validityCriterionMet: true,
     validityCode: 'expected_control_response_detected', dunnettAnyPositiveSignificant: true, pageTrendSignificant: true,
-    alerts: [{ code: 'viability_not_collected', detail: 'Viability/cytotoxicity data is not collected by this schema version.' }]
+    alerts: [{ code: 'viability_not_collected', detail: 'Cell viability was not reported as >75% for this experiment.' }]
   }
   analysis.descriptive.treatments = [
     { treatmentIndex: 0, treatment: 'Negative control', blockCount: 3, mean: 10, standardDeviation: 2, coefficientOfVariation: 20, minimum: 8, maximum: 12 },
@@ -254,7 +254,7 @@ describe('safe exports', () => {
     expect(html).not.toContain('<img src=x onerror=alert(1)>')
     expect(html.indexOf('Available replicates')).toBeLessThan(html.indexOf('Included primary blocks'))
     expect(html.indexOf('Selection rationale')).toBeLessThan(html.indexOf('Excluded primary blocks'))
-    expect(exporter.APP_VERSION).toBe('2.3.1')
+    expect(exporter.APP_VERSION).toBe('2.4.0')
   })
 
   it('escapes HTML payloads in reports', () => {
@@ -272,6 +272,27 @@ describe('safe exports', () => {
     expect(csv).toContain('"\'=HYPERLINK(""bad"")"')
     expect(csv).toContain('"Control, ""quoted"""')
     expect(csv).toContain('\r\n')
+  })
+
+  it('includes the viability status in the raw CSV and reflects it in the validation CSV and report', () => {
+    const notAnalyzed = experiment()
+    expect(exporter.buildRawCsv(notAnalyzed)).toContain('not-analyzed')
+
+    const analyzed = experiment({ viabilityStatus: 'above-75' })
+    expect(exporter.buildRawCsv(analyzed)).toContain('above-75')
+
+    const availableAnalysis = v4Analysis({ validation: { ...v4Analysis().validation, viabilityDataAvailable: true } })
+    const [validationRow] = parseCsv(exporter.buildValidationCsv(availableAnalysis))
+    expect(validationRow.viability_data_available).toBe('true')
+    const [defaultValidationRow] = parseCsv(exporter.buildValidationCsv(v4Analysis()))
+    expect(defaultValidationRow.viability_data_available).toBe('false')
+
+    const html = exporter.buildReportHtml(analyzed, availableAnalysis, 'en')
+    expect(html).toContain('Available')
+    expect(html).not.toContain('Not collected')
+
+    const unavailableHtml = exporter.buildReportHtml(notAnalyzed, v4Analysis(), 'en')
+    expect(unavailableHtml).toContain('Not collected')
   })
 
   it('exports slide corrections separately and safely in CSV and HTML', () => {

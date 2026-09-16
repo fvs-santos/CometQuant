@@ -37,7 +37,7 @@ describe('IndexedDB repository', () => {
     const result = await repository.init()
 
     expect(result).toMatchObject({ mode: 'indexeddb', migrated: true, quarantined: 3 })
-    expect(repository.list()).toEqual([expect.objectContaining({ id: 'valid-record', schemaVersion: 6, slideEditHistory: [] })])
+    expect(repository.list()).toEqual([expect.objectContaining({ id: 'valid-record', schemaVersion: 7, slideEditHistory: [] })])
     expect(repository.getRevision('valid-record')).toBe(1)
     expect(await readStore('quarantine')).toHaveLength(3)
     const meta = await readStore('meta')
@@ -69,8 +69,9 @@ describe('IndexedDB repository', () => {
     expect(result.upgraded).toBe(1)
     expect(repository.getRevision(legacy.id)).toBe(8)
     expect(repository.getRecord(legacy.id).data).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 7,
       slideEditHistory: [],
+      viabilityStatus: 'not-analyzed',
       studyDesign: expect.objectContaining({ version: 1, status: 'unconfigured', assayType: null }),
       replicates: [{ assignments: [{ blindCode: 'ABCD-01' }], gels: [{ blindCode: 'ABCD-01' }] }]
     })

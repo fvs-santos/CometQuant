@@ -9,10 +9,10 @@ function completeGel(overrides = {}) {
 
 function experiment(overrides = {}) {
   return {
-    schemaVersion: 6, id: 'exp-1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
+    schemaVersion: 7, id: 'exp-1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
     status: 'completed', researcher: 'Researcher', agent: 'Agent', cells: 'CHO-K1', negControl: 'Control',
     posControl: '', solControl: '', nucleoidsPerGel: 100, slidesPerTreatment: 1, concUnit: 'µM',
-    treatments: ['Control'], progress: null,
+    treatments: ['Control'], progress: null, viabilityStatus: 'not-analyzed',
     treatmentMetadata: [{ treatmentIndex: 0, role: 'negative-control', concentration: null }],
     studyDesign: {
       version: 1, status: 'unconfigured', assayType: null, primaryReferenceTreatmentIndex: null,

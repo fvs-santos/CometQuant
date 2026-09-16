@@ -697,10 +697,58 @@ Continuidade de 14/09/2026 (reformulacao estatistica v3 -> v4, Dunnett e sintese
 
 ### Pendencias e limitacoes desta continuidade
 
-- Viabilidade/citotoxicidade continua fora do schema do experimento; o alerta correspondente sempre informa "nao coletado" em vez de inventar um limiar -- fica fora de escopo (mudaria o schema/UI de contagem).
+- Viabilidade/citotoxicidade continua fora do schema do experimento; o alerta correspondente sempre informa "nao coletado" em vez de inventar um limiar -- fica fora de escopo (mudaria o schema/UI de contagem). (Nota: implementado na continuidade de 16/09/2026 -- indicador simples de viabilidade celular, ver "Estado no momento deste registro".)
 - Fallback Monte Carlo para Page L quando a enumeracao exata excede o limite computacional nao foi implementado (decisao do usuario: desenhos reais do laboratorio ficam bem abaixo do limite de 5 milhoes de arranjos).
 - Nenhum modo "avancado" com toggle de usuario foi criado para reativar Friedman/transformada/regressao; o codigo fica dormente no motor, sem UI.
 - README atualizado (protocolo estatistico, validacao independente, changelog, limitacoes); MEMORY.md atualizado nesta secao.
+
+Continuidade de 16/09/2026 (indicador de viabilidade celular):
+
+### Motivacao e decisoes confirmadas com o usuario antes de implementar
+
+- Preenche a limitacao documentada na secao "Known Limitations" do README e no motor Python: `_validate_design` sempre retornava `viabilityDataAvailable: False` e o motor sempre emitia o alerta `viability_not_collected`, porque o schema do experimento nunca teve nenhum campo de viabilidade.
+- Escopo deliberadamente minimo: um indicador binario por experimento (`viabilityStatus`: `not-analyzed` ou `above-75`), sem campo numerico e sem granularidade por lamina/tratamento. Nao existe opcao "<=75%" -- o campo so registra se o criterio de aceitacao foi checado e atendido, nunca um valor formal abaixo do limiar.
+- Local no schema: campo de topo no experimento (nao dentro de `studyDesign`), porque `studyDesign` e travado apos a geracao da primeira assignment (fim da fase cega), e viabilidade normalmente so e avaliada durante ou depois do ensaio. Ficar fora de `studyDesign` permite editar o indicador a qualquer momento pelo resumo sem reabrir o plano analitico.
+- Editavel a qualquer momento pelo resumo do experimento (novo `<select id="input-viability-status">` em `screen-summary`, persistido de imediato como as demais operacoes do resumo), nao fixo na configuracao inicial.
+- Legado (schemas 1 a 6) migra para `not-analyzed` de forma automatica e silenciosa, sem pedir confirmacao pos-blinding como o `studyDesign` legado -- decisao do usuario, pois nao ha nada a inferir, so um estado ausente.
+- Impacto no motor Python: apenas informativo. `validation.viabilityDataAvailable` passa a refletir `viabilityStatus == 'above-75'`; o alerta `viability_not_collected` so e emitido quando `not-analyzed`. O bloco `interpretation` (tabela de 5 linhas) continua com o criterio essencial de validade baseado somente na resposta do controle positivo -- viabilidade nao vira um segundo criterio de validade, decisao explicita do usuario para nao duplicar o papel do controle positivo.
+- CSV de validacao, relatorio HTML e tela in-app: nenhuma mudanca de codigo necessaria alem do valor do flag -- os tres pontos (`buildValidationCsv`, `renderValidation`, relatorio HTML) ja liam `validation.viabilityDataAvailable` e sempre mostravam "Nao coletada" porque o motor sempre retornava `False`.
+
+### Schema e migracao (`js/core.js`)
+
+- `SCHEMA_VERSION` 6 -> 7. Novo `VIABILITY_STATUSES = new Set(['not-analyzed', 'above-75'])`, exportado.
+- `migrateExperiment`: `if (version < 7 || experiment.viabilityStatus === undefined) experiment.viabilityStatus = 'not-analyzed'`, no mesmo padrao usado para `studyDesign`/`treatmentMetadata`.
+- `validateExperiment`: novo `push(VIABILITY_STATUSES.has(experiment.viabilityStatus), 'invalid-viability-status')`.
+- `mergeExperiments`: `viabilityStatus` entrou na lista `keys` de compatibilidade escalar (junto de `nucleoidsPerGel`, `slidesPerTreatment` etc.) -- mesclar experimentos com indicadores diferentes lanca `incompatible-experiments` em vez de resolver silenciosamente, seguindo a decisao ja registrada do projeto contra resolucao silenciosa de conflitos.
+
+### Interface (`index.html`, `js/app.js`, `js/i18n.js`)
+
+- Novo controle `<select id="input-viability-status">` em `screen-summary`, com as duas opcoes traduzidas; `handleCreateExperiment` grava `viabilityStatus: 'not-analyzed'` em experimentos novos; `showSummary()` sincroniza o valor exibido a partir de `currentExperiment.viabilityStatus`; `handleViabilityChange` clona o experimento, salva via `saveExperiment` (mesmo caminho de persistencia/CAS/invalidacao de analise dos demais campos do resumo) e reverte o `<select>` para o valor persistido se o salvamento falhar.
+- Chaves i18n novas (`summary.viability.label/notAnalyzed/above75/help`) em pt/en. O texto do alerta `analysis.reason.viability_not_collected` (e o equivalente `alert_viability_not_collected` em `js/export.js`) deixou de dizer "nao coletado por esta versao do aplicativo" e passou a "viabilidade celular nao foi informada como >75% para este experimento", ja que agora e um fato por experimento, nao mais uma limitacao da versao do app.
+
+### Motor Python (`python/cometquant_analysis.py`)
+
+- `_validate_design`: `"viabilityDataAvailable": experiment.get("viabilityStatus") == "above-75"` (era sempre `False`).
+- `_build_interpretation`: o alerta `viability_not_collected` agora e condicional a `not validation.get("viabilityDataAvailable", False)` (antes era incondicional).
+- Fixtures Python que nao definem `viabilityStatus` (a maioria dos testes de referencia v1/v2/v3, carregados de CSV) continuam se comportando como antes (`None == "above-75"` e `False`), sem exigir atualizacao de fixtures existentes.
+
+### Exportacao (`js/export.js`)
+
+- `rawRow`/`RAW_COLUMNS` (CSV bruto por lamina) ganharam a coluna `viability_status`, no mesmo nivel de `negative_control`/`positive_control`/`target_nucleoids`.
+- `buildValidationCsv`, `buildReportHtml` (secao de validade/integridade) e a tela in-app (`analysis.js`, `renderValidation`) nao precisaram de mudanca de codigo -- apenas o texto do alerta.
+
+### Versionamento
+
+- `APP_VERSION` (`export.js`), `package.json` e `app.version` (`i18n.js`): `2.3.1` -> `2.4.0`. Shell offline: `cometquant-shell-v25` -> `cometquant-shell-v26` (`service-worker.js` e `js/science-package.js`, mantidos em sincronia).
+
+### Validacao desta continuidade
+
+- `npm run check` passou.
+- `npm test` (Vitest) passou com 119 testes (10 arquivos), incluindo novos testes de migracao/validacao/merge do `viabilityStatus` em `core.test.js`, e um novo teste em `export.test.js` cobrindo a coluna do CSV bruto, `buildValidationCsv` e o relatorio HTML nos dois estados do indicador.
+- `npm run test:analysis` passou com 43 testes Python (40 antigos + 3 novos), cobrindo `_validate_design` com `viabilityStatus` `above-75`/`not-analyzed` via `analyze_experiment` completo e `_build_interpretation` isoladamente com a flag `viabilityDataAvailable` em ambos os estados.
+- `npm run test:reference:r` passou (v2: 92 metricas; v3: 49 metricas) -- viabilidade nao altera nenhum calculo estatistico, so o bloco `validation`/`interpretation`.
+- `npx playwright test` passou 31/31 em `chromium-pixel-7` e 31/31 em `webkit-iphone`, incluindo o novo cenario dedicado (`experiment-flow.spec.js`, "records and persists the cell viability indicator from the summary screen": altera o indicador no resumo, confirma persistencia em `localStorage`, sobrevive a `page.reload()` renavegando ate o resumo, e confirma o campo no JSON exportado). O unico teste que falhou na primeira rodada paralela do Chromium (`runs the extracted Python engine in Pyodide with reference results`) e o mesmo cenario historicamente sensivel a disputa de download do CDN sob paralelismo (ja documentado em continuidades anteriores); passou ao ser repetido isoladamente, sem relacao com esta mudanca.
+- README.md (schema v7, novo paragrafo sobre o indicador, limitacao reescrita, changelog 2.4.0) e este MEMORY.md foram atualizados.
 
 ## Arquivos de referencia
 
@@ -753,12 +801,12 @@ Continuidade de 14/09/2026 (reformulacao estatistica v3 -> v4, Dunnett e sintese
 ## Estado no momento deste registro
 
 - Branch: `main`.
-- A continuidade atual inclui schema 6 com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, selecao transitoria de repeticoes, validacao automatica do desenho antes de qualquer teste (>=3 experimentos independentes), ANOVA em blocos como apendice tecnico, comparacoes planejadas com ajuste de Dunnett (IC simultaneo, validado contra R `multcomp::glht`), resposta separada do controle positivo, Page L como unico teste padrao de tendencia, diagnosticos de robustez (residuos, Q-Q, influencia leave-one-block-out) e uma tabela de interpretacao orientativa de 5 linhas. Contrato cientifico `analysisSchemaVersion: 4`. Friedman, transformacao arcsine-sqrt e regressao linear de dose saem do contrato/relatorio padrao mas o codigo Python permanece no arquivo, dormente.
+- A continuidade atual inclui schema 7 (indicador simples de viabilidade celular por experimento, `not-analyzed`/`above-75`, editavel a qualquer momento pelo resumo) com historico auditavel de correcoes de laminas, importacao XLSX legada com classificacao explicita de tratamentos, score por total efetivamente contado, desenho de genotoxicidade/antigenotoxicidade, selecao transitoria de repeticoes, validacao automatica do desenho antes de qualquer teste (>=3 experimentos independentes), ANOVA em blocos como apendice tecnico, comparacoes planejadas com ajuste de Dunnett (IC simultaneo, validado contra R `multcomp::glht`), resposta separada do controle positivo, Page L como unico teste padrao de tendencia, diagnosticos de robustez (residuos, Q-Q, influencia leave-one-block-out) e uma tabela de interpretacao orientativa de 5 linhas. Contrato cientifico `analysisSchemaVersion: 4`; `validation.viabilityDataAvailable` reflete o novo indicador, mas viabilidade continua fora do criterio essencial de validade (que depende so do controle positivo). Friedman, transformacao arcsine-sqrt e regressao linear de dose saem do contrato/relatorio padrao mas o codigo Python permanece no arquivo, dormente.
 - A fixture `tests/reference/v2/` (ANOVA/controle/Page L) e a nova `tests/reference/v3/` (Dunnett, mesmos dados) foram validadas com calculos SciPy independentes do motor, com R real (`multcomp::glht` para v3) e com execucao real no Pyodide via Playwright.
 - Contagens aceitas usam pulso tatil de 30 ms e clique sonoro opcional de 25 ms; as preferencias sao independentes e falhas dessas APIs nao interferem no autosave.
-- A aplicacao esta na versao `2.3.1` e o shell offline usa `cometquant-shell-v25`.
+- A aplicacao esta na versao `2.4.0` e o shell offline usa `cometquant-shell-v26`.
 - **Bug real encontrado pelo usuario em producao (GitHub Pages) apos o deploy da v4, corrigido em 2.3.1**: uma aba que ja tinha visitado o app sob um Service Worker antigo, e que passou pela atualizacao em segundo plano durante a sessao, podia ficar com `js/analysis.js` antigo (em memoria, esperando `analysisSchemaVersion` antigo) buscando o motor Python atraves do Service Worker ja trocado para a versao nova -- produzindo "O motor cientifico retornou uma versao de resultado incompativel." Nao reproduzia localmente via Live Server porque ali normalmente nao havia Service Worker antigo registrado. Corrigido em `index.html` com um listener de `controllerchange` que forca `location.reload()` quando a troca de controlador substitui um controlador que a aba ja tinha (nao na primeira ativacao de uma instalacao nova), garantindo que todo o pacote de arquivos de uma mesma sessao venha de uma unica versao do shell.
-- A implementacao possui validacao estatistica automatizada independente para o protocolo v4 (SciPy + R real via `multcomp`), alem de 60 cenarios E2E reais em Chromium e WebKit executando o motor Python dentro do Pyodide verdadeiro, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica -- a revisao estatistica externa citada no documento de origem continua pendente.
+- A implementacao possui validacao estatistica automatizada independente para o protocolo v4 (SciPy + R real via `multcomp`), alem de 62 cenarios E2E reais em Chromium e WebKit executando o motor Python dentro do Pyodide verdadeiro, mas ainda nao deve ser tratada como software validado para uso regulatorio ou producao critica -- a revisao estatistica externa citada no documento de origem continua pendente.
 - Ha CI automatizada e matriz Chromium/WebKit, mas ainda nao ha politica formal de deploy, validacao em Safari/iOS real ou protocolo cientifico revisado externamente. O workflow de CI ganhou um passo de instalacao do pacote R `multcomp` antes de validar `tests/reference/v3/`.
 - O backup exportado e criptografado, mas IndexedDB permanece em texto claro. O CDN e necessario apenas para instalar o pacote cientifico pinado; depois da verificacao de integridade, o runtime funciona offline.
 - Nenhum resultado de analise e persistido pelo app (sempre recalculado); por isso a mudanca de contrato v3->v4 nao exigiu nenhuma migracao de dados armazenados, so do contrato de saida do motor.

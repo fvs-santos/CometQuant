@@ -545,6 +545,22 @@ class BlockAnalysisV4Tests(unittest.TestCase):
         ]
         self.assertEqual(len(primary_cells), 3 * 4)
 
+    def test_validation_reports_viability_when_above_threshold(self):
+        experiment = reference_v2_experiment()
+        experiment["viabilityStatus"] = "above-75"
+        result = analyze(experiment)
+        self.assertTrue(result["validation"]["viabilityDataAvailable"])
+        alerts = [alert["code"] for alert in result["interpretation"]["alerts"]]
+        self.assertNotIn("viability_not_collected", alerts)
+
+    def test_validation_reports_viability_not_collected_when_not_analyzed(self):
+        experiment = reference_v2_experiment()
+        experiment["viabilityStatus"] = "not-analyzed"
+        result = analyze(experiment)
+        self.assertFalse(result["validation"]["viabilityDataAvailable"])
+        alerts = [alert["code"] for alert in result["interpretation"]["alerts"]]
+        self.assertIn("viability_not_collected", alerts)
+
     def test_validation_detects_floor_ceiling_effect(self):
         experiment = reference_v2_experiment()
         for replicate in experiment["replicates"]:
@@ -651,6 +667,21 @@ class BlockAnalysisV4Tests(unittest.TestCase):
         result = engine._build_interpretation(comparisons, trend, not_estimable, validation, diagnostics, protocol)
         self.assertFalse(result["validityCriterionMet"])
         self.assertEqual(result["validityCode"], "control_response_not_estimable")
+
+    def test_interpretation_viability_alert_depends_on_validation_flag(self):
+        protocol = {"assayType": "genotoxicity", "alpha": 0.05}
+        comparisons = {"performed": True, "comparisons": [{"treatmentIndex": 2, "significant": True, "direction": "higher"}]}
+        trend = {"performed": True, "pageTrend": {"performed": True, "direction": "increasing", "pExact": 0.001}}
+        control = {"performed": True, "notes": [], "comparison": {"significant": True, "direction": "higher"}}
+        diagnostics = {"performed": False}
+
+        not_available = {"performed": True, "estimable": True, "positiveControlPresent": True, "floorCeilingFlag": {}, "viabilityDataAvailable": False}
+        result = engine._build_interpretation(comparisons, trend, control, not_available, diagnostics, protocol)
+        self.assertIn("viability_not_collected", [alert["code"] for alert in result["alerts"]])
+
+        available = {"performed": True, "estimable": True, "positiveControlPresent": True, "floorCeilingFlag": {}, "viabilityDataAvailable": True}
+        result = engine._build_interpretation(comparisons, trend, control, available, diagnostics, protocol)
+        self.assertNotIn("viability_not_collected", [alert["code"] for alert in result["alerts"]])
 
     def test_contract_is_strict_v4_json_without_retired_analyses(self):
         experiment = four_block_experiment()

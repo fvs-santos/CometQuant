@@ -245,6 +245,31 @@ test('edits a completed slide with an append-only correction history', async ({ 
   expect(exported.slideEditHistory).toHaveLength(3)
 })
 
+test('records and persists the cell viability indicator from the summary screen', async ({ page }) => {
+  await seedLegacyData(page, [completedCompactExperiment('viability-test')])
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.getByRole('button', { name: 'Open' }).click()
+  await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
+
+  await expect(page.locator('#input-viability-status')).toHaveValue('not-analyzed')
+  await page.locator('#input-viability-status').selectOption('above-75')
+  await expect(page.locator('#input-viability-status')).toHaveValue('above-75')
+
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('cometquant-experiments')).find(item => item.id === 'viability-test'))
+  expect(stored.viabilityStatus).toBe('above-75')
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Resume Experiment' }).click()
+  await page.getByRole('button', { name: 'Open' }).click()
+  await page.getByRole('button', { name: 'Open Experiment Summary' }).click()
+  await expect(page.locator('#input-viability-status')).toHaveValue('above-75')
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export Data (.json)' }).click()
+  const exported = JSON.parse(fs.readFileSync(await (await downloadPromise).path(), 'utf8'))
+  expect(exported.viabilityStatus).toBe('above-75')
+})
+
 test('blocks a new replicate when compact bases are exhausted', async ({ page }) => {
   await seedLegacyData(page, [completedCompactExperiment('exhausted-code-test')])
   await page.getByRole('button', { name: 'Resume Experiment' }).click()

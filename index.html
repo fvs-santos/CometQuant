@@ -467,6 +467,16 @@
 
     <div id="summary-table-container"></div>
 
+    <div class="form-group" id="summary-viability-group">
+      <label for="input-viability-status"
+             data-i18n="summary.viability.label">Cell Viability</label>
+      <select id="input-viability-status">
+        <option value="not-analyzed" data-i18n="summary.viability.notAnalyzed">Cell viability not analyzed</option>
+        <option value="above-75" data-i18n="summary.viability.above75">Cell viability above 75%</option>
+      </select>
+      <p class="form-help" data-i18n="summary.viability.help">Simple acceptance indicator, editable at any time; it is not a numeric measurement.</p>
+    </div>
+
     <div class="summary-buttons">
       <button class="btn-secondary" id="btn-export-experiment"
               data-i18n="summary.export">Export Data (.json)</button>

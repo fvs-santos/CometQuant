@@ -72,7 +72,7 @@ describe('migration and validation', () => {
     const legacy = experiment({ schemaVersion: 2 })
     legacy.replicates[0].gels[0] = completeGel({ total: 90, class2: 90, completion: undefined })
     const migrated = core.migrateExperiment(legacy)
-    expect(migrated.schemaVersion).toBe(6)
+    expect(migrated.schemaVersion).toBe(7)
     expect(migrated.replicates[0].gels[0].completion).toBe('incomplete')
     expect(migrated.replicates[0].gels[0].incompleteReason.code).toBe('legacy-unjustified')
   })
@@ -101,7 +101,7 @@ describe('migration and validation', () => {
 
     const result = core.validateExperiment(legacy, { source: 'import' })
     expect(result.valid).toBe(true)
-    expect(result.experiment.schemaVersion).toBe(6)
+    expect(result.experiment.schemaVersion).toBe(7)
     expect(result.experiment.replicates[0].assignments[0].blindCode).toBe('ABCD-01')
     expect(result.experiment.replicates[0].gels[0].blindCode).toBe('ABCD-01')
   })
@@ -128,8 +128,9 @@ describe('migration and validation', () => {
 
     const first = core.migrateExperiment(legacy)
     expect(first).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 7,
       slideEditHistory: [],
+      viabilityStatus: 'not-analyzed',
       customAuditField: { preserved: true },
       studyDesign: {
         version: 1,
@@ -180,6 +181,25 @@ describe('migration and validation', () => {
     const result = core.validateExperiment(data)
     expect(result.valid).toBe(true)
     expect(result.experiment.studyDesign.status).toBe('unconfigured')
+  })
+
+  it('defaults viability status to not-analyzed when migrating pre-v7 experiments', () => {
+    const legacy = experiment({ schemaVersion: 2 })
+    delete legacy.viabilityStatus
+    const migrated = core.migrateExperiment(legacy)
+    expect(migrated.viabilityStatus).toBe('not-analyzed')
+  })
+
+  it('preserves an already-configured viability status across idempotent migration', () => {
+    const current = experiment({ viabilityStatus: 'above-75' })
+    expect(core.migrateExperiment(current).viabilityStatus).toBe('above-75')
+  })
+
+  it('rejects an invalid viability status', () => {
+    const invalid = experiment({ viabilityStatus: 'below-75' })
+    const result = core.validateExperiment(invalid, { source: 'import' })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('invalid-viability-status')
   })
 
   it('rejects inconsistent totals and progress history', () => {
@@ -576,6 +596,12 @@ describe('aggregation and consolidation', () => {
     const first = configuredExperiment()
     const second = configuredExperiment('genotoxicity', { id: 'exp-2' })
     second.studyDesign.configurationSource = 'post-collection'
+    expect(() => core.mergeExperiments([first, second], () => 'merged')).toThrow('incompatible-experiments')
+  })
+
+  it('rejects merging experiments with a conflicting viability status', () => {
+    const first = experiment()
+    const second = experiment({ id: 'exp-2', viabilityStatus: 'above-75' })
     expect(() => core.mergeExperiments([first, second], () => 'merged')).toThrow('incompatible-experiments')
   })
 

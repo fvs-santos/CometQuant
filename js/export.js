@@ -6,7 +6,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
   'use strict'
 
-  const APP_VERSION = '2.3.1'
+  const APP_VERSION = '2.4.0'
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
@@ -97,6 +97,7 @@
       concentration_unit: experiment.concUnit,
       target_nucleoids: experiment.nucleoidsPerGel,
       slides_per_treatment: experiment.slidesPerTreatment,
+      viability_status: experiment.viabilityStatus,
       replicate_number: replicate.replicateNumber,
       replicate_date: replicate.date,
       ...replicateAnalysisFlags(analysis, replicate.replicateNumber),
@@ -116,7 +117,7 @@
     }
   }
 
-  const RAW_COLUMNS = ['schema_version', 'experiment_id', 'created_at', 'updated_at', 'researcher', 'agent', 'cells', 'negative_control', 'positive_control', 'solvent_control', 'concentration_unit', 'target_nucleoids', 'slides_per_treatment', 'replicate_number', 'replicate_date', 'selected_for_analysis', 'selection_exclusion_reason', 'primary_eligible', 'primary_included', 'validation_eligible', 'validation_included', 'blind_code', 'treatment_index', 'treatment', 'gel_number', 'status', 'absence_reason', 'incomplete_reason', 'recorded_at', 'class0', 'class1', 'class2', 'class3', 'class4', 'total_counted', 'completion', 'included_in_analysis', 'visual_score'].map(key => ({ key }))
+  const RAW_COLUMNS = ['schema_version', 'experiment_id', 'created_at', 'updated_at', 'researcher', 'agent', 'cells', 'negative_control', 'positive_control', 'solvent_control', 'concentration_unit', 'target_nucleoids', 'slides_per_treatment', 'viability_status', 'replicate_number', 'replicate_date', 'selected_for_analysis', 'selection_exclusion_reason', 'primary_eligible', 'primary_included', 'validation_eligible', 'validation_included', 'blind_code', 'treatment_index', 'treatment', 'gel_number', 'status', 'absence_reason', 'incomplete_reason', 'recorded_at', 'class0', 'class1', 'class2', 'class3', 'class4', 'total_counted', 'completion', 'included_in_analysis', 'visual_score'].map(key => ({ key }))
   const AGGREGATE_COLUMNS = ['treatment_index', 'treatment', 'replicate_number', 'selected_for_analysis', 'selection_exclusion_reason', 'primary_eligible', 'primary_included', 'validation_eligible', 'validation_included', 'expected_slides', 'counted_slides', 'analyzed_slides', 'complete_slides', 'incomplete_slides', 'absent_slides', 'replicate_score_mean'].map(key => ({ key }))
 
   function buildRawCsv(experiment, analysis) {
@@ -448,7 +449,7 @@
       validityCode_expected_control_response_not_detected: 'O controle positivo não atingiu significância estatística na direção esperada; a incerteza sobre a resposta do sistema fica maior.',
       validityCode_control_response_unexpected_direction: 'O controle positivo respondeu de forma estatisticamente significativa na direção oposta à esperada.',
       validityCode_control_response_not_estimable: 'A resposta do controle positivo não pôde ser estimada com os dados disponíveis.',
-      alert_viability_not_collected: 'Dados de viabilidade/citotoxicidade não são coletados por esta versão do aplicativo.',
+      alert_viability_not_collected: 'Viabilidade celular não foi informada como >75% para este experimento.',
       alert_elevated_uncertainty_minimum_blocks: 'A comparação do controle positivo usa o número mínimo de três experimentos independentes, com incerteza elevada.',
       alert_floor_ceiling_effect: 'Os scores da população principal se acumulam perto dos limites da escala (0 ou 100), o que pode comprimir diferenças observáveis.',
       alert_influence_instability: 'A direção de ao menos uma comparação muda quando um único experimento independente é removido; considere replicação independente.',
@@ -485,7 +486,7 @@
       validityCode_expected_control_response_not_detected: 'The positive control did not reach statistical significance in the expected direction; uncertainty about the system response is elevated.',
       validityCode_control_response_unexpected_direction: 'The positive control responded with statistical significance in the direction opposite to expected.',
       validityCode_control_response_not_estimable: 'The positive control response could not be estimated with the available data.',
-      alert_viability_not_collected: 'Viability/cytotoxicity data is not collected by this version of the application.',
+      alert_viability_not_collected: 'Cell viability was not reported as >75% for this experiment.',
       alert_elevated_uncertainty_minimum_blocks: 'The positive-control comparison uses the minimum of three independent experiments, carrying elevated uncertainty.',
       alert_floor_ceiling_effect: 'Primary-population scores accumulate near the scale limits (0 or 100), which may compress observable differences.',
       alert_influence_instability: 'The direction of at least one comparison changes when a single independent experiment is removed; consider independent replication.',

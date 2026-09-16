@@ -49,7 +49,7 @@ is significant.
 
 ## Data And Blinding
 
-The current experiment schema is version 6. Each replicate contains a complete
+The current experiment schema is version 7. Each replicate contains a complete
 mapping of blind assignments and counted slides. Assignment states are
 `pending`, `counting`, `counted` or `absent`.
 
@@ -60,6 +60,13 @@ numeric concentration metadata. Genotoxicity compares concentrations with the
 selected negative or vehicle control. Antigenotoxicity compares combined
 treatments with the positive mutagen-only control. The design is not shown while
 counting is blinded.
+
+Each experiment also carries a simple cell-viability indicator (not analyzed, or
+above 75%) recorded at the top level of the document. It has no numeric field
+or per-slide/per-treatment granularity, is editable at any time from the
+experiment summary rather than fixed at setup, and only reports whether the
+acceptance criterion was checked and met. Experiments migrated from schema 1
+through 6 default to not analyzed, since that data was never collected before.
 
 After blinding is complete, a counted or absent slide can be corrected from the
 experiment summary. Every correction requires a responsible person's name and a
@@ -234,10 +241,32 @@ and storage eviction remain part of the real-device checklist.
 - Three independent experiments are supported as the common assay design, but estimates and confidence intervals may remain imprecise; statistical non-significance is not evidence of equivalence or absence of effect.
 - The blocked model assumes additive block effects (no treatment-by-experiment interaction), which is undiagnosable with a single replication per cell; this assumption is declared rather than testable.
 - The two-treatment validation block model estimates its residual with few degrees of freedom; the separate model is kept intentionally rather than pooling error with the primary population.
-- The experiment schema has no viability/cytotoxicity field; the report always states that this data is not collected rather than inferring a threshold.
+- The cell-viability indicator is a single not-analyzed/above-75% flag per experiment; it has no numeric value, no per-slide or per-treatment breakdown, and never infers a threshold below 75%.
 - Dunnett's adjusted p-values and simultaneous confidence intervals are estimated by quasi-Monte Carlo integration of the multivariate-t reference distribution (both in `scipy.stats.multivariate_t` and in the R oracle's `multcomp::glht`); the production engine uses a fixed random seed for reproducibility, but independent cross-validation runs are only expected to agree within a numeric tolerance, not bit-for-bit, especially for very small p-values.
 
 ## Changelog
+
+### 2.4.0 — Cell viability indicator
+
+- Experiments now carry a simple cell-viability indicator (not analyzed, or
+  above 75%) recorded at the top level of the document, editable at any time
+  from the experiment summary. It has no numeric field and no per-slide or
+  per-treatment granularity; it only records whether the acceptance criterion
+  was checked and met, filling a limitation the schema previously had no field
+  for.
+- The statistics engine's `validation.viabilityDataAvailable` flag now
+  reflects this indicator instead of always returning `false`; the
+  `viability_not_collected` alert in the interpretation block, the in-app
+  results screen, the exported HTML report and `validation.csv` are emitted
+  or suppressed accordingly. It remains purely informational and is not part
+  of the essential validity criterion, which continues to depend only on the
+  positive-control response.
+- Experiments migrated from schema 1 through 6 default to not analyzed, since
+  this data was never collected before. Merging experiments with a
+  conflicting viability status is rejected rather than silently resolved,
+  consistent with the project's other compatibility checks.
+- The experiment schema moved from version 6 to 7. Offline shell cache bumped
+  to `cometquant-shell-v26`.
 
 ### 2.3.1 — Fix stale Service Worker causing analysis contract mismatches
 

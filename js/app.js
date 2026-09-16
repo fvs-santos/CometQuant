@@ -362,6 +362,7 @@ async function handleCreateExperiment() {
     treatments,
     treatmentMetadata: validation.treatmentMetadata,
     studyDesign: validation.studyDesign,
+    viabilityStatus: 'not-analyzed',
     slideEditHistory: [],
     replicates: [],
     progress: null
@@ -1076,6 +1077,7 @@ function initSummary() {
   document.getElementById('btn-export-experiment').addEventListener('click', () => exportExperimentData(currentExperiment))
   document.getElementById('btn-share-experiment').addEventListener('click', () => shareExperimentData(currentExperiment))
   document.getElementById('btn-add-replicate').addEventListener('click', handleAddReplicate)
+  document.getElementById('input-viability-status').addEventListener('change', handleViabilityChange)
   document.getElementById('slide-edit-form').addEventListener('submit', commitSlideEdit)
   document.getElementById('slide-edit-cancel').addEventListener('click', closeSlideEdit)
   document.getElementById('slide-edit-status').addEventListener('change', updateSlideEditForm)
@@ -1117,7 +1119,17 @@ async function handleAddReplicate() {
 function showSummary() {
   if (hasPendingSlides()) return alert(t('alert.blindingActive'))
   renderSummaryTable()
+  document.getElementById('input-viability-status').value = currentExperiment?.viabilityStatus || 'not-analyzed'
   showScreen('screen-summary')
+}
+
+async function handleViabilityChange(event) {
+  if (!currentExperiment) return
+  const status = event.target.value
+  const candidate = cloneExperiment(currentExperiment)
+  candidate.viabilityStatus = status
+  const saved = await saveExperiment(candidate)
+  event.target.value = saved ? status : (currentExperiment?.viabilityStatus || 'not-analyzed')
 }
 
 async function ensureStudyDesignBeforeAnalysis() {

@@ -1045,7 +1045,7 @@ def _validate_design(experiment, protocol, metadata_by_index, blocks, population
         "estimable": block_count >= MINIMUM_INDEPENDENT_EXPERIMENTS,
         "basalControlPresent": basal_control_present,
         "positiveControlPresent": positive_control_present,
-        "viabilityDataAvailable": False,
+        "viabilityDataAvailable": experiment.get("viabilityStatus") == "above-75",
         "cellCompleteness": cell_completeness,
         "scoreOutOfRangeCount": out_of_range_count,
         "floorCeilingFlag": {
@@ -1857,7 +1857,13 @@ def _build_interpretation(comparisons, trend_analysis, control_response, validat
         )
     if not validation.get("positiveControlPresent", False):
         alerts.append({"code": "no_positive_control", "detail": "No positive control was configured for this study design."})
-    alerts.append({"code": "viability_not_collected", "detail": "Viability/cytotoxicity data is not collected by this schema version."})
+    if not validation.get("viabilityDataAvailable", False):
+        alerts.append(
+            {
+                "code": "viability_not_collected",
+                "detail": "Cell viability was not reported as >75% for this experiment.",
+            }
+        )
     for note in control_response.get("notes", []) if control_response.get("performed", False) else []:
         if note["code"] == "elevated_uncertainty_minimum_blocks":
             alerts.append(note)

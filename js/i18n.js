@@ -11,7 +11,7 @@ const translations = {
     // Geral
     'app.title': 'CometQuant Lab',
     'app.subtitle': 'Ensaio Cometa — Score Visual',
-    'app.version': 'CometQuant Lab v2.3.1',
+    'app.version': 'CometQuant Lab v2.4.0',
     'app.credits': 'Desenvolvido para pesquisa em mutagênese',
 
     // Tela 1 — Início
@@ -206,6 +206,10 @@ const translations = {
 
     // Tela 4 — Resumo
     'summary.title': 'Resumo do Experimento',
+    'summary.viability.label': 'Viabilidade celular',
+    'summary.viability.notAnalyzed': 'Viabilidade celular não analisada',
+    'summary.viability.above75': 'Viabilidade celular >75%',
+    'summary.viability.help': 'Indicador simples de aceitação, editável a qualquer momento; não é uma medição numérica.',
     'summary.export': 'Exportar Dados (.json)',
     'summary.share': 'Compartilhar Dados (.json)',
     'share.title': 'Dados do CometQuant',
@@ -465,7 +469,7 @@ const translations = {
     'analysis.reason.insufficient_blocks_for_influence_analysis': 'A análise de influência exige ao menos quatro experimentos independentes.',
     'analysis.reason.dunnett_not_estimable': 'Os contrastes de Dunnett não puderam ser estimados.',
     'analysis.reason.primary_analysis_not_estimable': 'A interpretação exige comparações de Dunnett e tendência de Page L estimáveis.',
-    'analysis.reason.viability_not_collected': 'Dados de viabilidade/citotoxicidade não são coletados por esta versão do aplicativo.',
+    'analysis.reason.viability_not_collected': 'Viabilidade celular não foi informada como >75% para este experimento.',
     'analysis.reason.elevated_uncertainty_minimum_blocks': 'A comparação do controle positivo usa o número mínimo de três experimentos independentes, com incerteza elevada.',
     'analysis.reason.floor_ceiling_effect': 'Os scores da população principal se acumulam perto dos limites da escala (0 ou 100), o que pode comprimir diferenças observáveis.',
     'analysis.reason.influence_instability': 'A direção de ao menos uma comparação muda quando um único experimento independente é removido; considere replicação independente.',
@@ -570,7 +574,7 @@ const translations = {
     // General
     'app.title': 'CometQuant Lab',
     'app.subtitle': 'Comet Assay Visual Score',
-    'app.version': 'CometQuant Lab v2.3.1',
+    'app.version': 'CometQuant Lab v2.4.0',
     'app.credits': 'Developed for mutagenesis research',
 
     // Screen 1 — Home
@@ -765,6 +769,10 @@ const translations = {
 
     // Screen 4 — Summary
     'summary.title': 'Experiment Summary',
+    'summary.viability.label': 'Cell viability',
+    'summary.viability.notAnalyzed': 'Cell viability not analyzed',
+    'summary.viability.above75': 'Cell viability >75%',
+    'summary.viability.help': 'Simple acceptance indicator, editable at any time; it is not a numeric measurement.',
     'summary.export': 'Export Data (.json)',
     'summary.share': 'Share Data (.json)',
     'share.title': 'CometQuant data',
@@ -1024,7 +1032,7 @@ const translations = {
     'analysis.reason.insufficient_blocks_for_influence_analysis': 'Influence analysis requires at least four independent experiments.',
     'analysis.reason.dunnett_not_estimable': 'The Dunnett contrasts could not be estimated.',
     'analysis.reason.primary_analysis_not_estimable': 'The interpretation requires estimable Dunnett comparisons and a Page L trend.',
-    'analysis.reason.viability_not_collected': 'Viability/cytotoxicity data is not collected by this version of the application.',
+    'analysis.reason.viability_not_collected': 'Cell viability was not reported as >75% for this experiment.',
     'analysis.reason.elevated_uncertainty_minimum_blocks': 'The positive-control comparison uses the minimum of three independent experiments, carrying elevated uncertainty.',
     'analysis.reason.floor_ceiling_effect': 'Primary-population scores accumulate near the scale limits (0 or 100), which may compress observable differences.',
     'analysis.reason.influence_instability': 'The direction of at least one comparison changes when a single independent experiment is removed; consider independent replication.',

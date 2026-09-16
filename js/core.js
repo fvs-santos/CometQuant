@@ -5,7 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict'
 
-  const SCHEMA_VERSION = 6
+  const SCHEMA_VERSION = 7
   const STUDY_DESIGN_VERSION = 1
   const MAX_FILE_SIZE = 5 * 1024 * 1024
   const LIMITS = { nucleoids: 10000, slides: 100, concentrations: 100, text: 120, detail: 500 }
@@ -16,6 +16,7 @@
   const INCOMPLETE_REASONS = new Set(['insufficient-cells', 'poor-quality', 'damaged', 'technical-error', 'time-limit', 'other', 'legacy-unjustified'])
   const TREATMENT_ROLES = new Set(['positive-control', 'negative-control', 'solvent-control', 'test-concentration', 'other'])
   const ASSAY_TYPES = new Set(['genotoxicity', 'antigenotoxicity'])
+  const VIABILITY_STATUSES = new Set(['not-analyzed', 'above-75'])
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value))
@@ -168,6 +169,11 @@
       experiment.studyDesign = unconfiguredStudyDesign()
     }
     if (version < 6) experiment.slideEditHistory = []
+    // Viability was never collected before schema 7; migrated experiments default to 'not-analyzed'
+    // rather than inferring a threshold that was never actually checked.
+    if (version < 7 || experiment.viabilityStatus === undefined) {
+      experiment.viabilityStatus = 'not-analyzed'
+    }
 
     experiment.replicates.forEach(replicate => {
       replicate.gels = Array.isArray(replicate.gels) ? replicate.gels : []
@@ -427,6 +433,7 @@
     const normalizedTreatments = treatments.map(value => cleanText(value).toLocaleLowerCase())
     push(treatments.every(value => typeof value === 'string' && cleanText(value).length > 0), 'invalid-treatment-name')
     push(new Set(normalizedTreatments).size === normalizedTreatments.length, 'duplicate-treatment')
+    push(VIABILITY_STATUSES.has(experiment.viabilityStatus), 'invalid-viability-status')
     validateTreatmentMetadata(experiment.treatmentMetadata, treatments).forEach(error => errors.push(error))
     validateStudyDesign(experiment.studyDesign, experiment.treatmentMetadata, treatments).forEach(error => errors.push(error))
     validateSlideEditHistory(experiment).forEach(error => errors.push(error))
@@ -723,7 +730,7 @@
       return result.experiment
     })
     const reference = experiments[0]
-    const keys = ['agent', 'cells', 'negControl', 'posControl', 'solControl', 'concUnit', 'nucleoidsPerGel', 'slidesPerTreatment']
+    const keys = ['agent', 'cells', 'negControl', 'posControl', 'solControl', 'concUnit', 'nucleoidsPerGel', 'slidesPerTreatment', 'viabilityStatus']
     if (!experiments.every(item => keys.every(key => item[key] === reference[key]) &&
       stableEqual(item.treatments, reference.treatments) &&
       stableEqual(analyticalContract(item), analyticalContract(reference)))) throw new Error('incompatible-experiments')
@@ -801,7 +808,7 @@
   }
 
   return {
-    SCHEMA_VERSION, STUDY_DESIGN_VERSION, MAX_FILE_SIZE, LIMITS, ABSENCE_REASONS, INCOMPLETE_REASONS,
+    SCHEMA_VERSION, STUDY_DESIGN_VERSION, MAX_FILE_SIZE, LIMITS, ABSENCE_REASONS, INCOMPLETE_REASONS, VIABILITY_STATUSES,
     cleanText, parseBlindCode, availableBlindCodeBases, calculateVisualScore, isIncludedGel, migrateExperiment, validateExperiment,
     createSlideEditSnapshot, validateExperimentTransition,
     validateSetup, hasPendingSlides, aggregateReplicateScores, mergeExperiments
