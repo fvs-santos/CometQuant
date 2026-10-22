@@ -11,7 +11,7 @@ const translations = {
     // Geral
     'app.title': 'CometQuant Lab',
     'app.subtitle': 'Ensaio Cometa — Score Visual',
-    'app.version': 'CometQuant Lab v2.4.0',
+    'app.version': 'CometQuant Lab v1.0.0',
     'app.credits': 'Desenvolvido para pesquisa em mutagênese',
 
     // Tela 1 — Início
@@ -574,7 +574,7 @@ const translations = {
     // General
     'app.title': 'CometQuant Lab',
     'app.subtitle': 'Comet Assay Visual Score',
-    'app.version': 'CometQuant Lab v2.4.0',
+    'app.version': 'CometQuant Lab v1.0.0',
     'app.credits': 'Developed for mutagenesis research',
 
     // Screen 1 — Home

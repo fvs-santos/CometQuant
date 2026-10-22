@@ -254,7 +254,7 @@ describe('safe exports', () => {
     expect(html).not.toContain('<img src=x onerror=alert(1)>')
     expect(html.indexOf('Available replicates')).toBeLessThan(html.indexOf('Included primary blocks'))
     expect(html.indexOf('Selection rationale')).toBeLessThan(html.indexOf('Excluded primary blocks'))
-    expect(exporter.APP_VERSION).toBe('2.4.0')
+    expect(exporter.APP_VERSION).toBe('1.0.0')
   })
 
   it('escapes HTML payloads in reports', () => {

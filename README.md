@@ -263,6 +263,14 @@ and storage eviction remain part of the real-device checklist.
 
 ## Changelog
 
+### 1.0.0 — First public release
+
+- Establishes the first public version for external testing and software
+  registration. It preserves the functionality and data contracts developed
+  during the internal pre-release series.
+- The offline shell cache moved to `cometquant-shell-v27` so installed clients
+  receive the public version metadata consistently.
+
 ### 2.4.0 — Cell viability indicator
 
 - Experiments now carry a simple cell-viability indicator (not analyzed, or
