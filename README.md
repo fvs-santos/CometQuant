@@ -13,16 +13,26 @@ has no backend or remote database.
 
 ## Development
 
+Install the reproducible development dependencies:
+
 ```powershell
 npm ci
 npx playwright install chromium webkit
 python -m pip install -r requirements-test.txt
+```
+
+Run the minimum validation suite:
+
+```powershell
 npm run check
 npm test
 npm run test:analysis
-npm run test:reference:r
 npm run test:e2e
 ```
+
+For the complete independent statistical audit, install R 4 and its required
+packages, then run `npm run test:reference:r`. R is not required by the browser
+application or the minimum development validation suite.
 
 Use `npm run test:e2e:chromium` or `npm run test:e2e:webkit` to run one browser
 project. The WebKit project emulates an iPhone but does not replace validation
@@ -34,11 +44,13 @@ Use `npx http-server . -p 4173 -c-1` to run the application locally.
 ## Architecture
 
 - `index.html` and `css/style.css`: static application shell and responsive UI.
-- `js/app.js`: navigation, blinded counting and transactional local persistence.
+- `js/app.js`: navigation, UI state, blinded counting and autosave coordination.
+- `js/repository.js`: authoritative transactional IndexedDB persistence, migration, revisions, quarantine and cross-tab notifications.
 - `js/legacy-xlsx.js`: constrained offline importer for legacy Comet VisualScore workbooks.
 - `js/backup.js`: password-based encrypted backup envelopes for active blinding.
 - `js/core.js`: schema migration, validation, scoring, aggregation and merge.
 - `js/analysis.js`: Pyodide bridge, result rendering and analysis exports.
+- `js/analysis-worker.js`: isolated Pyodide initialization and statistical-engine execution outside the main thread.
 - `js/science-package.js`: verified scientific package installation and storage diagnostics.
 - `python/cometquant_analysis.py`: statistical engine used by both Pyodide and Python tests.
 - `js/export.js`: safe JSON, CSV, HTML and ZIP builders.
@@ -237,12 +249,17 @@ and storage eviction remain part of the real-device checklist.
 - Encrypted backup protects the exported file, not a device user with access to browser storage or developer tools.
 - Merge rejects active partial progress instead of reconciling concurrent counts.
 - Browser automation covers Chromium/Pixel 7 and Playwright WebKit/iPhone emulation; Safari/iOS support still requires the real-device checklist.
+- Haptic feel and audible feedback volume still require manual validation on real Android and Apple devices.
 - The comet class illustrations are provisional.
+- The project does not yet define a formal release, deployment and rollback policy.
+- The statistical protocol still requires external scientific review before critical or regulatory use.
 - Three independent experiments are supported as the common assay design, but estimates and confidence intervals may remain imprecise; statistical non-significance is not evidence of equivalence or absence of effect.
 - The blocked model assumes additive block effects (no treatment-by-experiment interaction), which is undiagnosable with a single replication per cell; this assumption is declared rather than testable.
 - The two-treatment validation block model estimates its residual with few degrees of freedom; the separate model is kept intentionally rather than pooling error with the primary population.
 - The cell-viability indicator is a single not-analyzed/above-75% flag per experiment; it has no numeric value, no per-slide or per-treatment breakdown, and never infers a threshold below 75%.
 - Dunnett's adjusted p-values and simultaneous confidence intervals are estimated by quasi-Monte Carlo integration of the multivariate-t reference distribution (both in `scipy.stats.multivariate_t` and in the R oracle's `multcomp::glht`); the production engine uses a fixed random seed for reproducibility, but independent cross-validation runs are only expected to agree within a numeric tolerance, not bit-for-bit, especially for very small p-values.
+- Page L uses exact enumeration and has no Monte Carlo fallback above the five-million-arrangement computational limit. Current laboratory designs remain below that limit.
+- Friedman, arcsine-sqrt transformation and linear dose regression remain dormant implementations without an advanced-mode UI and are outside the v4 runtime contract.
 
 ## Changelog
 

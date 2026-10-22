@@ -26,9 +26,10 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 ### Modulos principais
 
 - `js/core.js`: regras de dominio, schema, migracao, validacao, snapshots e transicoes de correcoes auditaveis, score, agregacao de laminas tecnicas e consolidacao de experimentos. Tambem oferece compatibilidade CommonJS para os testes em Node.
-- `js/app.js`: navegacao, estado da interface, setup, geracao dos codigos cegos, contagem, undo, autosave, edicao de laminas finalizadas, resumo, importacao e exportacao JSON.
+- `js/app.js`: navegacao, estado da interface, setup, geracao dos codigos cegos, contagem, undo, coordenacao do autosave, edicao de laminas finalizadas, resumo, importacao e exportacao JSON.
 - `js/legacy-xlsx.js`: leitor OOXML restrito ao formato legado Comet VisualScore, conversao das contagens brutas para o schema atual e suporte offline usando o JSZip ja vendorizado.
 - `js/repository.js`: IndexedDB autoritativo, migracao do `localStorage`, quarentena, revisoes, tombstones, mirror de transicao, validacao transacional do historico de correcoes e notificacao entre abas.
+- `js/backup.js`: criacao e restauracao de backups criptografados por senha para transferencia e recuperacao durante o blinding ativo.
 - `js/export.js`: serializacao canonica de CSV, historico de correcoes e relatorio, escape HTML, neutralizacao de formulas de planilha, validacao de PNG e nomes de arquivo seguros.
 - `js/analysis.js`: estados da interface cientifica, comunicacao com o worker, apresentacao dos resultados, graficos e exportacao do pacote final.
 - `js/analysis-worker.js`: inicializacao isolada do Pyodide e execucao do motor estatistico fora da thread principal.
@@ -51,7 +52,7 @@ A pagina principal e `index.html`. Os scripts sao carregados como JavaScript tra
 
 ## Modelo de dados
 
-O schema atual e a versao 6, definida em `js/core.js`.
+O schema atual e a versao 7, definida em `js/core.js`.
 
 Um experimento contem, em linhas gerais:
 
@@ -73,7 +74,8 @@ Dados antigos sao migrados antes do uso:
 - versoes futuras sao recusadas;
 - laminas legadas fora da meta sao marcadas como incompletas com motivo `legacy-unjustified`, mas permanecem analisaveis se o total efetivamente contado for positivo e consistente;
 - schemas 1 a 4 recebem metadados conservadores e um plano analitico `unconfigured`, sem inferencia silenciosa do tipo de ensaio ou referencia;
-- schemas 1 a 5 recebem `slideEditHistory: []`; historicos existentes no schema 6 sao validados sem reescrita;
+- schemas 1 a 5 recebem `slideEditHistory: []`; historicos existentes a partir do schema 6 sao validados sem reescrita;
+- schemas 1 a 6 recebem `viabilityStatus: 'not-analyzed'` quando o indicador ainda nao existe;
 - o status do experimento e recalculado a partir das assignments pendentes.
 
 ## Fluxos implementados
@@ -167,7 +169,7 @@ As rotinas canonicas de exportacao ficam em `js/export.js`. Elas foram separadas
 
 O historico auditavel integra o JSON do experimento e o backup criptografado. O relatorio HTML apresenta a trilha de correcoes com motivos e timestamps separados, e o pacote de analise inclui `data/slide_corrections.csv`. O mesmo CSV pode ser exportado diretamente pelo resumo.
 
-O JSZip e copiado para `vendor/` durante `npm install`, permitindo a geracao do pacote ZIP em hospedagem estatica sem depender de uma CDN para essa biblioteca.
+O JSZip e copiado para `vendor/` durante a instalacao das dependencias (`npm ci` ou `npm install`), permitindo a geracao do pacote ZIP em hospedagem estatica sem depender de uma CDN para essa biblioteca.
 
 ## Persistencia local
 
@@ -183,7 +185,7 @@ A analise estatistica usa um pacote opcional pinado e verificado por SHA-256. De
 
 ## Marco fundacional (commit `0b0779a`, 13/08/2026)
 
-Esta secao descreve o commit fundacional a partir do qual este documento foi originalmente reconstruido -- nao a sessao mais recente. Para o estado atual do projeto, ver "## Estado no momento deste registro" ao final deste documento; para o historico completo entre esse commit e o estado atual, ver "## Proximos passos recomendados" (log cronologico de continuidades).
+Esta secao descreve o commit fundacional a partir do qual este documento foi originalmente reconstruido -- nao a sessao mais recente. Para o estado atual do projeto, ver "## Estado no momento deste registro" ao final deste documento; para o historico completo entre esse commit e o estado atual, ver "## Historico de continuidades concluidas".
 
 O commit `0b0779a` foi uma alteracao ampla, com 21 arquivos e aproximadamente 5.711 insercoes e 928 remocoes. As principais entregas foram:
 
@@ -201,14 +203,16 @@ O commit `0b0779a` foi uma alteracao ampla, com 21 arquivos e aproximadamente 5.
 - configuracao de Vitest, Playwright e verificacao sintatica;
 - ajustes de interface, internacionalizacao e service worker.
 
-O commit anterior e de 15/04/2026, portanto `0b0779a` e a melhor referencia disponivel para a ultima sessao de desenvolvimento.
+O commit anterior e de 15/04/2026; por isso `0b0779a` permanece a referencia do marco fundacional, enquanto as continuidades posteriores estao registradas cronologicamente abaixo.
 
 ## Testes e comandos
 
 Instalacao:
 
 ```powershell
-npm install
+npm ci
+npx playwright install chromium webkit
+python -m pip install -r requirements-test.txt
 ```
 
 Comandos disponiveis:
@@ -230,7 +234,7 @@ Nao existe script de build, start ou dev. O Playwright inicia `http-server` na p
 
 A cobertura atual inclui regras centrais, importacao XLSX real, exportacao, protecoes basicas, autosave e fluxos mobile de criacao/contagem/restauracao. O motor Python extraido e exercitado por unittest e no Pyodide real pelos testes E2E.
 
-Existe um resultado local do Playwright indicando uma execucao sem falhas, mas ele nao possui timestamp suficiente para garantir correspondencia com o `HEAD`. Ao retomar o desenvolvimento, execute novamente pelo menos `npm run check`, `npm test` e `npm run test:e2e`.
+O estado atual registrado ao final deste documento inclui validacoes completas recentes em Chromium e WebKit. Como esses registros sao historicos e nao garantem correspondencia com alteracoes futuras, execute novamente pelo menos `npm run check`, `npm test`, `npm run test:analysis` e `npm run test:e2e` antes de uma release. A auditoria independente em R e adicional e requer R 4 com as dependencias descritas no README.
 
 ## Decisoes que devem ser preservadas
 
@@ -292,7 +296,17 @@ A preferencia local **Feedback tatil** e habilitada por padrao apenas quando `na
 
 As chamadas de vibracao e audio permanecem separadas do commit IndexedDB. Os testes automatizados injetam mocks de `navigator.vibrate` e `AudioContext`, confirmam um pulso de 30 ms e um clique por contagem aceita, ausencia de feedback em operacoes rejeitadas e autosave normal quando as APIs falham. A sensacao, intensidade, volume e comportamento com configuracoes do sistema ainda precisam de verificacao manual em dispositivos reais; Playwright nao valida o motor fisico nem a saida audivel.
 
-## Proximos passos recomendados
+## Pendencias vigentes
+
+1. Executar `docs/safari-ios-storage-checklist.md` em Safari macOS, iPhone e iPad reais, incluindo PWA instalada, reinicio offline, baixa disponibilidade de espaco, eviccao e Pyodide offline.
+2. Validar manualmente a sensacao da vibracao e o volume/comportamento do feedback sonoro em dispositivos Android e Apple reais.
+3. Definir uma politica formal de release e deploy, incluindo os criterios de aprovacao, versionamento do cache e rollback.
+4. Submeter o protocolo estatistico a revisao cientifica externa antes de uso critico ou regulatorio.
+5. Reavaliar o fallback Monte Carlo para Page L apenas se desenhos reais puderem exceder o limite de 5 milhoes de arranjos; no escopo atual, a ausencia do fallback e deliberada.
+6. Decidir se Friedman, transformacao arcsine-sqrt ou regressao linear devem ganhar um modo avancado; as implementacoes permanecem dormentes e fora do contrato v4.
+7. Substituir ou aprovar definitivamente as ilustracoes provisorias das classes antes de considera-las finais.
+
+## Historico de continuidades concluidas
 
 Concluido na continuidade de 14/08/2026:
 
@@ -517,7 +531,9 @@ Concluido na continuidade de 21/08/2026 (reformulacao da apresentacao do relator
 - O documento ganhou hierarquia visual por cartoes, caixas de leitura simples, avisos e destaque de resultados, alem de comportamento responsivo, rolagem de tabelas e estilo para impressao.
 - O HTML permanece autocontido e adequado a consulta offline: CSS, SVG e PNGs sao incorporados sem scripts ou recursos externos. Valores exibidos sao arredondados para leitura, enquanto JSON e CSV preservam a precisao integral.
 
-### Pontos para reavaliacao do relatorio HTML
+### Checklist historica do relatorio HTML (concluida em 25/08/2026)
+
+Os itens abaixo registram as decisoes que orientaram a revisao. O resultado implementado esta documentado na continuidade de 25/08/2026 logo depois desta lista; eles nao constituem pendencias vigentes.
 
 1. Reavaliar o status `Valido` no cartao de validade do ensaio. A regra atual resume a resposta estatistica do controle positivo na direcao esperada, mas o termo pode ser interpretado como validacao experimental ou regulatoria completa. Isso diverge da decisao historica registrada nas secoes de protocolo de apresentar a resposta do controle sem classificar automaticamente o ensaio como valido ou invalido. Considerar uma formulacao mais delimitada, como resposta esperada do controle detectada, sem antecipar a redacao final.
 2. Reavaliar o titulo `Conclusao em 30 segundos`. Verificar com o publico-alvo se ele transmite sintese cientifica sem parecer informal, promocional ou excessivamente conclusivo. Possiveis nomes devem ser discutidos antes de qualquer alteracao.
@@ -558,7 +574,7 @@ Concluido na continuidade de 24/08/2026 (correcao auditavel de laminas finalizad
 - As suites E2E completas passaram com 21 cenarios em Chromium/Pixel 7 e 21 em WebKit/iPhone, incluindo correcoes sucessivas, transicoes entre contado/ausente e inclusao do CSV no ZIP.
 - A revisao final nao encontrou findings de severidade alta ou media nas regras de ancestralidade do merge e na rastreabilidade dos timestamps.
 
-Pendencias operacionais que continuam validas em paralelo:
+Pendencias operacionais registradas naquela continuidade (consolidadas em "Pendencias vigentes"):
 
 1. Executar a checklist em Safari macOS, iPhone e iPad reais, incluindo PWA instalada, baixa disponibilidade de espaco e Pyodide offline.
 2. Validar manualmente a sensacao do feedback tatil e o volume do clique em dispositivos Android e Apple reais.
@@ -695,7 +711,7 @@ Continuidade de 14/09/2026 (reformulacao estatistica v3 -> v4, Dunnett e sintese
 - **E2E real rodou nos dois motores**: `npx playwright test` com `--project=chromium-pixel-7` e `--project=webkit-iphone` passou 30/30 cenarios em cada um (60 no total), incluindo o motor Python real executando dentro do Pyodide de verdade (nao mock), gerando relatorio e ZIP reais e conferindo a nova estrutura de secoes, ausencia de Holm/Friedman/transformacao, e presenca de "Dunnett" no relatorio.
 - `tests/e2e/analysis-flow.spec.js` foi atualizado para o contrato v4 (novos ids de secao, `.dunnett-marker` em vez de `.holm-marker`, novas chaves de CSV no ZIP, `analysisSchemaVersion: 4`).
 
-### Pendencias e limitacoes desta continuidade
+### Limitacoes registradas nesta continuidade
 
 - Viabilidade/citotoxicidade continua fora do schema do experimento; o alerta correspondente sempre informa "nao coletado" em vez de inventar um limiar -- fica fora de escopo (mudaria o schema/UI de contagem). (Nota: implementado na continuidade de 16/09/2026 -- indicador simples de viabilidade celular, ver "Estado no momento deste registro".)
 - Fallback Monte Carlo para Page L quando a enumeracao exata excede o limite computacional nao foi implementado (decisao do usuario: desenhos reais do laboratorio ficam bem abaixo do limite de 5 milhoes de arranjos).
